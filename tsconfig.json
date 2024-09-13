@@ -1,18 +1,30 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "outDir": "build",
-    "rootDir": "src",
-    "strict": true,
-    "moduleResolution": "Node",
     "allowSyntheticDefaultImports": true,
-
+    "emitDecoratorMetadata": true,
+    "esModuleInterop": true,
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": false,
-
+    "forceConsistentCasingInFileNames": true,
+    "module": "ES2020",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "moduleResolution": "node",
+    "noImplicitAny": false,
+    "outDir": "build",
+    "baseUrl": "./src",
+    "paths": {
+      "*": ["./*"],
+      "@utils/*": ["./utils/*"],
+      "@api/*": ["./api/*"],
+      "@service/*": ["./service/*"]
+    },
+    "removeComments": false,
+    "rootDir": "src",
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "strict": true,
+    "target": "ES2020",
+    "types": ["node", "discord.js"]
   },
-  "exclude": ["build", "node_modules"]
+  "exclude": ["build", "node_modules"],
+  "include": ["src/**/*"]
 }

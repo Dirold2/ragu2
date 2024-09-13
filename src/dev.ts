@@ -4,6 +4,11 @@ import { DIService, MetadataStorage } from "discordx";
 
 import { bot } from "./bot.js";
 
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+
 // The following syntax should be used in the commonjs environment
 // const importPattern =  __dirname + "/{events,commands}/**/*.{ts,js}"
 
@@ -54,7 +59,7 @@ async function Reload() {
  * Initialize
  */
 async function run() {
-  const watcher = chokidar.watch(importPattern);
+  const watcher = chokidar.watch(importPattern, {});
 
   // Load commands
   await LoadFiles(importPattern);

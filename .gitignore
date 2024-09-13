@@ -4,7 +4,28 @@
 .env.local
 package-lock.json
 yarn.lock
+eslint.config
+pnpm-lock.yaml
+*.log
+*.pid
+*.tmp
+*.bak
+*.swp
+*.swo
+*.DS_Store
+*.sqlite
+
+dist
+lib
+test
+coverage
 
 # folders
+dist
+lib
+test
+coverage
 build
 node_modules
+node_modules
+logs
