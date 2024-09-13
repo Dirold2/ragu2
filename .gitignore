@@ -28,4 +28,8 @@ coverage
 build
 node_modules
 node_modules
+<<<<<<< HEAD
 logs
+=======
+logs
+>>>>>>> 3bef9025899e4147e8b50161e5fcc512e1e3f0b6
