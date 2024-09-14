@@ -11,6 +11,7 @@ import {
 import { YMApiService } from "./YMApiService.ts"; // Новый сервис для работы с API
 import { QueueService, VoiceService, CommandService } from "../service/index.ts"; // Другие сервисы
 import { Discord, SelectMenuComponent } from 'discordx';
+import { ILogObj, Logger } from "tslog";
 
 interface TrackOption {
     label: string;
@@ -30,6 +31,7 @@ export class TrackService {
     private readonly voiceService: VoiceService;
     private readonly commandService: CommandService;
     private readonly apiService: YMApiService;
+    private logger: Logger<ILogObj> = new Logger();
 
     constructor(private queueService: QueueService) {
         this.voiceService = new VoiceService(this.queueService);
@@ -116,7 +118,7 @@ export class TrackService {
             await this.commandService.sendReply(interaction, `Добавлено в очередь: ${trackInfo}`);
             await this.voiceService.joinChannel(interaction);
         } catch (error) {
-            console.error(`Ошибка при выборе трека: ${(error as Error)?.message}`, error);
+            this.logger.error(`Ошибка при выборе трека: ${(error as Error)?.message}`, error);
             await this.commandService.sendReply(interaction, "Произошла ошибка при обработке вашего запроса.");
         } finally {
             await this.commandService.deleteMessageSafely(message);

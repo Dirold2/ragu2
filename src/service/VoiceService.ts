@@ -14,12 +14,14 @@ import { CommandInteraction, GuildMember, PermissionFlagsBits } from "discord.js
 import { QueueService, CommandService } from "../service/index.ts";
 import { Track } from "./QueueService.ts";
 import { YMApiService } from "./YMApiService.ts";
+import { ILogObj, Logger } from "tslog";
 
 export class VoiceService {
     private player: AudioPlayer = createAudioPlayer();
     private connection: VoiceConnection | null = null;
     private readonly commandService = new CommandService();
     private readonly apiService: YMApiService;
+    private logger: Logger<ILogObj> = new Logger();
 
     constructor(private queueService: QueueService) {
         this.apiService = new YMApiService();
@@ -45,7 +47,7 @@ export class VoiceService {
             await this.playNextTrack(similarTrack);
             await this.queueService.setLastTrackID(channelId, Number(similarTrack.id));
         } else {
-            console.log("Очередь пуста, воспроизведение остановлено.");
+            this.logger.info("Очередь пуста, воспроизведение остановлено.");
         }
     }
 
@@ -74,27 +76,27 @@ export class VoiceService {
     public stopPlayer(): void {
         if (this.isPlaying()) {
             this.player.stop(true);
-            console.log("Плеер остановлен.");
+            this.logger.info("Плеер остановлен.");
         } else {
-            console.log("Плеер уже остановлен.");
+            this.logger.info("Плеер уже остановлен.");
         }
     }
 
     public pause(): void {
         if (this.isPlaying()) {
             this.player.pause();
-            console.log("Проигрывание приостановлено.");
+            this.logger.info("Проигрывание приостановлено.");
         } else {
-            console.log("Нечего приостановить, плеер не воспроизводит трек.");
+            this.logger.info("Нечего приостановить, плеер не воспроизводит трек.");
         }
     }
 
     public unpause(): void {
         if (this.isPaused()) {
             this.player.unpause();
-            console.log("Проигрывание возобновлено.");
+            this.logger.info("Проигрывание возобновлено.");
         } else {
-            console.log("Плеер не находится в состоянии паузы.");
+            this.logger.info("Плеер не находится в состоянии паузы.");
         }
     }
 
@@ -103,9 +105,9 @@ export class VoiceService {
             const resource = createAudioResource(track.url, { inlineVolume: true });
             resource.volume?.setVolume(0.03);
             this.player.play(resource);
-            console.log(`Воспроизведение трека: ${track.info}`);
+            this.logger.info(`Воспроизведение трека: ${track.info}`);
         } catch (error) {
-            console.error(`Ошибка воспроизведения: ${(error as Error).message}`);
+            this.logger.error(`Ошибка воспроизведения: ${(error as Error).message}`);
             this.player.stop(true);
         }
     }
@@ -126,14 +128,14 @@ export class VoiceService {
 
             await this.connectToChannel(guildId, voiceChannelId, interaction);
         } catch (error) {
-            console.error("Ошибка подключения к каналу:", error);
+            this.logger.error("Ошибка подключения к каналу:", error);
             await this.commandService.sendReply(interaction, "Не удалось подключиться к голосовому каналу.");
         }
     }
 
     private async connectToChannel(guildId: string, channelId: string, interaction: CommandInteraction): Promise<void> {
         if (this.connection && this.connection.joinConfig.channelId === channelId) {
-            console.log("Уже подключено к каналу. Добавление трека...");
+            this.logger.info("Уже подключено к каналу. Добавление трека...");
         } else {
             this.connection = joinVoiceChannel({
                 channelId,
@@ -144,14 +146,14 @@ export class VoiceService {
             await entersState(this.connection, VoiceConnectionStatus.Ready, 30000);
             this.connection.subscribe(this.player);
 
-            console.log("Успешно подключено к каналу.");
+            this.logger.info("Успешно подключено к каналу.");
         }
 
         const nextTrack = await this.queueService.getNextTrack(channelId);
         if (nextTrack) {
             await this.addTrack(channelId, nextTrack);
         } else {
-            console.log("Очередь пуста.");
+            this.logger.info("Очередь пуста.");
         }
 
         this.handleDisconnection();
@@ -161,14 +163,14 @@ export class VoiceService {
         if (this.connection) {
             this.connection.disconnect();
             this.connection = null;
-            console.log("Отключено от голосового канала.");
+            this.logger.info("Отключено от голосового канала.");
         }
     }
 
     public async clearQueue(channelId: string): Promise<void> {
         await this.queueService.clearQueue(channelId);
         this.player.stop(true);
-        console.log("Очередь очищена и плеер остановлен.");
+        this.logger.info("Очередь очищена и плеер остановлен.");
     }
 
     private handleDisconnection(): void {
@@ -179,12 +181,12 @@ export class VoiceService {
                         entersState(this.connection!, VoiceConnectionStatus.Signalling, 5000),
                         entersState(this.connection!, VoiceConnectionStatus.Connecting, 5000),
                     ]);
-                    console.log("Соединение восстановлено.");
+                    this.logger.info("Соединение восстановлено.");
                 } catch (error) {
-                    console.error("Error reconnecting:", (error as Error).message);
+                    this.logger.error("Error reconnecting:", (error as Error).message);
                     this.connection!.destroy();
                     this.connection = null;
-                    console.log("Соединение разорвано.");
+                    this.logger.info("Соединение разорвано.");
                 }
             });
         }
@@ -193,7 +195,7 @@ export class VoiceService {
     public async addTrack(channelId: string, track: Track): Promise<void> {
         if (this.isPlaying()) {
             await this.queueService.addTrack(channelId, track);
-            console.log(`Трек добавлен в очередь: ${track.info}`);
+            this.logger.info(`Трек добавлен в очередь: ${track.info}`);
         } else {
             await this.playNextTrack(track);
         }

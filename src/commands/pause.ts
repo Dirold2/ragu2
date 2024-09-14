@@ -3,6 +3,10 @@ import { Discord, Slash } from "discordx";
 import { VoiceService, CommandService, QueueService } from "../service/index.ts";
 import { AudioPlayer, createAudioPlayer } from "@discordjs/voice";
 
+import { ILogObj, Logger } from "tslog";
+
+const logger: Logger<ILogObj> = new Logger();
+
 @Discord()
 export class PauseCommand {
     private readonly queueService = new QueueService()
@@ -18,9 +22,9 @@ export class PauseCommand {
 
             this.isPaused = !this.isPaused;
 
-            console.log(`[isPaused]: ${this.isPaused}`);
+            logger.info(`[isPaused]: ${this.isPaused}`);
 
-            console.log(`[status]: ${this.player.state.status }`);
+            logger.info(`[status]: ${this.player.state.status }`);
 
             if (this.voiceService.isPlaying() && !this.isPaused) {
                 this.voiceService.pause();
@@ -31,7 +35,7 @@ export class PauseCommand {
             }
 
         } catch (error) {
-            console.error('Ошибка выполнения команды /pause:', error);
+            logger.error('Ошибка выполнения команды /pause:', error);
             await this.commandService.sendReply(interaction, 'Произошла ошибка при выполнении команды');
         }
     }

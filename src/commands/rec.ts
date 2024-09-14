@@ -4,8 +4,11 @@ import sodium from "sodium-native";
 import { Discord, Slash, Client } from "discordx";
 import fs from "fs/promises";
 import { CommandInteraction, DiscordAPIError, GuildMember, PermissionFlagsBits } from "discord.js";
+import { ILogObj, Logger } from "tslog";
 
 const db = new QuickDB();
+
+const logger: Logger<ILogObj> = new Logger();
 
 @Discord()
 export class RecCommand {
@@ -27,7 +30,7 @@ export class RecCommand {
             adapterCreator: interaction.guild!.voiceAdapterCreator as DiscordGatewayAdapterCreator,
         });
 
-        console.log("Подключение к голосовому каналу успешно");
+        logger.info("Подключение к голосовому каналу успешно");
 
         let audioBuffer = Buffer.alloc(0);
         let startTime = Date.now();
@@ -61,7 +64,7 @@ export class RecCommand {
 
         connection.on(VoiceConnectionStatus.Disconnected, () => {
             connection.destroy();
-            console.log("Закрытие соединения");
+            logger.info("Закрытие соединения");
         });
     }
 
@@ -78,6 +81,6 @@ export class RecCommand {
 
         await fs.writeFile(filePath, buffer);
         await db.set(`recordings:${fileName}`, buffer.toString('base64'));
-        console.log(`Аудио записано как ${fileName}`);
+        logger.info(`Аудио записано как ${fileName}`);
     }
 }

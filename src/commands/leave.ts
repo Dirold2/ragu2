@@ -2,6 +2,9 @@ import { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
 import { VoiceService, CommandService, QueueService } from "../service/index.ts";
 
+import { ILogObj, Logger } from "tslog";
+
+const logger: Logger<ILogObj> = new Logger();
 @Discord()
 export class LeaveCommand {
     private readonly queueService = new QueueService()
@@ -16,7 +19,7 @@ export class LeaveCommand {
             await this.voiceService.leaveChannel();
             await this.commandService.sendReply(interaction, "Бот успешно покинул голосовой канал.");
         } catch (error) {
-            console.error("Ошибка при попытке отключиться от голосового канала:", error);
+            logger.error("Ошибка при попытке отключиться от голосового канала:", error);
             await this.commandService.sendReply(interaction, "Не удалось покинуть голосовой канал, произошла ошибка.");
         }
     }

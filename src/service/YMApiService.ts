@@ -1,6 +1,7 @@
 import { WrappedYMApi, YMApi, Types } from "ym-api-meowed";
-import { Track } from "./QueueService.ts";
 import { QueueService } from "../service/index.ts";
+import { Track } from "./QueueService.ts";
+import { ILogObj, Logger } from "tslog";
 
 interface Config {
     access_token?: string;
@@ -17,6 +18,7 @@ interface SearchTrackResult {
 export class YMApiService {
     private wrapper = new WrappedYMApi();
     private api = new YMApi();
+    private logger: Logger<ILogObj> = new Logger();
 
     constructor() {
         const config: Config = this.loadConfig();
@@ -33,9 +35,9 @@ export class YMApiService {
     private async init(config: Config): Promise<void> {
         try {
             await Promise.all([this.wrapper.init(config), this.api.init(config)]);
-            console.log("APIWrapper и API успешно инициализированы");
+            this.logger.info("APIWrapper и API успешно инициализированы");
         } catch (error) {
-            console.error("Ошибка при инициализации API:", (error as Error)?.message);
+            this.logger.error("Ошибка при инициализации API:", (error as Error)?.message);
         }
     }
 
@@ -43,11 +45,9 @@ export class YMApiService {
         try {
             const result = await this.api.searchTracks(trackName);
             const tracks = result?.tracks?.results as SearchTrackResult[];
-
-            console.log(`Найдено треков: ${tracks.length}`, tracks);
             return tracks;
         } catch (error) {
-            console.error("Ошибка при поиске трека:", (error as Error)?.message);
+            this.logger.error("Ошибка при поиске трека:", (error as Error)?.message);
             return [];
         }
     }
@@ -56,10 +56,9 @@ export class YMApiService {
         try {
             const trackUrl = await this.wrapper.getMp3DownloadUrl(trackId, false, Types.DownloadTrackQuality.High);
             if (!trackUrl) throw new Error("Не удалось получить URL для скачивания трека");
-            console.log(`URL для трека ${trackId}: ${trackUrl}`);
             return trackUrl;
         } catch (error) {
-            console.error("Ошибка при получении URL трека:", (error as Error)?.message);
+            this.logger.error("Ошибка при получении URL трека:", (error as Error)?.message);
             throw error;
         }
     }
@@ -80,14 +79,14 @@ export class YMApiService {
             const trackUrl = await this.getTrackUrl(trackSimilar.id);
             const trackInfo = this.formatTrackInfo(trackSimilar);
 
-            console.log(`Похожий трек найден: ${trackInfo}`);
+            this.logger.info(`Похожий трек найден: ${trackInfo}`);
             return {
                 trackId: trackSimilar.id,
                 info: trackInfo,
                 url: trackUrl,
             };
         } catch (error) {
-            console.error("Ошибка при получении похожего трека:", error);
+            this.logger.error("Ошибка при получении похожего трека:", error);
             throw error;
         }
     }

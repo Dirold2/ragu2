@@ -8,6 +8,10 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+import { ILogObj, Logger } from "tslog";
+
+const logger: Logger<ILogObj> = new Logger();
+
 
 // The following syntax should be used in the commonjs environment
 // const importPattern =  __dirname + "/{events,commands}/**/*.{ts,js}"
@@ -35,7 +39,7 @@ export async function LoadFiles(src: string): Promise<void> {
  * Reload commands for discordx
  */
 async function Reload() {
-  console.log("> Reloading modules\n");
+  logger.info("> Reloading modules\n");
 
   // Remove events
   bot.removeEvents();
@@ -52,7 +56,7 @@ async function Reload() {
   await bot.initApplicationCommands();
   bot.initEvents();
 
-  console.log("> Reload success\n");
+  logger.info("> Reload success\n");
 }
 
 /**
@@ -74,7 +78,7 @@ async function run() {
 
   // Hot Module reload
   if (process.env.NODE_ENV !== "production") {
-    console.log(
+    logger.info(
       "> Hot-Module-Reload enabled in development. Commands will automatically reload.",
     );
 

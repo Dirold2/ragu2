@@ -1,4 +1,5 @@
 import { QuickDB } from "quick.db";
+import { Logger, ILogObj } from "tslog";
 
 export interface Track {
     id?: number;
@@ -17,6 +18,7 @@ export interface Queue {
 
 export class QueueService {
     private db: QuickDB;
+    private logger: Logger<ILogObj> = new Logger();
 
     constructor() {
         this.db = new QuickDB();
@@ -51,7 +53,7 @@ export class QueueService {
                 return { ...queue, tracks: [...queue.tracks, newTrack] };
             });
         } catch (error) {
-            console.error('Error adding track to queue:', error);
+            this.logger.error('Error adding track to queue:', error);
         }
     }
 
@@ -111,13 +113,13 @@ export class QueueService {
 
     async clearTracksQueue(channelId: string, priority: boolean = false): Promise<void> {
         const queue = await this.getQueue(channelId, priority);
-        
+
         const newQueue: Queue = {
             tracks: [],
             lastTrackId: queue.lastTrackId,
             waveStatus: queue.waveStatus
         };
-        
+
         await this.setQueue(channelId, priority, newQueue);
     }
 

@@ -2,6 +2,10 @@ import { Discord, Slash, SlashOption } from "discordx";
 import { CommandInteraction, ApplicationCommandOptionType, TextChannel } from "discord.js";
 import { QueueService, TrackService, CommandService } from "../service/index.ts";
 
+import { ILogObj, Logger } from "tslog";
+
+const logger: Logger<ILogObj> = new Logger();
+
 @Discord()
 export class PlayCommands {
     private readonly queueService = new QueueService();
@@ -48,7 +52,7 @@ export class PlayCommands {
                 await this.commandService.sendReply(interaction, "Ошибка: это действие невозможно выполнить в этом типе канала.");
             }
         } catch (error) {
-            console.error('Error creating Select Menu:', error);
+            logger.error('Error creating Select Menu:', error);
             await this.commandService.sendReply(interaction, "Произошла ошибка при создании меню выбора трека.");
         }
     }
