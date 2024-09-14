@@ -1,4 +1,4 @@
-// spotify_web_api.ts
+// spotify_web_api.js
 
 import axios from 'axios';
 

@@ -1,4 +1,4 @@
-// apple_music_api.ts
+// apple_music_api.js
 
 import axios from 'axios';
 

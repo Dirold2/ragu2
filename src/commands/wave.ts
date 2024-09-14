@@ -1,6 +1,6 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { CommandService, QueueService } from "../service/index.ts";
+import { CommandService, QueueService } from "../service/index.js";
 
 @Discord()
 export class WaveCommand {

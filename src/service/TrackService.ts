@@ -8,8 +8,8 @@ import {
     CacheType,
     GuildMember,
 } from "discord.js";
-import { YMApiService } from "./YMApiService.ts"; // Новый сервис для работы с API
-import { QueueService, VoiceService, CommandService } from "../service/index.ts"; // Другие сервисы
+import { YMApiService } from "./YMApiService.js";
+import { QueueService, VoiceService, CommandService } from "../service/index.js";
 import { Discord, SelectMenuComponent } from 'discordx';
 import { ILogObj, Logger } from "tslog";
 
@@ -31,95 +31,111 @@ export class TrackService {
     private readonly voiceService: VoiceService;
     private readonly commandService: CommandService;
     private readonly apiService: YMApiService;
-    private logger: Logger<ILogObj> = new Logger();
+    private readonly logger: Logger<ILogObj>;
 
     constructor(private queueService: QueueService) {
         this.voiceService = new VoiceService(this.queueService);
         this.commandService = new CommandService();
         this.apiService = new YMApiService();
+        this.logger = new Logger();
     }
 
-    async searchTrack(trackName: string): Promise<SearchTrackResult[]> {
-        return await this.apiService.searchTrack(trackName);
+    public async searchTrack(trackName: string): Promise<SearchTrackResult[]> {
+        try {
+            return await this.apiService.searchTrack(trackName);
+        } catch (error) {
+            this.logger.error(`Error searching for track: ${(error as Error).message}`);
+            throw new Error('Failed to search for track');
+        }
     }
 
-    private truncateDescription(text: string, maxLength: number): string {
-        return text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`;
-    }
-
-    private truncateLabel(text: string, maxLength: number): string {
-        return text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`;
+    private truncateText(text: string, maxLength: number): string {
+        return text.length <= maxLength ? text : `${text.slice(0, maxLength - 3)}...`;
     }
 
     public buildTrackOptions(tracks: SearchTrackResult[]): TrackOption[] {
         return tracks.map((track, index) => ({
-            label: this.truncateLabel(`${this.truncateLabel(track.artists.map(artist => artist.name).join(', '), 50)} - ${this.truncateLabel(track.title, 50)}`, 100),
-            description: this.truncateDescription(track.albums[0]?.title ?? 'Неизвестный альбом', 50),
+            label: this.truncateText(`${track.artists.map(artist => artist.name).join(', ')} - ${track.title}`, 100),
+            description: this.truncateText(track.albums[0]?.title ?? 'Unknown album', 50),
             value: index.toString()
         }));
     }
 
     public buildTrackSelectMenu(options: TrackOption[]): ActionRowBuilder<StringSelectMenuBuilder> {
         return new ActionRowBuilder<StringSelectMenuBuilder>()
-            .addComponents(new StringSelectMenuBuilder()
-                .setCustomId("select-track")
-                .setPlaceholder("Выберите трек")
-                .addOptions(options.map(option => ({
-                    ...option,
-                    label: this.truncateLabel(option.label, 100)
-                })))
+            .addComponents(
+                new StringSelectMenuBuilder()
+                    .setCustomId("select-track")
+                    .setPlaceholder("Select a track")
+                    .addOptions(options)
             );
     }
 
     @SelectMenuComponent({ id: "select-track" })
-    async handleTrackSelection(
+    public async handleTrackSelection(
         interaction: CommandInteraction<CacheType>,
         tracks: SearchTrackResult[],
         message: Message
     ): Promise<void> {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const filter = (i: any) => i.isStringSelectMenu();
-        const channel = interaction.channel as TextChannel;
+        const channel = interaction.channel;
+        if (!(channel instanceof TextChannel)) {
+            this.logger.error("Invalid channel type");
+            return;
+        }
 
         const collector = channel.createMessageComponentCollector({
-            filter,
+            filter: (i): i is any => i.isStringSelectMenu(),
             time: 15000,
         });
 
         collector.on("collect", async (i: StringSelectMenuInteraction) => {
             const selectedTrack = tracks[Number(i.values[0])];
             if (!selectedTrack) {
-                await this.commandService.sendReply(interaction, "Ошибка: выбранный трек не найден.");
+                await this.commandService.sendReply(interaction, "Error: Selected track not found.");
                 return;
             }
             await this.processTrackSelection(i, selectedTrack, interaction, message);
         });
 
-        // collector.on("timeout", () => {
-        //     this.commandService.deleteMessageSafely(message);
-        // });
+        collector.on("end", async (_collected, reason) => {
+            if (reason === 'time') {
+                await this.commandService.deleteMessageSafely(message);
+            }
+        });
     }
 
     private async processTrackSelection(
-        i: StringSelectMenuInteraction,
+        _i: StringSelectMenuInteraction,
         selectedTrack: SearchTrackResult,
         interaction: CommandInteraction<CacheType>,
         message: Message
     ): Promise<void> {
         try {
             const trackUrl = await this.apiService.getTrackUrl(selectedTrack.id);
-            const member = interaction.member as GuildMember;
-            const channelId = member.voice.channel!.id;
+            const member = interaction.member;
+            if (!(member instanceof GuildMember)) {
+                throw new Error('Invalid member type');
+            }
+
+            const channelId = member.voice.channel?.id;
+            if (!channelId) {
+                throw new Error('User is not in a voice channel');
+            }
+
             const artists = selectedTrack.artists.map(artist => artist.name).join(', ');
             const trackInfo = `${artists} - ${selectedTrack.title}`;
 
-            await this.queueService.addTrack(channelId, { trackId: selectedTrack.id, info: trackInfo, url: trackUrl });
+            await this.queueService.addTrack(channelId, { 
+                trackId: selectedTrack.id, 
+                info: trackInfo, 
+                url: trackUrl 
+            });
             await this.queueService.setLastTrackID(channelId, selectedTrack.id);
-            await this.commandService.sendReply(interaction, `Добавлено в очередь: ${trackInfo}`);
+            await this.commandService.sendReply(interaction, `Added to queue: ${trackInfo}`);
             await this.voiceService.joinChannel(interaction);
         } catch (error) {
-            this.logger.error(`Ошибка при выборе трека: ${(error as Error)?.message}`, error);
-            await this.commandService.sendReply(interaction, "Произошла ошибка при обработке вашего запроса.");
+            this.logger.error(`Error processing track selection: ${(error as Error).message}`, error);
+            await this.commandService.sendReply(interaction, "An error occurred while processing your request.");
         } finally {
             await this.commandService.deleteMessageSafely(message);
         }

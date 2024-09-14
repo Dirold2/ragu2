@@ -1,15 +1,19 @@
 {
   "name": "ragu2",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "license": "MIT",
   "type": "module",
   "main": "build/main.js",
   "scripts": {
     "build": "tsc",
-    "dev": "node --enable-source-maps --experimental-specifier-resolution=node --no-warnings --loader ts-node/esm/transpile-only src/dev.ts",
-    "lint": "eslint .",
-    "start": "node build/main.js"
+    "start": "node --enable-source-maps --experimental-specifier-resolution=node --no-warnings --loader ts-node/esm/transpile-only src/dev.ts",
+    "start:prod": "node --enable-source-maps --experimental-specifier-resolution=node build/main.js",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "test": "echo \"No tests specified\" && exit 0",
+    "prepare": "husky install"
   },
   "dependencies": {
     "@discordjs/opus": "^0.9.0",
@@ -26,6 +30,7 @@
     "dotenv": "^16.4.5",
     "quick.db": "^9.1.7",
     "sodium-native": "^4.1.1",
+    "tslib": "^2.7.0",
     "tslog": "^4.9.3",
     "ym-api-meowed": "^1.3.4"
   },
@@ -33,15 +38,24 @@
     "@eslint/js": "^9.10.0",
     "@types/eslint__js": "^8.42.3",
     "@types/node": "^22.5.4",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
     "chokidar": "^4.0.0",
     "eslint": "^9.10.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0",
     "prettier": "^3.3.3",
     "ts-node": "^10.9.2",
-    "typescript": "^5.6.2",
-    "typescript-eslint": "^8.5.0"
+    "typescript": "^5.6.2"
   },
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=7.0.0"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ]
   }
 }

@@ -1,4 +1,4 @@
-// youtube_api.ts
+// youtube_api.js
 
 import axios from 'axios';
 

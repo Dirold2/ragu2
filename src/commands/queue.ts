@@ -1,40 +1,69 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { QueueService, CommandService } from "../service/index.ts";
+import { QueueService, CommandService } from "../service/index.js";
+import { ILogObj, Logger } from "tslog";
 
 @Discord()
 export class QueueCommand {
-    private readonly queueService = new QueueService();
-    private readonly commandService = new CommandService();
+    private readonly queueService: QueueService;
+    private readonly commandService: CommandService;
+    private readonly logger: Logger<ILogObj>;
 
-    @Slash({ description: "Просмотр очереди", name: "queue" })
-    async queue(interaction: CommandInteraction): Promise<void> {
+    constructor() {
+        this.queueService = new QueueService();
+        this.commandService = new CommandService();
+        this.logger = new Logger();
+    }
+
+    @Slash({ description: "View the current queue", name: "queue" })
+    public async queue(interaction: CommandInteraction): Promise<void> {
         await interaction.deferReply({ ephemeral: true });
 
         try {
-            const member = interaction.member as GuildMember;
-            const channelId = member.voice.channel?.id;
-            if (!channelId) {
-                await this.commandService.sendReply(interaction, "Не удалось определить ID канала.");
-                return
-            }
-
-            const queue = await this.queueService.getQueue(channelId);
-            if (!queue[0].length) {
-                await this.commandService.sendReply(interaction, "Очередь пуста.");
-                return 
-            }
-
-            const queueString = queue[0]
-                .map((track, index) => `${index + 1}. ${track.tracks.info}`)
-                .join("\n");
-            await this.commandService.sendReply(interaction, `Текущая очередь:\n${queueString}`);
+            await this.handleQueueCommand(interaction);
         } catch (error) {
-            const errorMsg = error instanceof Error
-                ? `Произошла ошибка при получении очереди: ${error.name}: ${error.message}`
-                : "Произошла неожиданная ошибка при получении очереди.";
-
-            await this.commandService.sendReply(interaction, errorMsg);
+            await this.handleError(interaction, error);
         }
+    }
+
+    private async handleQueueCommand(interaction: CommandInteraction): Promise<void> {
+        const channelId = this.getVoiceChannelId(interaction);
+        if (!channelId) {
+            await this.commandService.sendReply(interaction, "You must be in a voice channel to use this command.");
+            return;
+        }
+
+        const queue = await this.queueService.getQueue(channelId);
+        if (queue.tracks.length === 0) {
+            await this.commandService.sendReply(interaction, "The queue is empty.");
+            return;
+        }
+
+        const queueString = this.formatQueueString(queue.tracks);
+        await this.commandService.sendReply(interaction, `Current queue:\n${queueString}`);
+    }
+
+    private getVoiceChannelId(interaction: CommandInteraction): string | null {
+        const member = interaction.member;
+        if (!(member instanceof GuildMember)) {
+            this.logger.warn("Interaction member is not a GuildMember");
+            return null;
+        }
+        return member.voice.channelId;
+    }
+
+    private formatQueueString(tracks: any[]): string {
+        return tracks
+            .map((track, index) => `${index + 1}. ${track.info}`)
+            .join("\n");
+    }
+
+    private async handleError(interaction: CommandInteraction, error: unknown): Promise<void> {
+        const errorMsg = error instanceof Error
+            ? `An error occurred while fetching the queue: ${error.name}: ${error.message}`
+            : "An unexpected error occurred while fetching the queue.";
+
+        this.logger.error("Queue command error:", error);
+        await this.commandService.sendReply(interaction, errorMsg);
     }
 }

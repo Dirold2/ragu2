@@ -1,7 +1,7 @@
 import { joinVoiceChannel, createAudioPlayer, VoiceConnectionStatus, createAudioResource, DiscordGatewayAdapterCreator } from "@discordjs/voice";
 import { QuickDB } from "quick.db";
 import sodium from "sodium-native";
-import { Discord, Slash, Client } from "discordx";
+import { Discord, Slash } from "discordx";
 import fs from "fs/promises";
 import { CommandInteraction, DiscordAPIError, GuildMember, PermissionFlagsBits } from "discord.js";
 import { ILogObj, Logger } from "tslog";
@@ -12,7 +12,6 @@ const logger: Logger<ILogObj> = new Logger();
 
 @Discord()
 export class RecCommand {
-    private client = new Client({ intents: [] });
 
     @Slash({ description: "Запись", name: "rec" })
     async rec(interaction: CommandInteraction): Promise<void> {

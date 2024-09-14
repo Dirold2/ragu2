@@ -1,6 +1,6 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { QueueService, CommandService } from "../service/index.ts";
+import { QueueService, CommandService } from "../service/index.js";
 
 @Discord()
 export class ResumeCommand {

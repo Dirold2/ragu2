@@ -1,5 +1,5 @@
-export { QueueService } from "./QueueService.ts";
-export { VoiceService } from "./VoiceService.ts";
-export { CommandService } from "./CommandService.ts";
-export { TrackService } from "./TrackService.ts";
-export { YMApiService } from "./YMApiService.ts";
+export { QueueService } from "./QueueService.js";
+export { VoiceService } from "./VoiceService.js";
+export { CommandService } from "./CommandService.js";
+export { TrackService } from "./TrackService.js";
+export { YMApiService } from "./YMApiService.js";

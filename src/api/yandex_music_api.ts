@@ -1,4 +1,4 @@
-// yandex_music_api.ts
+// yandex_music_api.js
 
 import axios from 'axios';
 import { ILogObj, Logger } from "tslog";

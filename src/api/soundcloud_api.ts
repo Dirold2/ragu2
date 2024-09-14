@@ -1,4 +1,4 @@
-// soundcloud_api.ts
+// soundcloud_api.js
 
 import axios from 'axios';
 

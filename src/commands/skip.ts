@@ -1,6 +1,6 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { QueueService, VoiceService, CommandService } from "../service/index.ts";
+import { QueueService, VoiceService, CommandService } from "../service/index.js";
 
 @Discord()
 export class SkipCommand {
@@ -25,7 +25,7 @@ export class SkipCommand {
         const nextTrack = await this.queueService.getNextTrack(channelId ?? '');
 
         if (nextTrack) {
-            await this.voiceService.joinChannel(interaction);
+            await this.voiceService.handleTrackEnd();
             await this.commandService.sendReply(interaction, "Пропустил трек.");
         } else {
             await this.commandService.sendReply(interaction, "Следующий трек закончен.");

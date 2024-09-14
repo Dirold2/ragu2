@@ -1,6 +1,6 @@
 import { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { VoiceService, CommandService, QueueService } from "../service/index.ts";
+import { VoiceService, CommandService, QueueService } from "../service/index.js";
 
 import { ILogObj, Logger } from "tslog";
 
