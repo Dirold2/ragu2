@@ -1,12 +1,9 @@
 import { joinVoiceChannel, createAudioPlayer, VoiceConnectionStatus, createAudioResource, DiscordGatewayAdapterCreator } from "@discordjs/voice";
-import { QuickDB } from "quick.db";
 import sodium from "sodium-native";
 import { Discord, Slash } from "discordx";
 import fs from "fs/promises";
 import { CommandInteraction, DiscordAPIError, GuildMember, PermissionFlagsBits } from "discord.js";
 import { ILogObj, Logger } from "tslog";
-
-const db = new QuickDB();
 
 const logger: Logger<ILogObj> = new Logger();
 
@@ -79,7 +76,6 @@ export class RecCommand {
         }
 
         await fs.writeFile(filePath, buffer);
-        await db.set(`recordings:${fileName}`, buffer.toString('base64'));
         logger.info(`Аудио записано как ${fileName}`);
     }
 }

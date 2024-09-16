@@ -43,7 +43,7 @@ export class VolumeCommand {
         try {
             // await this.queueService.setVolumeStatus(String(channelId), volume);
             await this.commandService.sendReply(interaction, `Громкость установлена на ${Math.round(volume * 100)}%`);
-        } catch (error) {
+        } catch {
             await this.commandService.sendReply(interaction, "Произошла ошибка при изменении громкости.");
         }
     }

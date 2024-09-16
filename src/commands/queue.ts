@@ -2,6 +2,7 @@ import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
 import { QueueService, CommandService } from "../service/index.js";
 import { ILogObj, Logger } from "tslog";
+import { Track } from "../service/QueueService.js";
 
 @Discord()
 export class QueueCommand {
@@ -52,7 +53,7 @@ export class QueueCommand {
         return member.voice.channelId;
     }
 
-    private formatQueueString(tracks: any[]): string {
+    private formatQueueString(tracks: Track[]): string {
         return tracks
             .map((track, index) => `${index + 1}. ${track.info}`)
             .join("\n");

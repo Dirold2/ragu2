@@ -238,10 +238,17 @@ export class VoiceService {
             await entersState(this.connection, VoiceConnectionStatus.Ready, 30000);
             this.connection.subscribe(this.player);
             this.logger.info("Successfully connected to voice channel.");
-        } catch (error) {
+        } catch {
             this.logger.error("Failed to connect to voice channel within the timeout.");
             await this.leaveChannel();
             throw new Error('Connection timed out.');
+        }
+
+        const nextTrack = await this.queueService.getNextTrack(channelId);
+        if (nextTrack) {
+            await this.addTrack(channelId, nextTrack);
+        } else {
+            this.logger.info("Queue is empty.");
         }
 
         this.handleDisconnection();

@@ -24,8 +24,8 @@ interface TrackOption {
 interface SearchTrackResult {
     id: number;
     title: string;
-    artists: Array<{ name: string }>;
-    albums: Array<{ title: string }>;
+    artists: { name: string }[];
+    albums: { title: string }[];
 }
 
 @Discord()
@@ -108,6 +108,7 @@ export class TrackService {
         }
 
         const collector = channel.createMessageComponentCollector({
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             filter: (i): i is any => i.isStringSelectMenu(),
             time: 15000,
         });

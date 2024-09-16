@@ -1,7 +1,7 @@
 import type { ArgsOf } from "discordx";
 import { Discord, On } from "discordx";
 
-import logger from "../utils/logger";
+import logger from "../utils/logger.js";
 
 @Discord()
 export class Example {

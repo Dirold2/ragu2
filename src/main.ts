@@ -1,7 +1,5 @@
 import { dirname, importx } from "@discordx/importer";
 
-import "@discordx/plugin-ytdl-player";
-
 import { bot } from "./bot.js";
 
 async function run() {
