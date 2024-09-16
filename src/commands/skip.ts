@@ -2,7 +2,7 @@ import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
 import { QueueService, VoiceService, CommandService } from "../service/index.js";
 import { Logger } from "winston";
-import logger from '../service/logger.js';
+import logger from '../utils/logger.js';
 
 
 @Discord()

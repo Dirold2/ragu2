@@ -1,11 +1,11 @@
 import { WrappedYMApi, YMApi, Types } from "ym-api-meowed";
-import { QueueService } from "../service/index.js";
+import { QueueService } from "../index.js";
 import { Logger } from 'winston';
-import logger from './logger.js';
+import logger from '../../utils/logger.js';
 import NodeCache from 'node-cache';
 import retry from 'async-retry';
-import { trackPlayCounter } from './monitoring.js';
-import { Track } from "./QueueService.js";
+import { trackPlayCounter } from '../../utils/monitoring.js';
+import { Track } from "../QueueService.js";
 
 interface Config {
     access_token: string;

@@ -6,7 +6,7 @@ import {
     CacheType
 } from "discord.js";
 import { Logger } from 'winston';
-import logger from './logger.js';
+import logger from '../utils/logger.js';
 
 export class CommandService {
     private readonly logger: Logger;

@@ -2,7 +2,7 @@ import { Discord, Slash, SlashOption } from "discordx";
 import { CommandInteraction, ApplicationCommandOptionType, TextChannel } from "discord.js";
 import { QueueService, TrackService, CommandService } from "../service/index.js";
 import { Logger } from "winston";
-import logger from '../service/logger.js';
+import logger from '../utils/logger.js';
 
 @Discord()
 export class PlayCommands {

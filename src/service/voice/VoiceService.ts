@@ -13,11 +13,11 @@ import {
 } from "@discordjs/voice";
 
 import { CommandInteraction, GuildMember, PermissionFlagsBits } from "discord.js";
-import { QueueService, CommandService } from "../service/index.js";
-import { Track } from "./QueueService.js";
-import { YMApiService } from "./YMApiService.js";
+import { QueueService, CommandService } from "../index.js";
+import { Track } from "../QueueService.js";
+import { YMApiService } from "../api/YMApiService.js";
 import { Logger } from 'winston';
-import logger from './logger.js';
+import logger from '../../utils/logger.js';
 
 const DEFAULT_VOLUME = 0.05;
 const RECONNECTION_TIMEOUT = 5000;
@@ -62,7 +62,7 @@ export class VoiceService {
     public async handleTrackEnd(): Promise<void> {
         const channelId = this.connection?.joinConfig.channelId;
         if (!channelId) return;
-    
+
         const nextTrack = await this.queueService.getNextTrack(channelId);
         if (nextTrack) {
             await this.playNextTrack(nextTrack);
@@ -124,6 +124,10 @@ export class VoiceService {
         return this.player.state.status === AudioPlayerStatus.Paused;
     }
 
+    /**
+     * Checks if the player is idle.
+     * @returns {boolean} True if idle, false otherwise.
+     */
     public isIdle(): boolean {
         return this.player.state.status === AudioPlayerStatus.Idle;
     }
@@ -165,10 +169,6 @@ export class VoiceService {
     }
 
     private async createAudioResource(track: Track): Promise<AudioResource> {
-        // let input = await this.apiService.getAudioStream(track.url);
-        // if (this.equalizer) {
-        //     input = input.pipe(this.equalizer);
-        // }
         const resource = createAudioResource(track.url, { inputType: StreamType.Opus, inlineVolume: true });
         resource.volume?.setVolume(DEFAULT_VOLUME);
         return resource;
@@ -178,7 +178,6 @@ export class VoiceService {
      * Plays the next track in the queue, or logs an error if something goes wrong.
      * @param {Track} track - The track to play.
      * @returns {Promise<void>}
-     * @public
      */
     public async playNextTrack(track: Track): Promise<void> {
         try {
@@ -190,16 +189,6 @@ export class VoiceService {
             this.player.stop(true);
         }
     }
-
-    // TODO
-    // public async setVolume(volume: number): Promise<void> {
-    //     if (!this.player.) {
-    //         throw new Error('No audio resource available');
-    //     }
-        
-    //     this.player.state.resource.volume.setVolume(volume);
-    //     this.logger.info(`Set volume to ${volume}`);
-    // }
 
     /**
      * Joins a voice channel and adds a track to the queue.
@@ -238,33 +227,28 @@ export class VoiceService {
      * @private
      */
     private async connectToChannel(guildId: string, channelId: string, interaction: CommandInteraction): Promise<void> {
-        if (this.connection && this.connection.joinConfig.channelId === channelId) {
-            this.logger.info("Already connected to channel. Adding track...");
-        } else {
-            this.connection = joinVoiceChannel({
-                channelId,
-                guildId,
-                adapterCreator: interaction.guild?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
-            });
+        this.connection = joinVoiceChannel({
+            channelId,
+            guildId,
+            adapterCreator: interaction.guild?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+            selfDeaf: false,
+        });
 
+        try {
             await entersState(this.connection, VoiceConnectionStatus.Ready, 30000);
             this.connection.subscribe(this.player);
-
-            this.logger.info("Successfully connected to channel.");
-        }
-
-        const nextTrack = await this.queueService.getNextTrack(channelId);
-        if (nextTrack) {
-            await this.addTrack(channelId, nextTrack);
-        } else {
-            this.logger.info("Queue is empty.");
+            this.logger.info("Successfully connected to voice channel.");
+        } catch (error) {
+            this.logger.error("Failed to connect to voice channel within the timeout.");
+            await this.leaveChannel();
+            throw new Error('Connection timed out.');
         }
 
         this.handleDisconnection();
     }
 
     /**
-     * Leaves the voice channel and clears the connection.
+     * Leaves the voice channel and cleans up the connection and player.
      * @returns {Promise<void>}
      */
     public async leaveChannel(): Promise<void> {
@@ -307,7 +291,7 @@ export class VoiceService {
             this.logger.info("Connection restored.");
         } catch (error) {
             this.logger.error("Error reconnecting:", (error as Error).message);
-            this.connection.disconnect();
+            this.connection.destroy();
             this.connection = null;
             this.logger.info("Connection terminated.");
         }

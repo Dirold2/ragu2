@@ -2,7 +2,7 @@ import { dirname, resolve } from "@discordx/importer";
 import chokidar from "chokidar";
 import { DIService, MetadataStorage } from "discordx";
 import { bot } from "./bot.js";
-import logger from './service/logger.js';
+import logger from './utils/logger.js';
 import dotenv from 'dotenv';
 
 dotenv.config();

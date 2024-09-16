@@ -1,6 +1,6 @@
 import { PrismaClient, Tracks } from '@prisma/client';
 import { Logger } from 'winston';
-import logger from './logger';
+import logger from '../utils/logger';
 import NodeCache from 'node-cache';
 
 export interface Track {

@@ -8,12 +8,12 @@ import {
     CacheType,
     GuildMember,
 } from "discord.js";
-import { YMApiService } from "./YMApiService.js";
+import { YMApiService } from "./api/YMApiService.js";
 import { QueueService, VoiceService, CommandService } from "../service/index.js";
 import { Discord, SelectMenuComponent } from 'discordx';
 import { Logger } from 'winston';
-import logger from './logger.js';
-import { trackPlayCounter } from './monitoring.js';
+import logger from '../utils/logger.js';
+import { trackPlayCounter } from '../utils/monitoring.js';
 
 interface TrackOption {
     label: string;
