@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Queue {
+  id          Int     @id @default(autoincrement())
+  channelId   String
+  tracks      Tracks[]
+  lastTrackId Int?
+  waveStatus  Boolean @default(false)
+  volume      Float?
+  priority    Boolean @default(false)
+}
+
+model Tracks {
+  id        Int      @id @default(autoincrement())
+  trackId   Int
+  addedAt   BigInt?
+  info      String
+  url       String
+  queue     Queue   @relation(fields: [queueId], references: [id])
+  queueId   Int
+}

@@ -5,25 +5,22 @@ import {
     InteractionResponse,
     CacheType
 } from "discord.js";
-import { Logger, ILogObj } from "tslog";
+import { Logger } from 'winston';
+import logger from './logger.js';
 
 export class CommandService {
-    private readonly logger: Logger<ILogObj>;
+    private readonly logger: Logger;
 
-    /**
-     * Initializes a new instance of the CommandService class with a logger.
-     */
     constructor() {
-        this.logger = new Logger();
+        this.logger = logger;
     }
 
     /**
      * Sends a reply to a Discord interaction.
-     *
-     * @param {CommandInteraction<CacheType>} interaction - The interaction object from Discord.
-     * @param {string} message - The message to reply with.
-     * @param {boolean} [ephemeral=true] - Whether the reply should be ephemeral (only visible to the user).
-     * @returns {Promise<InteractionResponse<boolean> | Message<boolean> | void>} A promise that resolves to the reply or nothing.
+     * @param {CommandInteraction<CacheType>} interaction - The interaction to reply to.
+     * @param {string} message - The message content.
+     * @param {boolean} [ephemeral=true] - Whether the reply should be ephemeral.
+     * @returns {Promise<InteractionResponse<boolean> | Message<boolean> | void>}
      */
     public async sendReply(
         interaction: CommandInteraction<CacheType>,
@@ -49,10 +46,9 @@ export class CommandService {
     }
 
     /**
-     * Deletes a message safely.
-     *
-     * @param {Message} message - The message object to be deleted.
-     * @returns {Promise<void>} A promise that resolves once the message is deleted, or if deletion fails.
+     * Safely deletes a message.
+     * @param {Message} message - The message to delete.
+     * @returns {Promise<void>}
      */
     public async deleteMessageSafely(message: Message): Promise<void> {
         if (!message.deletable) {
@@ -69,13 +65,6 @@ export class CommandService {
         }
     }
 
-    /**
-     * Handles errors that occur during an interaction.
-     *
-     * @param {unknown} error - The error object that was thrown.
-     * @param {CommandInteraction<CacheType>} interaction - The interaction object in which the error occurred.
-     * @private
-     */
     private handleInteractionError(error: unknown, interaction: CommandInteraction<CacheType>): void {
         if (error instanceof DiscordAPIError) {
             this.handleDiscordAPIError(error, `interaction with ID: ${interaction.id}`);
@@ -84,13 +73,6 @@ export class CommandService {
         }
     }
 
-    /**
-     * Handles errors that occur while deleting a message.
-     *
-     * @param {unknown} error - The error object that was thrown.
-     * @param {Message} message - The message object in which the error occurred.
-     * @private
-     */
     private handleMessageError(error: unknown, message: Message): void {
         if (error instanceof DiscordAPIError) {
             this.handleDiscordAPIError(error, `message with ID: ${message.id}`);
@@ -99,13 +81,6 @@ export class CommandService {
         }
     }
 
-    /**
-     * Handles Discord API errors and logs them accordingly.
-     *
-     * @param {DiscordAPIError} error - The Discord API error.
-     * @param {string} context - A description of the context (interaction or message) in which the error occurred.
-     * @private
-     */
     private handleDiscordAPIError(error: DiscordAPIError, context: string): void {
         switch (error.code) {
             case 10008:

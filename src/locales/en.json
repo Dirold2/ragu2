@@ -1,0 +1,27 @@
+{
+    "common": {
+      "hello": "Hello!",
+      "error": {
+        "noVoiceChannel": "You must be in a voice channel."
+      }
+    },
+    "commands": {
+      "skip": {
+        "success": "Skipped current song. Now playing:",
+        "noTracks": "No next song in queue."
+      }
+    },
+    "services": {
+      "voice": {
+        "playerStopped": "Player stopped.",
+        "alreadyConnected": "Already connected to channel. Adding track...",
+        "successfullyConnected": "Successfully connected to channel.",
+        "nothingToPause": "Nothing to pause, player is not playing a track.",
+        "playbackResumed": "Playback resumed.",
+        "playerNotPaused": "Player is not in a paused state.",
+        "disconnected": "Disconnected from voice channel.",
+        "connectionTerminated": "Connection terminated.",
+        "reconnectionError": "Reconnection error:"
+      }
+    }
+  }

@@ -8,23 +8,29 @@ import {
     VoiceConnectionStatus,
     DiscordGatewayAdapterCreator,
     AudioPlayerStatus,
+    StreamType,
+    AudioResource,
 } from "@discordjs/voice";
 
 import { CommandInteraction, GuildMember, PermissionFlagsBits } from "discord.js";
 import { QueueService, CommandService } from "../service/index.js";
 import { Track } from "./QueueService.js";
 import { YMApiService } from "./YMApiService.js";
-import { ILogObj, Logger } from "tslog";
+import { Logger } from 'winston';
+import logger from './logger.js';
+
+const DEFAULT_VOLUME = 0.05;
+const RECONNECTION_TIMEOUT = 5000;
 
 /**
  * Manages voice channel operations, such as connecting, playing, and queue management, for Discord bots.
  */
 export class VoiceService {
-    private player: AudioPlayer;
+    public player: AudioPlayer;
     private connection: VoiceConnection | null = null;
     private readonly commandService: CommandService;
     private readonly apiService: YMApiService;
-    private readonly logger: Logger<ILogObj>;
+    private readonly logger: Logger;
 
     /**
      * @param {QueueService} queueService - Service to manage the queue of tracks.
@@ -33,7 +39,7 @@ export class VoiceService {
         this.player = createAudioPlayer();
         this.commandService = new CommandService();
         this.apiService = new YMApiService();
-        this.logger = new Logger();
+        this.logger = logger;
         this.setupPlayerEvents();
     }
 
@@ -56,14 +62,18 @@ export class VoiceService {
     public async handleTrackEnd(): Promise<void> {
         const channelId = this.connection?.joinConfig.channelId;
         if (!channelId) return;
-
+    
         const nextTrack = await this.queueService.getNextTrack(channelId);
         if (nextTrack) {
             await this.playNextTrack(nextTrack);
         } else if (await this.queueService.getWaveStatus(channelId) === true) {
             const similarTrack = await this.apiService.getSimilarTrack(channelId, this.queueService);
-            await this.playNextTrack(similarTrack);
-            await this.queueService.setLastTrackID(channelId, Number(similarTrack.id));
+            if (similarTrack) {
+                await this.playNextTrack(similarTrack);
+                await this.queueService.setLastTrackID(channelId, Number(similarTrack.trackId));
+            } else {
+                this.logger.info("Queue is empty and no similar tracks found.");
+            }
         } else {
             this.logger.info("Queue is empty, playback stopped.");
         }
@@ -114,6 +124,10 @@ export class VoiceService {
         return this.player.state.status === AudioPlayerStatus.Paused;
     }
 
+    public isIdle(): boolean {
+        return this.player.state.status === AudioPlayerStatus.Idle;
+    }
+
     /**
      * Stops the audio player and logs the action.
      */
@@ -150,16 +164,25 @@ export class VoiceService {
         }
     }
 
+    private async createAudioResource(track: Track): Promise<AudioResource> {
+        // let input = await this.apiService.getAudioStream(track.url);
+        // if (this.equalizer) {
+        //     input = input.pipe(this.equalizer);
+        // }
+        const resource = createAudioResource(track.url, { inputType: StreamType.Opus, inlineVolume: true });
+        resource.volume?.setVolume(DEFAULT_VOLUME);
+        return resource;
+    }
+
     /**
      * Plays the next track in the queue, or logs an error if something goes wrong.
      * @param {Track} track - The track to play.
      * @returns {Promise<void>}
-     * @private
+     * @public
      */
-    private async playNextTrack(track: Track): Promise<void> {
+    public async playNextTrack(track: Track): Promise<void> {
         try {
-            const resource = createAudioResource(track.url, { inlineVolume: true });
-            resource.volume?.setVolume(0.03);
+            const resource = await this.createAudioResource(track);
             this.player.play(resource);
             this.logger.info(`Playing track: ${track.info}`);
         } catch (error) {
@@ -167,6 +190,16 @@ export class VoiceService {
             this.player.stop(true);
         }
     }
+
+    // TODO
+    // public async setVolume(volume: number): Promise<void> {
+    //     if (!this.player.) {
+    //         throw new Error('No audio resource available');
+    //     }
+        
+    //     this.player.state.resource.volume.setVolume(volume);
+    //     this.logger.info(`Set volume to ${volume}`);
+    // }
 
     /**
      * Joins a voice channel and adds a track to the queue.
@@ -259,20 +292,24 @@ export class VoiceService {
      */
     private handleDisconnection(): void {
         if (this.connection) {
-            this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-                try {
-                    await Promise.race([
-                        entersState(this.connection!, VoiceConnectionStatus.Signalling, 5000),
-                        entersState(this.connection!, VoiceConnectionStatus.Connecting, 5000),
-                    ]);
-                    this.logger.info("Connection restored.");
-                } catch (error) {
-                    this.logger.error("Error reconnecting:", (error as Error).message);
-                    this.connection?.destroy();
-                    this.connection = null;
-                    this.logger.info("Connection terminated.");
-                }
-            });
+            this.connection.on(VoiceConnectionStatus.Disconnected, this.reconnect.bind(this));
+        }
+    }
+
+    private async reconnect(): Promise<void> {
+        if (!this.connection) return;
+
+        try {
+            await Promise.race([
+                entersState(this.connection, VoiceConnectionStatus.Signalling, RECONNECTION_TIMEOUT),
+                entersState(this.connection, VoiceConnectionStatus.Connecting, RECONNECTION_TIMEOUT),
+            ]);
+            this.logger.info("Connection restored.");
+        } catch (error) {
+            this.logger.error("Error reconnecting:", (error as Error).message);
+            this.connection.disconnect();
+            this.connection = null;
+            this.logger.info("Connection terminated.");
         }
     }
 

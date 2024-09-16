@@ -11,7 +11,9 @@ import {
 import { YMApiService } from "./YMApiService.js";
 import { QueueService, VoiceService, CommandService } from "../service/index.js";
 import { Discord, SelectMenuComponent } from 'discordx';
-import { ILogObj, Logger } from "tslog";
+import { Logger } from 'winston';
+import logger from './logger.js';
+import { trackPlayCounter } from './monitoring.js';
 
 interface TrackOption {
     label: string;
@@ -31,20 +33,26 @@ export class TrackService {
     private readonly voiceService: VoiceService;
     private readonly commandService: CommandService;
     private readonly apiService: YMApiService;
-    private readonly logger: Logger<ILogObj>;
+    private readonly logger: Logger;
 
     constructor(private queueService: QueueService) {
         this.voiceService = new VoiceService(this.queueService);
         this.commandService = new CommandService();
         this.apiService = new YMApiService();
-        this.logger = new Logger();
+        this.logger = logger;
     }
 
+    /**
+     * Searches for tracks based on the given name.
+     * @param {string} trackName - The name of the track to search for.
+     * @returns {Promise<SearchTrackResult[]>} An array of search results.
+     * @throws {Error} If the search fails.
+     */
     public async searchTrack(trackName: string): Promise<SearchTrackResult[]> {
         try {
             return await this.apiService.searchTrack(trackName);
         } catch (error) {
-            this.logger.error(`Error searching for track: ${(error as Error).message}`);
+            this.logger.error(`Error searching for track: ${error.message}`);
             throw new Error('Failed to search for track');
         }
     }
@@ -53,6 +61,11 @@ export class TrackService {
         return text.length <= maxLength ? text : `${text.slice(0, maxLength - 3)}...`;
     }
 
+    /**
+     * Builds track options for the select menu.
+     * @param {SearchTrackResult[]} tracks - The tracks to build options for.
+     * @returns {TrackOption[]} An array of track options.
+     */
     public buildTrackOptions(tracks: SearchTrackResult[]): TrackOption[] {
         return tracks.map((track, index) => ({
             label: this.truncateText(`${track.artists.map(artist => artist.name).join(', ')} - ${track.title}`, 100),
@@ -61,6 +74,11 @@ export class TrackService {
         }));
     }
 
+    /**
+     *  Builds a track select menu.
+     * @param {TrackOption[]} options - The options to include in the menu.
+     * @returns {ActionRowBuilder<StringSelectMenuBuilder>} A select menu builder.
+     */
     public buildTrackSelectMenu(options: TrackOption[]): ActionRowBuilder<StringSelectMenuBuilder> {
         return new ActionRowBuilder<StringSelectMenuBuilder>()
             .addComponents(
@@ -71,6 +89,12 @@ export class TrackService {
             );
     }
 
+    /**
+     * Handles the track selection from the select menu.
+     * @param {CommandInteraction<CacheType>} interaction - The interaction that triggered the selection.
+     * @param {SearchTrackResult[]} tracks - The tracks to choose from.
+     * @param {Message} message - The message containing the select menu.
+     */
     @SelectMenuComponent({ id: "select-track" })
     public async handleTrackSelection(
         interaction: CommandInteraction<CacheType>,
@@ -133,9 +157,11 @@ export class TrackService {
             await this.queueService.setLastTrackID(channelId, selectedTrack.id);
             await this.commandService.sendReply(interaction, `Added to queue: ${trackInfo}`);
             await this.voiceService.joinChannel(interaction);
+            trackPlayCounter.inc({ status: 'success' });
         } catch (error) {
-            this.logger.error(`Error processing track selection: ${(error as Error).message}`, error);
+            this.logger.error(`Error processing track selection: ${error.message}`, error);
             await this.commandService.sendReply(interaction, "An error occurred while processing your request.");
+            trackPlayCounter.inc({ status: 'failure' });
         } finally {
             await this.commandService.deleteMessageSafely(message);
         }

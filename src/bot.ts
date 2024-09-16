@@ -1,9 +1,8 @@
 import type { Interaction, Message } from "discord.js";
 import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
-import { ILogObj, Logger } from "tslog";
 
-const logger: Logger<ILogObj> = new Logger();
+import logger from './service/logger.js';
 
 export const bot = new Client({
   // To use only guild command

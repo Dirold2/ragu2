@@ -19,6 +19,7 @@ dist
 lib
 test
 coverage
+dev.db
 
 # folders
 dist
@@ -29,3 +30,4 @@ build
 node_modules
 node_modules
 logs
+prisma/migrations

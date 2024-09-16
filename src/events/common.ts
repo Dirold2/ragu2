@@ -1,9 +1,7 @@
 import type { ArgsOf } from "discordx";
 import { Discord, On } from "discordx";
 
-import { ILogObj, Logger } from "tslog";
-
-const logger: Logger<ILogObj> = new Logger();
+import logger from "../service/logger";
 
 @Discord()
 export class Example {
