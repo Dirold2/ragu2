@@ -3,6 +3,7 @@ import { QueueService, Track, CommandService } from "./index.js";
 import { AudioPlayer, AudioPlayerStatus, 
     createAudioPlayer, createAudioResource, 
     DiscordGatewayAdapterCreator, entersState, 
+    getVoiceConnection, 
     joinVoiceChannel, StreamType, 
     VoiceConnection, VoiceConnectionStatus 
 } from "@discordjs/voice";
@@ -56,20 +57,21 @@ class PlayerService {
         try {
             const member = interaction.member as GuildMember;
             if (!this.hasVoiceChannelAccess(member)) {
-                await this.commandService.send(interaction, "No access to voice channel.");
+                await this.commandService.send(interaction, "Нет доступа к голосовому каналу.");
                 return;
             }
 
             const voiceChannelId = member.voice.channel?.id;
             const guildId = interaction.guild?.id;
             if (!guildId || !voiceChannelId) {
-                throw new Error("Guild ID or Voice Channel ID not found.");
+                throw new Error("ID гильдии или ID голосового канала не найдены.");
             }
 
             await this.connectToChannel(guildId, voiceChannelId, interaction);
+            await this.commandService.send(interaction, "Успешно подключился к голосовому каналу.");
         } catch (error) {
-            this.logger.error("Error connecting to channel:", error);
-            await this.commandService.send(interaction, "Failed to connect to voice channel.");
+            this.logger.error("Ошибка подключения к каналу:", error);
+            await this.commandService.send(interaction, "Не удалось подключиться к голосовому каналу.");
         }
     }
 
@@ -84,15 +86,30 @@ class PlayerService {
     }
 
     // Метод для паузы/возобновления воспроизведения
-    public togglePause(): void {
+    public async togglePause(interaction: CommandInteraction): Promise<void> {
+        const guildId = interaction.guild?.id;
+        if (!guildId) {
+            await this.commandService.send(interaction, "Команда должна быть выполнена на сервере.");
+            return;
+        }
+
+        this.connection = getVoiceConnection(guildId) ?? null;
+        if (!this.connection) {
+            await this.commandService.send(interaction, "Бот не подключен к голосовому каналу.");
+            return;
+        }
+
         if (this.player.state.status === AudioPlayerStatus.Playing) {
             this.player.pause();
-            this.logger.debug("Playback paused.");
+            this.logger.debug("Воспроизведение приостановлено.");
+            await this.commandService.send(interaction, "Воспроизведение приостановлено.");
         } else if (this.player.state.status === AudioPlayerStatus.Paused) {
             this.player.unpause();
-            this.logger.debug("Playback resumed.");
+            this.logger.debug("Воспроизведение возобновлено.");
+            await this.commandService.send(interaction, "Воспроизведение возобновлено.");
         } else {
-            this.logger.debug("Player is not playing or paused.");
+            this.logger.debug("Плеер не воспроизводит и не приостановлен.");
+            await this.commandService.send(interaction, "Нет активного воспроизведения для паузы или возобновления.");
         }
     }
 
@@ -103,10 +120,27 @@ class PlayerService {
         this.logger.info("Disconnected from voice channel.");
     }
 
-    // Настройка событий аудиоплеера
+    // New method to handle pause command
+    public async handlePauseCommand(interaction: CommandInteraction): Promise<void> {
+        await this.togglePause(interaction);
+    }
+
+    // Modified setupPlayerEvents method
     private setupPlayerEvents(): void {
         this.player.on(AudioPlayerStatus.Idle, async () => {
             await this.handleTrackEnd();
+        });
+
+        this.player.on('error', error => {
+            this.logger.error(`Error in audio player: ${error.message}`);
+        });
+
+        this.player.on(AudioPlayerStatus.Playing, () => {
+            this.logger.debug('Audio player is now playing.');
+        });
+
+        this.player.on(AudioPlayerStatus.Paused, () => {
+            this.logger.debug('Audio player is now paused.');
         });
     }
 
@@ -143,17 +177,17 @@ class PlayerService {
         try {
             await entersState(this.connection, VoiceConnectionStatus.Ready, 30000);
             this.connection.subscribe(this.player);
-            this.logger.info("Successfully connected to voice channel.");
-
+            this.logger.info("Успешно подключился к голосовому каналу.");
+        
             const track = await this.queueService.getTrack(channelId);
             if (track) {
                 await this.playOrQueueTrack(channelId, track);
             }
             this.handleDisconnection();
-        } catch {
-            this.logger.error("Failed to connect to voice channel within the timeout.");
+        } catch (error) {
+            this.logger.error("Не удалось подключиться к голосовому каналу в течение таймаута.", error);
             await this.leaveChannel();
-            throw new Error("Connection timed out.");
+            throw new Error("Время подключения истекло.");
         }
     }
 

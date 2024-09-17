@@ -10,28 +10,24 @@ dotenv.config();
 const commandsPattern = `${dirname(import.meta.url)}/commands/**/*.{ts,js}`;
 const eventsPattern = `${dirname(import.meta.url)}/events/**/*.{ts,js}`;
 
-async function LoadFiles(src: string): Promise<void> {
+async function loadFiles(src: string): Promise<void> {
     const files = await resolve(src);
     await Promise.all(
         files.map((file) => import(`${file}?version=${Date.now().toString()}`))
     );
 }
 
-async function Reload() {
+async function reload() {
     logger.info("> Reloading modules\n");
 
-    // Remove events
     bot.removeEvents();
 
-    // cleanup
     MetadataStorage.clear();
     DIService.engine.clearAllServices();
 
-    // reload files
-    await LoadFiles(commandsPattern);
-    await LoadFiles(eventsPattern);
+    await loadFiles(commandsPattern);
+    await loadFiles(eventsPattern);
 
-    // rebuild
     await MetadataStorage.instance.build();
     await bot.initApplicationCommands();
     bot.initEvents();
@@ -40,31 +36,29 @@ async function Reload() {
 }
 
 async function run() {
-    const watcher = chokidar.watch([commandsPattern, eventsPattern], {});
+    const watcher = chokidar.watch([commandsPattern, eventsPattern], {
+        persistent: true,
+        ignoreInitial: true
+    });
 
-    // Load commands
-    await LoadFiles(commandsPattern);
-    await LoadFiles(eventsPattern);
+    await loadFiles(commandsPattern);
+    await loadFiles(eventsPattern);
 
-    // Let's start the bot
     if (!process.env.BOT_TOKEN) {
         throw Error("Could not find BOT_TOKEN in your environment");
     }
 
-    // Log in with your bot token
     await bot.login(process.env.BOT_TOKEN);
 
-    // Hot Module reload
     if (process.env.NODE_ENV !== "production") {
         logger.info(
             "> Hot-Module-Reload enabled in development. Commands and events will automatically reload.",
         );
 
-        // Watch changed files using chikidar
-        watcher.on("add", () => void Reload());
-        watcher.on("change", () => void Reload());
-        watcher.on("unlink", () => void Reload());
+        watcher.on("add", reload);
+        watcher.on("change", reload);
+        watcher.on("unlink", reload);
     }
 }
 
-void run();
+run();

@@ -6,8 +6,11 @@ import { ActionRowBuilder, CacheType,
 } from "discord.js";
 import { Discord, SelectMenuComponent } from "discordx";
 import { Logger } from "winston";
-import { CommandService, QueueService, 
-    PlayerService, YandexService, 
+import { 
+    CommandService, 
+    QueueService, 
+    PlayerService, 
+    YandexService, 
     YouTubeService 
 } from "./index.js";
 
