@@ -14,13 +14,13 @@ export class ResumeCommand {
         const member = interaction.member as GuildMember;
 
         if (!member.voice.channel) {
-            await this.commandService.sendReply(interaction, "Вы должны находиться в голосовом канале!");
+            await this.commandService.send(interaction, "Вы должны находиться в голосовом канале!");
             return;
         }
 
         const channelId = member.voice.channel.id;
 
         await this.queueService.clearTracksQueue(channelId)
-        await this.commandService.sendReply(interaction, 'Очередь успешно очищена');
+        await this.commandService.send(interaction, 'Очередь успешно очищена');
     }
 }

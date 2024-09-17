@@ -1,41 +1,65 @@
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
+import { format } from 'date-fns';
+import { ru } from 'date-fns/locale';
 
 const createLogger = () => {
-    const logger = winston.createLogger({
-      level: 'info',
-      levels: {
-        error: 0,
-        warn: 1,
-        info: 2,
-        verbose: 3,
-        debug: 4,
-        silly: 5
-      },
-      format: winston.format.combine(
+    const customFormat = winston.format.printf(({ level, message, timestamp, stack }) => {
+        const formattedTime = format(new Date(timestamp), 'dd.MM.yyyy HH:mm:ss', { locale: ru });
+        const logMessage = `${formattedTime} | ${level}: ${message}`;
+        return stack ? `${logMessage}\n${stack}` : logMessage;
+    });
+
+    const fileFormat = winston.format.combine(
         winston.format.timestamp(),
+        winston.format.errors({ stack: true }),
+        customFormat
+    );
+
+    const consoleFormat = winston.format.combine(
         winston.format.colorize(),
-        winston.format.json(),
-        winston.format.printf(info => {
-          return `${info.level}: ${info.message} | ${info.timestamp}`;
-        })
-      ),
-      transports: [
-        new DailyRotateFile({
-          filename: 'logs/application-%DATE%.log',
-          datePattern: 'YYYY-MM-DD',
-          zippedArchive: true,
-          maxSize: '20m',
-          maxFiles: '14d'
-        }),
-      ],
+        winston.format.timestamp(),
+        customFormat
+    );
+
+    const logger = winston.createLogger({
+        level: process.env.LOG_LEVEL || 'info',
+        format: fileFormat,
+        transports: [
+            new DailyRotateFile({
+                filename: 'logs/application-%DATE%.log',
+                datePattern: 'YYYY-MM-DD',
+                zippedArchive: true,
+                maxSize: '20m',
+                maxFiles: '14d'
+            }),
+            new DailyRotateFile({
+                filename: 'logs/error-%DATE%.log',
+                datePattern: 'YYYY-MM-DD',
+                zippedArchive: true,
+                maxSize: '20m',
+                maxFiles: '14d',
+                level: 'error'
+            })
+        ],
     });
 
     if (process.env.NODE_ENV !== 'production') {
         logger.add(new winston.transports.Console({
-            format: winston.format.simple()
+            format: consoleFormat,
+            handleExceptions: true,
+            handleRejections: true
         }));
     }
+
+    // Обработка необработанных исключений и отклонений
+    logger.exceptions.handle(
+        new winston.transports.File({ filename: 'logs/exceptions.log' })
+    );
+
+    process.on('unhandledRejection', (ex) => {
+        logger.error('Unhandled rejection', ex);
+    });
 
     return logger;
 };

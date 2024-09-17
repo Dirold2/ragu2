@@ -30,18 +30,18 @@ export class QueueCommand {
     private async handleQueueCommand(interaction: CommandInteraction): Promise<void> {
         const channelId = this.getVoiceChannelId(interaction);
         if (!channelId) {
-            await this.commandService.sendReply(interaction, "You must be in a voice channel to use this command.");
+            await this.commandService.send(interaction, "You must be in a voice channel to use this command.");
             return;
         }
 
         const queue = await this.queueService.getQueue(channelId);
         if (queue.tracks.length === 0) {
-            await this.commandService.sendReply(interaction, "The queue is empty.");
+            await this.commandService.send(interaction, "The queue is empty.");
             return;
         }
 
         const queueString = this.formatQueueString(queue.tracks);
-        await this.commandService.sendReply(interaction, `Current queue:\n${queueString}`);
+        await this.commandService.send(interaction, `Current queue:\n${queueString}`);
     }
 
     private getVoiceChannelId(interaction: CommandInteraction): string | null {
@@ -65,6 +65,6 @@ export class QueueCommand {
             : "An unexpected error occurred while fetching the queue.";
 
         this.logger.error("Queue command error:", error);
-        await this.commandService.sendReply(interaction, errorMsg);
+        await this.commandService.send(interaction, errorMsg);
     }
 }

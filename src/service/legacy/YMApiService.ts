@@ -29,7 +29,7 @@ export class YMApiService {
         this.wrapper = new WrappedYMApi();
         this.api = new YMApi();
         this.logger = logger;
-        this.cache = new NodeCache({ stdTTL: 600 }); // Cache for 10 minutes
+        this.cache = new NodeCache({ stdTTL: 600 });
         this.init();
     }
 

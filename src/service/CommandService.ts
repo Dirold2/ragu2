@@ -22,7 +22,7 @@ export class CommandService {
      * @param {boolean} [ephemeral=true] - Whether the reply should be ephemeral.
      * @returns {Promise<InteractionResponse<boolean> | Message<boolean> | void>}
      */
-    public async sendReply(
+    public async send(
         interaction: CommandInteraction<CacheType>,
         message: string,
         ephemeral: boolean = true
@@ -34,10 +34,10 @@ export class CommandService {
 
         try {
             if (interaction.replied || interaction.deferred) {
-                this.logger.info(`Editing reply for interaction ID: ${interaction.id}`);
+                this.logger.debug(`Editing reply for interaction ID: ${interaction.id}`);
                 return await interaction.editReply({ content: message });
             } else {
-                this.logger.info(`Sending new reply for interaction ID: ${interaction.id}`);
+                this.logger.debug(`Sending new reply for interaction ID: ${interaction.id}`);
                 return await interaction.reply({ content: message, ephemeral });
             }
         } catch (error) {
@@ -50,16 +50,16 @@ export class CommandService {
      * @param {Message} message - The message to delete.
      * @returns {Promise<void>}
      */
-    public async deleteMessageSafely(message: Message): Promise<void> {
+    public async delete(message: Message): Promise<void> {
         if (!message.deletable) {
-            this.logger.warn(`Message with ID: ${message.id} cannot be deleted or does not exist.`);
+            this.logger.debug(`Message with ID: ${message.id} cannot be deleted or does not exist.`);
             return;
         }
 
         try {
-            this.logger.info(`Attempting to delete message with ID: ${message.id}`);
+            this.logger.debug(`Attempting to delete message with ID: ${message.id}`);
             await message.delete();
-            this.logger.info(`Message with ID: ${message.id} successfully deleted.`);
+            this.logger.debug(`Message with ID: ${message.id} successfully deleted.`);
         } catch (error) {
             this.handleMessageError(error, message);
         }
@@ -84,10 +84,10 @@ export class CommandService {
     private handleDiscordAPIError(error: DiscordAPIError, context: string): void {
         switch (error.code) {
             case 10008:
-                this.logger.warn(`${context} no longer exists (Unknown Message).`);
+                this.logger.debug(`${context} no longer exists (Unknown Message).`);
                 break;
             case 10062:
-                this.logger.warn(`${context} no longer exists (Unknown Interaction).`);
+                this.logger.debug(`${context} no longer exists (Unknown Interaction).`);
                 break;
             default:
                 this.logger.error(`Discord API Error (${error.code}) for ${context}: ${error.message}`);

@@ -8,12 +8,13 @@ import {
     CacheType,
     GuildMember,
 } from "discord.js";
-import { YMApiService } from "./api/YMApiService.js";
-import { QueueService, VoiceService, CommandService } from "../service/index.js";
+import { YMApiService } from "./YMApiService.js";
+import { QueueService, CommandService } from "../index.js";
 import { Discord, SelectMenuComponent } from 'discordx';
 import { Logger } from 'winston';
-import logger from '../utils/logger.js';
-import { trackPlayCounter } from '../utils/monitoring.js';
+import logger from '../../utils/logger.js';
+import { trackPlayCounter } from '../../utils/monitoring.js';
+import { VoiceService } from "./voice/VoiceService.js";
 
 interface TrackOption {
     label: string;
@@ -42,12 +43,6 @@ export class TrackService {
         this.logger = logger;
     }
 
-    /**
-     * Searches for tracks based on the given name.
-     * @param {string} trackName - The name of the track to search for.
-     * @returns {Promise<SearchTrackResult[]>} An array of search results.
-     * @throws {Error} If the search fails.
-     */
     public async searchTrack(trackName: string): Promise<SearchTrackResult[]> {
         try {
             return await this.apiService.searchTrack(trackName);
@@ -61,11 +56,6 @@ export class TrackService {
         return text.length <= maxLength ? text : `${text.slice(0, maxLength - 3)}...`;
     }
 
-    /**
-     * Builds track options for the select menu.
-     * @param {SearchTrackResult[]} tracks - The tracks to build options for.
-     * @returns {TrackOption[]} An array of track options.
-     */
     public buildTrackOptions(tracks: SearchTrackResult[]): TrackOption[] {
         return tracks.map((track, index) => ({
             label: this.truncateText(`${track.artists.map(artist => artist.name).join(', ')} - ${track.title}`, 100),
@@ -74,11 +64,6 @@ export class TrackService {
         }));
     }
 
-    /**
-     *  Builds a track select menu.
-     * @param {TrackOption[]} options - The options to include in the menu.
-     * @returns {ActionRowBuilder<StringSelectMenuBuilder>} A select menu builder.
-     */
     public buildTrackSelectMenu(options: TrackOption[]): ActionRowBuilder<StringSelectMenuBuilder> {
         return new ActionRowBuilder<StringSelectMenuBuilder>()
             .addComponents(
@@ -89,12 +74,6 @@ export class TrackService {
             );
     }
 
-    /**
-     * Handles the track selection from the select menu.
-     * @param {CommandInteraction<CacheType>} interaction - The interaction that triggered the selection.
-     * @param {SearchTrackResult[]} tracks - The tracks to choose from.
-     * @param {Message} message - The message containing the select menu.
-     */
     @SelectMenuComponent({ id: "select-track" })
     public async handleTrackSelection(
         interaction: CommandInteraction<CacheType>,
@@ -116,7 +95,7 @@ export class TrackService {
         collector.on("collect", async (i: StringSelectMenuInteraction) => {
             const selectedTrack = tracks[Number(i.values[0])];
             if (!selectedTrack) {
-                await this.commandService.sendReply(interaction, "Error: Selected track not found.");
+                await this.commandService.send(interaction, "Error: Selected track not found.");
                 return;
             }
             await this.processTrackSelection(i, selectedTrack, interaction, message);
@@ -124,7 +103,7 @@ export class TrackService {
 
         collector.on("end", async (_collected, reason) => {
             if (reason === 'time') {
-                await this.commandService.deleteMessageSafely(message);
+                await this.commandService.delete(message);
             }
         });
     }
@@ -150,21 +129,21 @@ export class TrackService {
             const artists = selectedTrack.artists.map(artist => artist.name).join(', ');
             const trackInfo = `${artists} - ${selectedTrack.title}`;
 
-            await this.queueService.addTrack(channelId, { 
+            await this.queueService.setTrack(channelId, { 
                 trackId: selectedTrack.id, 
                 info: trackInfo, 
                 url: trackUrl 
             });
             await this.queueService.setLastTrackID(channelId, selectedTrack.id);
-            await this.commandService.sendReply(interaction, `Added to queue: ${trackInfo}`);
+            await this.commandService.send(interaction, `Added to queue: ${trackInfo}`);
             await this.voiceService.joinChannel(interaction);
             trackPlayCounter.inc({ status: 'success' });
         } catch (error) {
             this.logger.error(`Error processing track selection: ${error.message}`, error);
-            await this.commandService.sendReply(interaction, "An error occurred while processing your request.");
+            await this.commandService.send(interaction, "An error occurred while processing your request.");
             trackPlayCounter.inc({ status: 'failure' });
         } finally {
-            await this.commandService.deleteMessageSafely(message);
+            await this.commandService.delete(message);
         }
     }
 }

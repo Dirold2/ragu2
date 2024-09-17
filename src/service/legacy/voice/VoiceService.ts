@@ -13,11 +13,11 @@ import {
 } from "@discordjs/voice";
 
 import { CommandInteraction, GuildMember, PermissionFlagsBits } from "discord.js";
-import { QueueService, CommandService } from "../index.js";
-import { Track } from "../QueueService.js";
-import { YMApiService } from "../api/YMApiService.js";
+import { QueueService, CommandService } from "../../index.js";
+import { Track } from "../../QueueService.js";
+import { YMApiService } from "../YMApiService.js";
 import { Logger } from 'winston';
-import logger from '../../utils/logger.js';
+import logger from '../../../utils/logger.js';
 
 const DEFAULT_VOLUME = 0.05;
 const RECONNECTION_TIMEOUT = 5000;
@@ -63,7 +63,7 @@ export class VoiceService {
         const channelId = this.connection?.joinConfig.channelId;
         if (!channelId) return;
 
-        const nextTrack = await this.queueService.getNextTrack(channelId);
+        const nextTrack = await this.queueService.getTrack(channelId);
         if (nextTrack) {
             await this.playNextTrack(nextTrack);
         } else if (await this.queueService.getWaveStatus(channelId) === true) {
@@ -200,7 +200,7 @@ export class VoiceService {
             const member = interaction.member as GuildMember;
 
             if (!this.hasVoiceChannelAccess(member)) {
-                await this.commandService.sendReply(interaction, "No access to voice channel.");
+                await this.commandService.send(interaction, "No access to voice channel.");
                 return;
             }
 
@@ -214,7 +214,7 @@ export class VoiceService {
             await this.connectToChannel(guildId, voiceChannelId, interaction);
         } catch (error) {
             this.logger.error("Error connecting to channel:", error);
-            await this.commandService.sendReply(interaction, "Failed to connect to voice channel.");
+            await this.commandService.send(interaction, "Failed to connect to voice channel.");
         }
     }
 
@@ -244,9 +244,9 @@ export class VoiceService {
             throw new Error('Connection timed out.');
         }
 
-        const nextTrack = await this.queueService.getNextTrack(channelId);
+        const nextTrack = await this.queueService.getTrack(channelId);
         if (nextTrack) {
-            await this.addTrack(channelId, nextTrack);
+            await this.setTrack(channelId, nextTrack);
         } else {
             this.logger.info("Queue is empty.");
         }
@@ -310,9 +310,9 @@ export class VoiceService {
      * @param {Track} track - The track to be added or played.
      * @returns {Promise<void>} A promise that resolves once the track is added or played.
      */
-    public async addTrack(channelId: string, track: Track): Promise<void> {
+    public async setTrack(channelId: string, track: Track): Promise<void> {
         if (this.isPlaying()) {
-            await this.queueService.addTrack(channelId, track);
+            await this.queueService.setTrack(channelId, track);
             this.logger.info(`Track added to queue: ${track.info}`);
         } else {
             await this.playNextTrack(track);

@@ -29,7 +29,7 @@ export class QueueService {
      * @throws {Error} If the track cannot be added to the queue.
      * @returns {Promise<void>}
      */
-    public async addTrack(channelId: string, track: Omit<Track, 'id'>, priority: boolean = false): Promise<void> {
+    public async setTrack(channelId: string, track: Omit<Track, 'id'>, priority: boolean = false): Promise<void> {
         try {
             let queue = await this.prisma.queue.findFirst({ where: { channelId, priority } });
             if (!queue) {
@@ -39,15 +39,40 @@ export class QueueService {
             }
             await this.prisma.tracks.create({
                 data: {
-                ...track,
-                addedAt: Date.now(),
-                queue: { connect: { id: queue.id } }
+                    ...track,
+                    addedAt: Date.now(),
+                    queue: { connect: { id: queue.id } }
                 }
             });
             this.cache.del(`queue_${channelId}_${priority}`);
         } catch (error) {
             this.logger.error('Error adding track to queue:', error);
             throw new Error('Failed to add track to queue');
+        }
+    }
+
+    /**
+     * Retrieves the next track from the queue for a given channel.
+     * @param {string} channelId - The ID of the channel.
+     * @returns {Promise<Track | null>} The next track or null if the queue is empty.
+     */
+    public async getTrack(channelId: string): Promise<Track | null> {
+        try {
+            const queue = await this.prisma.queue.findFirst({
+                where: { channelId },
+                include: { tracks: { take: 1 } }
+            });
+            if (!queue || queue.tracks.length === 0) {
+                return null;
+            }
+            const nextTrack = queue.tracks[0];
+            await this.prisma.tracks.delete({ where: { id: nextTrack.id } });
+            this.cache.del(`queue_${channelId}_false`);
+            this.cache.del(`queue_${channelId}_true`);
+            return this.mapPrismaTrackToTrack(nextTrack);
+        } catch (error) {
+            this.logger.error('Error getting next track:', error);
+            throw new Error('Failed to get next track');
         }
     }
 
@@ -120,31 +145,6 @@ export class QueueService {
             });
         }
         this.cache.del(`queue_${channelId}_${priority}`);
-    }
-
-    /**
-     * Retrieves the next track from the queue for a given channel.
-     * @param {string} channelId - The ID of the channel.
-     * @returns {Promise<Track | null>} The next track or null if the queue is empty.
-     */
-    public async getNextTrack(channelId: string): Promise<Track | null> {
-        try {
-            const queue = await this.prisma.queue.findFirst({
-                where: { channelId },
-                include: { tracks: { take: 1 } }
-            });
-            if (!queue || queue.tracks.length === 0) {
-                return null;
-            }
-            const nextTrack = queue.tracks[0];
-            await this.prisma.tracks.delete({ where: { id: nextTrack.id } });
-            this.cache.del(`queue_${channelId}_false`);
-            this.cache.del(`queue_${channelId}_true`);
-            return this.mapPrismaTrackToTrack(nextTrack);
-        } catch (error) {
-            this.logger.error('Error getting next track:', error);
-            throw new Error('Failed to get next track');
-        }
     }
 
     /**

@@ -1,6 +1,6 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { QueueService, VoiceService, CommandService } from "../service/index.js";
+import { QueueService, PlayerService, CommandService } from "../service/index.js";
 import { Logger } from "winston";
 import logger from '../utils/logger.js';
 
@@ -8,13 +8,13 @@ import logger from '../utils/logger.js';
 @Discord()
 export class SkipCommand {
     private readonly queueService: QueueService;
-    private readonly voiceService: VoiceService;
+    private readonly playerService: PlayerService;
     private readonly commandService: CommandService;
     private readonly logger: Logger;
 
     constructor() {
         this.queueService = new QueueService();
-        this.voiceService = new VoiceService(this.queueService);
+        this.playerService = new PlayerService();
         this.commandService = new CommandService();
         this.logger = logger
     }
@@ -27,31 +27,31 @@ export class SkipCommand {
         const channelId = member.voice.channelId;
 
         if (!channelId) {
-            await this.commandService.sendReply(interaction, "Вы должны быть в голосовом канале.");
+            await this.commandService.send(interaction, "Вы должны быть в голосовом канале.");
             return;
         }
 
         try {
             // Останавливаем текущее воспроизведение
-            this.voiceService.stopPlayer();
+            this.playerService.stop();
 
             // Получаем следующий трек из очереди
-            const nextTrack = await this.queueService.getNextTrack(channelId);
+            const nextTrack = await this.queueService.getTrack(channelId);
 
             if (nextTrack) {
                 // Игрываем следующий трек
-                await this.voiceService.playNextTrack(nextTrack);
+                await this.playerService.playOrQueueTrack(channelId, nextTrack);
                 
                 // Отправляем сообщение о пропуске текущего трека и начале воспроизведения нового
-                await this.commandService.sendReply(interaction, "Пропущена текущая песня. Сейчас играет:");
-                await this.commandService.sendReply(interaction, nextTrack.info);
+                await this.commandService.send(interaction, "Пропущена текущая песня. Сейчас играет:");
+                await this.commandService.send(interaction, nextTrack.info);
             } else {
                 // Если нет следующих треков в очереди
-                await this.commandService.sendReply(interaction, "Следующей песни в очереди нет. Воспроизведение завершено.");
+                await this.commandService.send(interaction, "Следующей песни в очереди нет. Воспроизведение завершено.");
             }
         } catch (error) {
             this.logger.error('Error skipping track:', error);
-            await this.commandService.sendReply(interaction, "Произошла ошибка при попытке пропустить трек.");
+            await this.commandService.send(interaction, "Произошла ошибка при попытке пропустить трек.");
         }
     }
 }

@@ -1,5 +1,7 @@
+export { type Track } from "./QueueService.js";
 export { QueueService } from "./QueueService.js";
-export { VoiceService } from "./voice/VoiceService.js";
 export { CommandService } from "./CommandService.js";
-export { TrackService } from "./TrackService.js";
-export { YMApiService } from "./api/YMApiService.js";
+export { PlayerService } from "./PlayerService.js"
+export { YouTubeService } from "./api/YouTubeService.js"
+export { YandexService } from "./api/YandexService.js"
+export { NameService } from "./NameService.js"

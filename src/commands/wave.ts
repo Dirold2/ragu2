@@ -17,7 +17,7 @@ export class WaveCommand {
         this.waveEnabled = !this.waveEnabled;
         const waveStatus = this.waveEnabled ? "Моя волна включена" : "Моя волна выключена";
 
-        await this.commandService.sendReply(interaction, `${waveStatus}.`);
+        await this.commandService.send(interaction, `${waveStatus}.`);
 
         // Сохранение текущего статуса волны в базу данных
         await this.queueService.setWaveStatus(voiceChannelId, this.waveEnabled);
