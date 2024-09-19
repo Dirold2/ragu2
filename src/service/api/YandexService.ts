@@ -29,15 +29,13 @@ class YandexService {
     private cache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
     private initialized = false;
 
-    constructor() {
-        this.init();
-    }
-
     hasAvailableResults(): boolean {
         return !!this.results?.length;
     }
 
     async searchName(trackName: string): Promise<SearchTrackResult[]> {
+        this.init();
+
         const cacheKey = `search_${trackName}`;
         const cachedResult = this.cache.get<SearchTrackResult[]>(cacheKey);
 
@@ -52,6 +50,8 @@ class YandexService {
     }
 
     async getTrackUrl(trackId?: string): Promise<string> {
+        this.init();
+
         if (!trackId) {
             logger.error("Error getting track URL: trackId is undefined");
             return '';
@@ -104,7 +104,8 @@ class YandexService {
         };
         const validation = ConfigSchema.safeParse(config);
         if (!validation.success) {
-            throw new Error("Invalid configuration");
+            const errorMessages = validation.error.errors.map(err => err.message);
+            throw new Error(`Invalid configuration: ${errorMessages.join(', ')}`);
         }
         return validation.data;
     }
