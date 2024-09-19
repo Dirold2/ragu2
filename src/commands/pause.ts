@@ -12,6 +12,6 @@ export class PauseCommand {
 
     @Slash({ name: "pause", description: "Приостановить или возобновить текущий трек" })
     async pause(interaction: CommandInteraction): Promise<void> {
-        await this.playerService.handlePauseCommand(interaction);
+        await this.playerService.togglePause(interaction);
     }
 }

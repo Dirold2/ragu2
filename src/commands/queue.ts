@@ -1,19 +1,27 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
 import { QueueService, CommandService } from "../service/index.js";
-import { ILogObj, Logger } from "tslog";
-import { Track } from "../service/QueueService.js";
+import { Logger } from "winston";
+import logger from '../utils/logger.js';
+
+interface Track {
+    url: string;
+    info: string;
+    source: string;
+    trackId?: string | undefined;
+    addedAt?: bigint | undefined;
+}
 
 @Discord()
 export class QueueCommand {
     private readonly queueService: QueueService;
     private readonly commandService: CommandService;
-    private readonly logger: Logger<ILogObj>;
+    private readonly logger: Logger;
 
     constructor() {
         this.queueService = new QueueService();
         this.commandService = new CommandService();
-        this.logger = new Logger();
+        this.logger = logger;
     }
 
     @Slash({ description: "View the current queue", name: "queue" })

@@ -1,5 +1,4 @@
 // TYPE
-export { type Track } from "./QueueService.js";
 
 // API
 export { YouTubeService } from "./api/YouTubeService.js"

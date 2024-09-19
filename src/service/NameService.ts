@@ -1,175 +1,109 @@
 import { logger, trackPlayCounter } from "../utils/index.js";
-import { ActionRowBuilder, CacheType, 
-    CommandInteraction, GuildMember, 
-    Message, StringSelectMenuBuilder, 
-    StringSelectMenuInteraction, TextChannel 
+import {
+    CommandInteraction,
+    GuildMember,
 } from "discord.js";
-import { Discord, SelectMenuComponent } from "discordx";
-import { Logger } from "winston";
-import { 
-    CommandService, 
-    QueueService, 
-    PlayerService, 
-    YandexService, 
-    YouTubeService 
-} from "./index.js";
+import { Discord } from "discordx";
+import { CommandService, QueueService, PlayerService, YandexService, YouTubeService } from "./index.js";
+import { z } from "zod";
 
-interface SearchTrackResult {
-    id: number;
-    title: string;
-    artists: { name: string }[];
-    albums: { title: string }[];
-}
+const TrackResultSchema = z.object({
+    id: z.string(),
+    title: z.string(),
+    artists: z.array(z.object({ name: z.string() })),
+    albums: z.array(z.object({ title: z.string().optional() })).optional(),
+    source: z.enum(['yandex', 'youtube'])
+});
+
+const TrackUrlSchema = z.string().url();
+
+type SearchTrackResult = z.infer<typeof TrackResultSchema>;
 
 @Discord()
 class NameService {
-    private logger: Logger;
-    private readonly commandService: CommandService;
     private readonly yandexService: YandexService;
     private readonly youtubeService: YouTubeService;
+    private readonly commandService: CommandService;
     private readonly queueService: QueueService;
     private readonly playerService: PlayerService;
-
+    
     constructor() {
-        this.logger = logger;
-        this.commandService = new CommandService();
         this.yandexService = new YandexService();
         this.youtubeService = new YouTubeService();
+        this.commandService = new CommandService();
         this.queueService = new QueueService();
         this.playerService = new PlayerService();
     }
 
-    public async searchTrack(trackName: string): Promise<SearchTrackResult[]> {
+    public async searchName(trackName: string): Promise<SearchTrackResult[]> {
+        logger.info(`Поиск трека "${trackName}"...`);
+
         try {
-            this.logger.info(`Searching for track "${trackName}"...`);
-
-            const results = await Promise.all([
-                this.yandexService.searchName(trackName).catch(error => {
-                    this.logger.warn(`Error in YandexService: ${error.message}`);
-                    return [];
-                }),
-                this.youtubeService.hasAvailableResults()
-                    ? this.youtubeService.searchName(trackName).catch(error => {
-                        this.logger.warn(`Error in YouTubeService: ${error.message}`);
-                        return [];
-                    })
-                    : []
-            ]);
-
-            const [yandexResults, youtubeResults] = results;
-            const allResults = [...yandexResults, ...youtubeResults];
-
-            if (allResults.length > 0) {
-                this.logger.info(`Found ${allResults.length} results in combined search`);
-                return allResults;
+            const yandexResults = await this.searchAndValidate(this.yandexService, trackName, 'yandex');
+            if (yandexResults.length > 0) {
+                return yandexResults;
             }
 
-            this.logger.warn('No results found in either Yandex or YouTube services');
-            throw new Error('Neither Yandex nor YouTube have available results');
-
+            const youtubeResults = await this.searchAndValidate(this.youtubeService, trackName, 'youtube');
+            if (youtubeResults.length > 0) {
+                return youtubeResults;
+            }
         } catch (error) {
-            this.logger.error(`Error searching for track: ${error.message}`);
-            throw new Error('Failed to search for track');
+            logger.warn(`Ошибка при поиске: ${error.message}`);
         }
+
+        logger.warn('Результаты не найдены');
+        return [];
     }
 
-    private truncateText(text: string, maxLength: number): string {
-        return text.length <= maxLength ? text : `${text.slice(0, maxLength - 3)}...`;
+    private async searchAndValidate(service: YandexService | YouTubeService, trackName: string, source: 'yandex' | 'youtube'): Promise<SearchTrackResult[]> {
+        const results = await service.searchName(trackName);
+        const validatedResults = results
+            .map(r => TrackResultSchema.safeParse({ ...r, source }))
+            .filter((result): result is z.SafeParseSuccess<SearchTrackResult> => result.success)
+            .map(result => result.data);
+
+        logger.info(`Найдено ${validatedResults.length} результатов в ${source}Service`);
+        return validatedResults;
     }
 
-    public buildTrackOptions(tracks: SearchTrackResult[]): ActionRowBuilder<StringSelectMenuBuilder> {
-        const options = tracks.map((track, index) => ({
-            label: this.truncateText(`${track.artists.map(artist => artist.name).join(', ')} - ${track.title}`, 100),
-            description: this.truncateText(track.albums[0]?.title ?? 'Unknown album', 50),
-            value: index.toString()
-        }));
-
-        return new ActionRowBuilder<StringSelectMenuBuilder>()
-            .addComponents(
-                new StringSelectMenuBuilder()
-                    .setCustomId("select-track")
-                    .setPlaceholder("Select a track")
-                    .addOptions(options)
-            );
-    }
-
-    @SelectMenuComponent({ id: "select-track" })
-    public async handleTrackSelection(
-        interaction: CommandInteraction<CacheType>,
-        tracks: SearchTrackResult[],
-        message: Message
-    ): Promise<void> {
-        const channel = interaction.channel;
-        if (!(channel instanceof TextChannel)) {
-            this.logger.error("Invalid channel type");
-            return;
-        }
-    
-        const collector = channel.createMessageComponentCollector({
-            filter: (i): i is StringSelectMenuInteraction<"cached"> => i.isStringSelectMenu(),
-            time: 10000,
-        });
-    
-        collector.on("collect", async (i: StringSelectMenuInteraction<"cached">) => {
-            const selectedTrack = tracks[Number(i.values[0])];
-            if (!selectedTrack) {
-                await this.commandService.send(interaction, "Error: Selected track not found.");
-                return;
-            }
-            await this.processTrackSelection(i, selectedTrack, interaction, message);
-        });
-    
-        collector.on("end", async (_collected, reason) => {
-            if (reason === 'time') {
-                setTimeout(async () => {
-                    await this.commandService.delete(message);
-                }, 3000);
-            }
-        });
-    }
-    
-    private async processTrackSelection(
-        _i: StringSelectMenuInteraction<"cached">,
+    public async processTrackSelection(
         selectedTrack: SearchTrackResult,
-        interaction: CommandInteraction<CacheType>,
-        message: Message
+        interaction: CommandInteraction,
     ): Promise<void> {
         try {
-            const member = interaction.member;
-            if (!(member instanceof GuildMember)) {
-                throw new Error('Invalid member type');
-            }
-    
+            const member = interaction.member as GuildMember;
             const channelId = member.voice.channel?.id;
+            const guildId = interaction.guild?.id;
             if (!channelId) {
-                throw new Error('User is not in a voice channel');
+                throw new Error('Пользователь не в голосовом канале');
             }
-    
-            const trackUrl = await this.yandexService.getTrackUrl(selectedTrack.id);
+
+            const service = selectedTrack.source === 'yandex' ? this.yandexService : this.youtubeService;
+            const trackUrl = await service.getTrackUrl(selectedTrack.id);
+            TrackUrlSchema.parse(trackUrl);
+
             const artists = selectedTrack.artists.map(artist => artist.name).join(', ');
             const trackInfo = `${artists} - ${selectedTrack.title}`;
-    
-            this.queueService.setTrack(channelId, {
+
+            await this.queueService.setTrack(channelId, guildId, {
                 trackId: selectedTrack.id,
                 info: trackInfo,
                 url: trackUrl,
+                source: selectedTrack.source,
             });
-    
+
             await this.queueService.setLastTrackID(channelId, selectedTrack.id);
-            await this.commandService.send(interaction, `Added to queue: ${trackInfo}`);
-    
+            await this.commandService.send(interaction, `Добавлено в очередь: ${trackInfo}`);
             await this.playerService.joinChannel(interaction);
-    
+
             trackPlayCounter.inc({ status: 'success' });
         } catch (error) {
-            this.logger.error(`Error processing track selection: ${error.message}`, error);
-            await this.commandService.send(interaction, "An error occurred while processing your request.");
+            logger.error(`Ошибка при обработке выбора трека: ${error.message}`, error);
+            await this.commandService.send(interaction, "Произошла ошибка при обработке вашего запроса.");
             trackPlayCounter.inc({ status: 'failure' });
-        } finally {
-            await this.commandService.delete(message);
         }
     }
-    
 }
 
-export { NameService }
+export { NameService };

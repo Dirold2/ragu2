@@ -8,21 +8,26 @@ datasource db {
 }
 
 model Queue {
-  id          Int     @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   channelId   String
+  guildId     String   @unique @default("")
+  priority    Boolean
+  lastTrackId String?
+  waveStatus  Boolean?
+  volume      Int?
+  
   tracks      Tracks[]
-  lastTrackId Int?
-  waveStatus  Boolean @default(false)
-  volume      Float?
-  priority    Boolean @default(false)
+  
+  @@unique([channelId, priority]) // Определяем составной уникальный ключ
 }
 
 model Tracks {
-  id        Int      @id @default(autoincrement())
-  trackId   Int
-  addedAt   BigInt?
+  id        Int    @id @default(autoincrement())
+  trackId   String
+  addedAt   BigInt
   info      String
   url       String
-  queue     Queue   @relation(fields: [queueId], references: [id])
+  source    String
   queueId   Int
+  Queue     Queue   @relation(fields: [queueId], references: [id])
 }

@@ -1,238 +1,244 @@
 import { PrismaClient, Tracks } from '@prisma/client';
-import { Logger } from 'winston';
 import logger from '../utils/logger.js';
 import NodeCache from 'node-cache';
+import { z } from 'zod';
 
-export interface Track {
-    trackId: number;
-    addedAt?: bigint; // Changed from number | undefined to number | null
-    info: string;
-    url: string;
+const TrackSchema = z.object({
+    trackId: z.string(),
+    addedAt: z.bigint().optional(),
+    info: z.string(),
+    url: z.string().url(),
+    source: z.string(),
+    waveStatus: z.boolean().optional()
+});
+
+interface QueueResult {
+    tracks: Track[];
+    lastTrackId?: string;
+    waveStatus?: boolean;
+    volume?: number;
 }
+
+type Track = z.infer<typeof TrackSchema>;
 
 export class QueueService {
     private prisma: PrismaClient;
-    private logger: Logger;
     private cache: NodeCache;
 
     constructor() {
         this.prisma = new PrismaClient();
-        this.logger = logger;
-        this.cache = new NodeCache({ stdTTL: 600 }); // Cache for 10 minutes
+        this.cache = new NodeCache({ stdTTL: 600 });
     }
 
-    /**
-     * Adds a track to the queue for a specific channel.
-     * @param {string} channelId - The ID of the channel.
-     * @param {Omit<Track, 'id'>} track - The track to be added.
-     * @param {boolean} [priority=false] - Whether to add to the priority queue.
-     * @throws {Error} If the track cannot be added to the queue.
-     * @returns {Promise<void>}
-     */
-    public async setTrack(channelId: string, track: Omit<Track, 'id'>, priority: boolean = false): Promise<void> {
+    public async setTrack(
+        channelId: string | null, 
+        guildId: string | null = '',
+        track: Omit<Track, 'id'>,
+        priority: boolean = false
+    ): Promise<void> {
         try {
-            let queue = await this.prisma.queue.findFirst({ where: { channelId, priority } });
-            if (!queue) {
-                queue = await this.prisma.queue.create({
-                data: { channelId, priority }
+            const validatedTrack = TrackSchema.parse(track);
+            await this.prisma.$transaction(async (prisma) => {
+                await prisma.tracks.create({
+                    data: {
+                        ...validatedTrack,
+                        addedAt: BigInt(Date.now()),
+                        Queue: {
+                            connectOrCreate: {
+                                where: { channelId_priority: { channelId: channelId ?? '', priority } },
+                                create: { channelId: channelId ?? '', guildId: guildId ?? '', priority }
+                            }
+                        }
+                    }
                 });
-            }
-            await this.prisma.tracks.create({
-                data: {
-                    ...track,
-                    addedAt: Date.now(),
-                    queue: { connect: { id: queue.id } }
-                }
             });
-            this.cache.del(`queue_${channelId}_${priority}`);
+            this.invalidateCache(channelId, priority);
         } catch (error) {
-            this.logger.error('Error adding track to queue:', error);
+            logger.error('Error adding track to queue:', error);
             throw new Error('Failed to add track to queue');
         }
     }
 
-    /**
-     * Retrieves the next track from the queue for a given channel.
-     * @param {string} channelId - The ID of the channel.
-     * @returns {Promise<Track | null>} The next track or null if the queue is empty.
-     */
-    public async getTrack(channelId: string): Promise<Track | null> {
+    public async getTrack(channelId: string | null): Promise<Track | null> {
         try {
-            const queue = await this.prisma.queue.findFirst({
-                where: { channelId },
-                include: { tracks: { take: 1 } }
+            const result = await this.prisma.$transaction(async (prisma) => {
+                const nextTrack = await prisma.tracks.findFirst({
+                    where: { Queue: { channelId: channelId ?? '' } },
+                    orderBy: { id: 'asc' }
+                });
+                if (!nextTrack) return null;
+                
+                await prisma.tracks.delete({ where: { id: nextTrack.id } });
+                return nextTrack;
             });
-            if (!queue || queue.tracks.length === 0) {
-                return null;
-            }
-            const nextTrack = queue.tracks[0];
-            await this.prisma.tracks.delete({ where: { id: nextTrack.id } });
-            this.cache.del(`queue_${channelId}_false`);
-            this.cache.del(`queue_${channelId}_true`);
-            return this.mapPrismaTrackToTrack(nextTrack);
+
+            if (!result) return null;
+
+            this.invalidateCache(channelId);
+            return TrackSchema.parse(this.mapPrismaTrackToTrack(result));
         } catch (error) {
-            this.logger.error('Error getting next track:', error);
+            logger.error('Error getting next track:', error);
             throw new Error('Failed to get next track');
         }
     }
 
-    /**
-     * Retrieves the queue for a given channel.
-     * @param {string} channelId - The ID of the channel.
-     * @param {boolean} [priority=false] - Whether to get the priority queue.
-     * @returns {Promise<{ tracks: Track[], lastTrackId?: number, waveStatus: boolean, volume?: number }>}
-     */
-    public async getQueue(channelId: string, priority: boolean = false): Promise<{ tracks: Track[], lastTrackId?: number, waveStatus: boolean, volume?: number }> {
-        const cacheKey = `queue_${channelId}_${priority}`;
-        const cachedQueue = this.cache.get(cacheKey);
-        if (cachedQueue) {
-          return cachedQueue as { tracks: Track[], lastTrackId?: number, waveStatus: boolean, volume?: number };
+    public async setGuildChannelId(guildId: string, channelId: string | null, priority: boolean = false): Promise<void> {
+        try {
+          await this.prisma.queue.upsert({
+            where: { channelId_priority: { channelId: channelId ?? '', priority } },
+            update: { channelId: channelId ?? '' },
+            create: { guildId: guildId, channelId: channelId ?? '', priority}
+          });
+      
+          this.invalidateCache(guildId);
+        } catch (error) {
+          logger.error('Error setting channel ID for guild:', error);
+          throw new Error('Failed to set channel ID');
         }
-    
-        const queue = await this.prisma.queue.findFirst({
-          where: { channelId, priority },
-          include: { tracks: true }
-        });
-        if (!queue) {
-          return { tracks: [], waveStatus: false };
-        }
-        const result = {
-          tracks: queue.tracks.map(this.mapPrismaTrackToTrack),
-          lastTrackId: queue.lastTrackId ?? undefined,
-          waveStatus: queue.waveStatus,
-          volume: queue.volume ?? undefined
-        };
-        this.cache.set(cacheKey, result);
-        return result;
     }
 
-    /**
-     * Sets the last played track ID for a given channel's queue.
-     * @param {string} channelId - The ID of the channel.
-     * @param {number} trackId - The ID of the last played track.
-     * @returns {Promise<void>}
-     */
-    public async setLastTrackID(channelId: string, trackId: number): Promise<void> {
+    public async getGuildChannelId(guildId: string): Promise<{ guildId: string; channelId: string | null }> {
+        try {
+          const result = await this.prisma.queue.findUnique({
+            where: { guildId },
+            select: { channelId: true }
+          });
+      
+          if (!result) {
+            return { guildId, channelId: null };
+          }
+      
+          return { guildId, channelId: result.channelId };
+        } catch (error) {
+          logger.error('Error getting channel ID for guild:', error);
+          throw new Error('Failed to get channel ID');
+        }
+    }
+
+    public async getQueue(channelId: string, priority: boolean = false): Promise<QueueResult> {
+        const cacheKey = `queue_${channelId}_${priority}`;
+        const cachedQueue = this.cache.get<QueueResult>(cacheKey);
+        if (cachedQueue) return cachedQueue;
+    
+        try {
+            const queue = await this.prisma.queue.findUnique({
+                where: {
+                    channelId_priority: { channelId, priority },
+                },
+                include: { tracks: { orderBy: { id: `asc` } } }
+            });
+            const result: QueueResult = queue
+                ? {
+                    tracks: queue.tracks.map(this.mapPrismaTrackToTrack),
+                    lastTrackId: queue.lastTrackId ?? undefined,
+                    waveStatus: queue.waveStatus ?? undefined,
+                    volume: queue.volume ?? undefined
+                }
+                : { tracks: [], waveStatus: false, lastTrackId: undefined, volume: undefined };
+            
+            this.cache.set(cacheKey, result);
+            return result;
+        } catch (error) {
+            logger.error('Error getting queue:', error);
+            throw new Error('Failed to get queue');
+        }
+    }
+
+    public async setLastTrackID(channelId: string, trackId: string | undefined): Promise<void> {
         await this.prisma.queue.updateMany({
             where: { channelId },
             data: { lastTrackId: trackId }
         });
-        this.cache.del(`queue_${channelId}_false`);
-        this.cache.del(`queue_${channelId}_true`);
+        this.invalidateCache(channelId);
     }
 
-    /**
-     * Retrieves the last played track ID for a given channel's queue.
-     * @param {string} channelId - The ID of the channel.
-     * @returns {Promise<number | null>}
-     */
-    public async getLastTrackID(channelId: string): Promise<number | null> {
+    public async getLastTrackID(channelId: string): Promise<string | null> {
         const queue = await this.prisma.queue.findFirst({ where: { channelId } });
         return queue?.lastTrackId ?? null;
     }
 
-    /**
-     * Clears the track queue for a given channel.
-     * @param {string} channelId - The ID of the channel.
-     * @param {boolean} [priority=false] - Whether to clear the priority queue.
-     * @returns {Promise<void>}
-     */
     public async clearQueue(channelId: string, priority: boolean = false): Promise<void> {
-        const queue = await this.prisma.queue.findFirst({ where: { channelId, priority } });
-        if (queue) {
-            await this.prisma.tracks.deleteMany({
-                where: { queueId: queue.id }
-            });
-        }
-        this.cache.del(`queue_${channelId}_${priority}`);
+        await this.prisma.queue.update({
+            where: {
+                channelId_priority: { channelId, priority },
+            },
+            data: { tracks: { deleteMany: {} }, lastTrackId: null }
+        });
+        this.invalidateCache(channelId, priority);
     }
 
-    /**
-     * Retrieves the wave status for a given channel.
-     * @param {string} channelId - The ID of the channel.
-     * @returns {Promise<boolean>} The wave status.
-     */
     public async getWaveStatus(channelId: string): Promise<boolean> {
-        try {
-            const queue = await this.prisma.queue.findFirst({ where: { channelId } });
-            return queue?.waveStatus ?? false;
-        } catch (error) {
-            this.logger.error('Error getting wave status:', error);
-            throw new Error('Failed to get wave status');
-        }
+        const queue = await this.prisma.queue.findFirst({ where: { channelId } });
+        return queue?.waveStatus ?? false;
     }
 
-    /**
-     * Sets the wave status for a given channel.
-     * @param {string} channelId - The ID of the channel.
-     * @param {boolean} status - The wave status to set.
-     * @returns {Promise<void>}
-     */
     public async setWaveStatus(channelId: string, status: boolean): Promise<void> {
-        try {
-            await this.prisma.queue.updateMany({
-                where: { channelId },
-                data: { waveStatus: status }
-            });
-            this.cache.del(`queue_${channelId}_false`);
-            this.cache.del(`queue_${channelId}_true`);
-        } catch (error) {
-            this.logger.error('Error setting wave status:', error);
-            throw new Error('Failed to set wave status');
-        }
+        await this.prisma.queue.updateMany({
+            where: { channelId },
+            data: { waveStatus: status }
+        });
+        this.invalidateCache(channelId);
     }
 
-    /**
-     * Counts the number of tracks in the queue for a given channel.
-     * @param {string} channelId - The ID of the channel.
-     * @param {boolean} [priority=false] - Whether to count tracks in the priority queue.
-     * @returns {Promise<number>} The number of tracks in the queue.
-     */
     public async countMusicTracks(channelId: string, priority: boolean = false): Promise<number> {
-        try {
-            const queue = await this.prisma.queue.findFirst({
-                where: { channelId, priority },
-                include: { _count: { select: { tracks: true } } }
-            });
-            return queue?._count.tracks ?? 0;
-        } catch (error) {
-            this.logger.error('Error counting music tracks:', error);
-            throw new Error('Failed to count music tracks');
-        }
+        const result = await this.prisma.tracks.count({
+            where: { Queue: { channelId, priority } }
+        });
+        return result;
     }
 
-    /**
-     * Clears all tracks from the queue for a given channel.
-     * @param {string} channelId - The ID of the channel.
-     * @param {boolean} [priority=false] - Whether to clear the priority queue.
-     * @returns {Promise<void>}
-     */
-    public async clearTracksQueue(channelId: string, priority: boolean = false): Promise<void> {
-        try {
-            const queue = await this.prisma.queue.findFirst({ where: { channelId, priority } });
-            if (queue) {
-                await this.prisma.tracks.deleteMany({
-                    where: { queueId: queue.id }
-                });
-                await this.prisma.queue.update({
-                    where: { id: queue.id },
-                    data: { lastTrackId: null }
-                });
+    public async removeTrack(channelId: string, trackId: string): Promise<void> {
+        await this.prisma.$transaction(async (prisma) => {
+            const track = await prisma.tracks.findFirst({
+                where: { trackId, Queue: { channelId } }
+            });
+            if (track) {
+                await prisma.tracks.delete({ where: { id: track.id } });
             }
-            this.cache.del(`queue_${channelId}_${priority}`);
-            this.logger.info(`Cleared tracks queue for channel ${channelId}, priority: ${priority}`);
+        });
+        this.invalidateCache(channelId);
+    }
+
+    public async addMultipleTracks(channelId: string, tracks: Omit<Track, 'id'>[], priority: boolean = false): Promise<void> {
+        try {
+            const validatedTracks = tracks.map(track => TrackSchema.parse(track));
+            await this.prisma.$transaction(async (prisma) => {
+                await prisma.tracks.createMany({
+                    data: validatedTracks.map(track => ({
+                        ...track,
+                        addedAt: BigInt(Date.now()),
+                        Queue: {
+                            connectOrCreate: {
+                                where: { channelId_priority: { channelId, priority } },
+                                create: { channelId, priority }
+                            }
+                        },
+                        queueId: 1
+                    }))
+                });
+            });
+            this.invalidateCache(channelId, priority);
         } catch (error) {
-            this.logger.error('Error clearing tracks queue:', error);
-            throw new Error('Failed to clear tracks queue');
+            logger.error('Error adding multiple tracks to queue:', error);
+            throw new Error('Failed to add multiple tracks to queue');
         }
     }
 
     private mapPrismaTrackToTrack(prismaTrack: Tracks): Track {
-        return {
+        return TrackSchema.parse({
             trackId: prismaTrack.trackId,
-            addedAt: prismaTrack.addedAt ?? undefined,
+            addedAt: prismaTrack.addedAt,
             info: prismaTrack.info,
             url: prismaTrack.url,
-        };
+            source: prismaTrack.source
+        });
+    }
+
+    private invalidateCache(channelId: string | null, priority?: boolean): void {
+        this.cache.del(`queue_${channelId}_${priority}`);
+        if (priority === undefined) {
+            this.cache.del(`queue_${channelId}_true`);
+            this.cache.del(`queue_${channelId}_false`);
+        }
     }
 }

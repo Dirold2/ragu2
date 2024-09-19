@@ -3,7 +3,8 @@ import {
     Message,
     DiscordAPIError,
     InteractionResponse,
-    CacheType
+    CacheType,
+    AutocompleteInteraction
 } from "discord.js";
 import { Logger } from 'winston';
 import logger from '../utils/logger.js';
@@ -23,24 +24,26 @@ export class CommandService {
      * @returns {Promise<InteractionResponse<boolean> | Message<boolean> | void>}
      */
     public async send(
-        interaction: CommandInteraction<CacheType>,
+        interaction: CommandInteraction<CacheType> | AutocompleteInteraction<CacheType>,
         message: string,
         ephemeral: boolean = true
     ): Promise<InteractionResponse<boolean> | Message<boolean> | void> {
         if (!interaction.isRepliable()) {
-            this.logger.error(`Error: Interaction is not repliable. Interaction ID: ${interaction.id}`);
             return;
         }
 
         try {
             if (interaction.replied || interaction.deferred) {
                 this.logger.debug(`Editing reply for interaction ID: ${interaction.id}`);
-                return await interaction.editReply({ content: message });
+                return interaction.editReply({ content: message });
             } else {
                 this.logger.debug(`Sending new reply for interaction ID: ${interaction.id}`);
-                return await interaction.reply({ content: message, ephemeral });
+                return interaction.reply({ content: message, ephemeral });
             }
         } catch (error) {
+            if (!interaction.replied && !interaction.deferred) {
+                return interaction.editReply(message);
+            }
             this.handleInteractionError(error, interaction);
         }
     }

@@ -20,7 +20,7 @@ export class ResumeCommand {
 
         const channelId = member.voice.channel.id;
 
-        await this.queueService.clearTracksQueue(channelId)
+        await this.queueService.clearQueue(channelId)
         await this.commandService.send(interaction, 'Очередь успешно очищена');
     }
 }
