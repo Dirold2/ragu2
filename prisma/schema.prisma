@@ -10,7 +10,7 @@ datasource db {
 model Queue {
   id          Int      @id @default(autoincrement())
   channelId   String
-  guildId     String   @unique @default("")
+  guildId     String   @default("")
   priority    Boolean
   lastTrackId String?
   waveStatus  Boolean?

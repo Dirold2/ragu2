@@ -1,6 +1,6 @@
 {
   "name": "ragu2",
-  "version": "0.0.7",
+  "version": "0.0.7.3",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -13,7 +13,13 @@
     "lint:fix": "eslint . .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "echo \"No tests specified\" && exit 0",
-    "prepare": "husky install"
+    "prepare": "husky install",
+
+    "pm2:start": "pm2 start build/main.js --name ragu2",
+    "pm2:restart": "pm2 restart ragu2",
+    "pm2:stop": "pm2 stop ragu2",
+    "pm2:delete": "pm2 delete ragu2",
+    "pm2:list": "pm2 list"
   },
   "dependencies": {
     "@distube/ytdl-core": "^4.14.4",

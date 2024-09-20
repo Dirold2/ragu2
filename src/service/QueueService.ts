@@ -38,20 +38,45 @@ export class QueueService {
     ): Promise<void> {
         try {
             const validatedTrack = TrackSchema.parse(track);
+            
             await this.prisma.$transaction(async (prisma) => {
-                await prisma.tracks.create({
-                    data: {
-                        ...validatedTrack,
-                        addedAt: BigInt(Date.now()),
-                        Queue: {
-                            connectOrCreate: {
-                                where: { channelId_priority: { channelId: channelId ?? '', priority } },
-                                create: { channelId: channelId ?? '', guildId: guildId ?? '', priority }
+                // Сначала проверяем, существует ли уже запись для этого сервера
+                const existingTrack = await prisma.tracks.findFirst({
+                    where: { Queue: { guildId: guildId ?? `` } }
+                });
+    
+                if (existingTrack) {
+                    // Если запись существует, обновляем её
+                    await prisma.tracks.update({
+                        where: { id: existingTrack.id },
+                        data: {
+                            ...validatedTrack,
+                            addedAt: BigInt(Date.now()),
+                            Queue: {
+                                connectOrCreate: {
+                                    where: { channelId_priority: { channelId: channelId ?? '', priority } },
+                                    create: { channelId: channelId ?? '', guildId: guildId ?? '', priority }
+                                }
                             }
                         }
-                    }
-                });
+                    });
+                } else {
+                    // Если записи нет, создаем новую
+                    await prisma.tracks.create({
+                        data: {
+                            ...validatedTrack,
+                            addedAt: BigInt(Date.now()),
+                            Queue: {
+                                connectOrCreate: {
+                                    where: { channelId_priority: { channelId: channelId ?? '', priority } },
+                                    create: { channelId: channelId ?? '', guildId: guildId ?? '', priority }
+                                }
+                            }
+                        }
+                    });
+                }
             });
+    
             this.invalidateCache(channelId, priority);
         } catch (error) {
             logger.error('Error adding track to queue:', error);
@@ -94,24 +119,6 @@ export class QueueService {
         } catch (error) {
           logger.error('Error setting channel ID for guild:', error);
           throw new Error('Failed to set channel ID');
-        }
-    }
-
-    public async getGuildChannelId(guildId: string): Promise<{ guildId: string; channelId: string | null }> {
-        try {
-          const result = await this.prisma.queue.findUnique({
-            where: { guildId },
-            select: { channelId: true }
-          });
-      
-          if (!result) {
-            return { guildId, channelId: null };
-          }
-      
-          return { guildId, channelId: result.channelId };
-        } catch (error) {
-          logger.error('Error getting channel ID for guild:', error);
-          throw new Error('Failed to get channel ID');
         }
     }
 
