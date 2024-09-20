@@ -51,6 +51,9 @@ export class PlayCommands {
     }
 
     private async handleAutocompleteInteraction(interaction: AutocompleteInteraction, trackName: string, cacheKey: string) {
+        if (!(interaction instanceof AutocompleteInteraction)) {
+            logger.error('Invalid interaction type');
+        }
         if (this.debounceTimers.has(cacheKey)) {
             clearTimeout(this.debounceTimers.get(cacheKey)!);
         }

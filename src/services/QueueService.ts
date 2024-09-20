@@ -36,9 +36,9 @@ export class QueueService {
             
             await this.prisma.$transaction(async (prisma) => {
                 const existingTrack = await prisma.tracks.findFirst({
-                    where: { Queue: { guildId: guildId ?? `` } }
+                    where: { trackId: track.trackId }
                 });
-    
+
                 if (existingTrack) {
                     await prisma.tracks.update({
                         where: { id: existingTrack.id },
@@ -81,7 +81,7 @@ export class QueueService {
             const result = await this.prisma.$transaction(async (prisma) => {
                 const nextTrack = await prisma.tracks.findFirst({
                     where: { Queue: { channelId: channelId ?? '' } },
-                    orderBy: { id: 'asc' }
+                    orderBy: { id: 'desc' }
                 });
                 if (!nextTrack) return null;
                 
@@ -103,7 +103,7 @@ export class QueueService {
         try {
             const nextTrack = await this.prisma.tracks.findFirst({
                 where: { Queue: { channelId: channelId ?? '' } },
-                orderBy: { id: 'asc' }
+                orderBy: { id: 'desc' }
             });
 
             if (!nextTrack) return null;

@@ -45,7 +45,8 @@ export class PlayerService {
             await this.preloadNextTrack();
         } else {
             await this.queueService.setTrack(this.channelId, this.guildId, track);
-            logger.verbose(`Track added to queue: ${track.info}`);
+            logger.debug(`Track added to queue: ${track.info}`);
+            if (await this.queueService.countMusicTracks(this.channelId!) === 1) await this.preloadNextSaveTrack();
         }
     }
 
@@ -62,6 +63,17 @@ export class PlayerService {
         });
         resource.volume?.setVolumeLogarithmic(this.volume / 100);
         return resource;
+    }
+
+    private async preloadNextSaveTrack(): Promise<void> {
+        this.nextTrack = await this.queueService.getNextTrack(this.channelId);
+        if (this.nextTrack) {
+            this.nextResource = this.createAudioResource(this.nextTrack);
+            logger.verbose(`Preloaded next track: ${this.nextTrack.info}`);
+        } else {
+            this.nextResource = null;
+            logger.verbose('No next track to preload');
+        }
     }
 
     private async preloadNextTrack(): Promise<void> {
@@ -160,17 +172,19 @@ export class PlayerService {
     }
 
     private ensureConnected(interaction: CommandInteraction): boolean {
-        if (!getVoiceConnection(this.guildId)) {
-            this.commandService.send(interaction, "Bot is not connected to a voice channel.");
+        const connection = getVoiceConnection(this.guildId);
+        if (!connection || connection.state.status !== VoiceConnectionStatus.Ready) {
+            this.commandService.send(interaction, "Bot is not connected to a voice channel or the connection is not ready.");
             return false;
         }
         return true;
     }
 
     private hasVoiceChannelAccess(member: GuildMember): boolean {
-        return member.voice.channel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) ?? false;
+        const permissions = member.voice.channel?.permissionsFor(member);
+        return (permissions?.has(PermissionFlagsBits.Connect) && permissions?.has(PermissionFlagsBits.Speak)) ?? false;
     }
-
+    
     private handleDisconnection(): void {
         this.connection?.on(VoiceConnectionStatus.Disconnected, async () => {
             try {
@@ -207,5 +221,5 @@ export class PlayerService {
             this.currentTrack = null;
             logger.info("Queue is empty, playback stopped.");
         }
-    }
+    }    
 }
