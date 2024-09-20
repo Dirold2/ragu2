@@ -29,7 +29,7 @@ async function reload() {
     await loadFiles(eventsPattern);
 
     await MetadataStorage.instance.build();
-    await bot.initApplicationCommands();
+    await bot.client.initApplicationCommands();
     bot.initEvents();
 
     logger.info("> Reload success\n");
@@ -48,7 +48,7 @@ async function run() {
         throw Error("Could not find BOT_TOKEN in your environment");
     }
 
-    await bot.login(process.env.BOT_TOKEN);
+    await bot.start(process.env.BOT_TOKEN);
 
     if (process.env.NODE_ENV !== "production") {
         logger.info(

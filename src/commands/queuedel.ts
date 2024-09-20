@@ -1,12 +1,9 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { QueueService, CommandService } from "../service/index.js";
+import { bot } from "../bot.js";
 
 @Discord()
-export class ResumeCommand {
-    private readonly queueService = new QueueService();
-    private readonly commandService = new CommandService();
-
+export class QueueDelCommand {
     @Slash({ description: "Очистить очередь", name: "queuedel" })
     async queuedel(interaction: CommandInteraction): Promise<void> {
         await interaction.deferReply({ ephemeral: true });
@@ -14,13 +11,13 @@ export class ResumeCommand {
         const member = interaction.member as GuildMember;
 
         if (!member.voice.channel) {
-            await this.commandService.send(interaction, "Вы должны находиться в голосовом канале!");
+            await bot.commandService.send(interaction, "Вы должны находиться в голосовом канале!");
             return;
         }
 
         const channelId = member.voice.channel.id;
 
-        await this.queueService.clearQueue(channelId)
-        await this.commandService.send(interaction, 'Очередь успешно очищена');
+        await bot.queueService.clearQueue(channelId);
+        await bot.commandService.send(interaction, 'Очередь успешно очищена');
     }
 }

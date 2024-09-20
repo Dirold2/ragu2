@@ -1,11 +1,9 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { CommandService, QueueService } from "../service/index.js";
+import { bot } from "../bot.js";
 
 @Discord()
 export class WaveCommand {
-    private readonly commandService = new CommandService();
-    private readonly queueService = new QueueService();
     private waveEnabled = false;
 
     @Slash({ description: "Моя волна", name: "wave" })
@@ -17,9 +15,9 @@ export class WaveCommand {
         this.waveEnabled = !this.waveEnabled;
         const waveStatus = this.waveEnabled ? "Моя волна включена" : "Моя волна выключена";
 
-        await this.commandService.send(interaction, `${waveStatus}.`);
+        await bot.commandService.send(interaction, `${waveStatus}.`);
 
         // Сохранение текущего статуса волны в базу данных
-        await this.queueService.setWaveStatus(voiceChannelId, this.waveEnabled);
+        await bot.queueService.setWaveStatus(voiceChannelId, this.waveEnabled);
     }
 }

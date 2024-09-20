@@ -12,14 +12,14 @@ const TrackSchema = z.object({
     waveStatus: z.boolean().optional()
 });
 
+type Track = z.infer<typeof TrackSchema>;
+
 interface QueueResult {
     tracks: Track[];
     lastTrackId?: string;
     waveStatus?: boolean;
     volume?: number;
 }
-
-type Track = z.infer<typeof TrackSchema>;
 
 export class QueueService {
     private prisma: PrismaClient;
@@ -30,23 +30,16 @@ export class QueueService {
         this.cache = new NodeCache({ stdTTL: 600 });
     }
 
-    public async setTrack(
-        channelId: string | null, 
-        guildId: string | null = '',
-        track: Omit<Track, 'id'>,
-        priority: boolean = false
-    ): Promise<void> {
+    public async setTrack(channelId: string | null, guildId: string | null = '', track: Omit<Track, 'id'>, priority: boolean = false): Promise<void> {
         try {
             const validatedTrack = TrackSchema.parse(track);
             
             await this.prisma.$transaction(async (prisma) => {
-                // Сначала проверяем, существует ли уже запись для этого сервера
                 const existingTrack = await prisma.tracks.findFirst({
                     where: { Queue: { guildId: guildId ?? `` } }
                 });
     
                 if (existingTrack) {
-                    // Если запись существует, обновляем её
                     await prisma.tracks.update({
                         where: { id: existingTrack.id },
                         data: {
@@ -61,7 +54,6 @@ export class QueueService {
                         }
                     });
                 } else {
-                    // Если записи нет, создаем новую
                     await prisma.tracks.create({
                         data: {
                             ...validatedTrack,
@@ -101,6 +93,22 @@ export class QueueService {
 
             this.invalidateCache(channelId);
             return TrackSchema.parse(this.mapPrismaTrackToTrack(result));
+        } catch (error) {
+            logger.error('Error getting next track:', error);
+            throw new Error('Failed to get next track');
+        }
+    }
+
+    public async getNextTrack(channelId: string | null): Promise<Track | null> {
+        try {
+            const nextTrack = await this.prisma.tracks.findFirst({
+                where: { Queue: { channelId: channelId ?? '' } },
+                orderBy: { id: 'asc' }
+            });
+
+            if (!nextTrack) return null;
+
+            return TrackSchema.parse(this.mapPrismaTrackToTrack(nextTrack));
         } catch (error) {
             logger.error('Error getting next track:', error);
             throw new Error('Failed to get next track');

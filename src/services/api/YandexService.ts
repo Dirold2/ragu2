@@ -1,5 +1,5 @@
 import NodeCache from "node-cache";
-import logger from "../../utils/logger.js";
+import { logger } from "../../utils/index.js";
 import retry from 'async-retry';
 import { Types, WrappedYMApi, YMApi } from "ym-api-meowed";
 import { z } from "zod";
@@ -22,7 +22,7 @@ type Config = z.infer<typeof ConfigSchema>;
 type SearchTrackResult = z.infer<typeof SearchTrackResultSchema>;
 
 @Discord()
-class YandexService {
+export class YandexService {
     private results?: SearchTrackResult[];
     private wrapper = new WrappedYMApi();
     private api = new YMApi();
@@ -34,7 +34,7 @@ class YandexService {
     }
 
     async searchName(trackName: string): Promise<SearchTrackResult[]> {
-        this.init();
+        await this.init();
 
         const cacheKey = `search_${trackName}`;
         const cachedResult = this.cache.get<SearchTrackResult[]>(cacheKey);
@@ -50,7 +50,7 @@ class YandexService {
     }
 
     async getTrackUrl(trackId?: string): Promise<string> {
-        this.init();
+        await this.init();
 
         if (!trackId) {
             logger.error("Error getting track URL: trackId is undefined");
@@ -122,5 +122,3 @@ class YandexService {
         }
     }
 }
-
-export { YandexService }

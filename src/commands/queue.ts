@@ -1,7 +1,6 @@
 import { CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash } from "discordx";
-import { QueueService, CommandService } from "../service/index.js";
-import { Logger } from "winston";
+import { bot } from "../bot.js";
 import logger from '../utils/logger.js';
 
 interface Track {
@@ -14,16 +13,6 @@ interface Track {
 
 @Discord()
 export class QueueCommand {
-    private readonly queueService: QueueService;
-    private readonly commandService: CommandService;
-    private readonly logger: Logger;
-
-    constructor() {
-        this.queueService = new QueueService();
-        this.commandService = new CommandService();
-        this.logger = logger;
-    }
-
     @Slash({ description: "View the current queue", name: "queue" })
     public async queue(interaction: CommandInteraction): Promise<void> {
         await interaction.deferReply({ ephemeral: true });
@@ -38,24 +27,24 @@ export class QueueCommand {
     private async handleQueueCommand(interaction: CommandInteraction): Promise<void> {
         const channelId = this.getVoiceChannelId(interaction);
         if (!channelId) {
-            await this.commandService.send(interaction, "You must be in a voice channel to use this command.");
+            await bot.commandService.send(interaction, "You must be in a voice channel to use this command.");
             return;
         }
 
-        const queue = await this.queueService.getQueue(channelId);
+        const queue = await bot.queueService.getQueue(channelId);
         if (queue.tracks.length === 0) {
-            await this.commandService.send(interaction, "The queue is empty.");
+            await bot.commandService.send(interaction, "The queue is empty.");
             return;
         }
 
         const queueString = this.formatQueueString(queue.tracks);
-        await this.commandService.send(interaction, `Current queue:\n${queueString}`);
+        await bot.commandService.send(interaction, `Current queue:\n${queueString}`);
     }
 
     private getVoiceChannelId(interaction: CommandInteraction): string | null {
         const member = interaction.member;
         if (!(member instanceof GuildMember)) {
-            this.logger.warn("Interaction member is not a GuildMember");
+            logger.warn("Interaction member is not a GuildMember");
             return null;
         }
         return member.voice.channelId;
@@ -72,7 +61,7 @@ export class QueueCommand {
             ? `An error occurred while fetching the queue: ${error.name}: ${error.message}`
             : "An unexpected error occurred while fetching the queue.";
 
-        this.logger.error("Queue command error:", error);
-        await this.commandService.send(interaction, errorMsg);
+        logger.error("Queue command error:", error);
+        await bot.commandService.send(interaction, errorMsg);
     }
 }

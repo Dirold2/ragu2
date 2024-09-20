@@ -1,38 +1,74 @@
-import type { Interaction, Message } from "discord.js";
-import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
+import { IntentsBitField, Interaction, Message } from "discord.js";
+import { NameService, QueueService, PlayerService, CommandService, YandexService, YouTubeService } from "./services/index.js";
+import logger from "./utils/logger.js";
 
-import logger from './utils/logger.js';
+class Bot {
+    public client: Client;
+    public nameService: NameService;
+    public queueService: QueueService;
+    public playerService: PlayerService;
+    public commandService: CommandService;
 
-export const bot = new Client({
+    constructor() {
+        this.client = new Client({
+            intents: [
+                IntentsBitField.Flags.Guilds,
+                IntentsBitField.Flags.GuildMembers,
+                IntentsBitField.Flags.GuildMessages,
+                IntentsBitField.Flags.GuildMessageReactions,
+                IntentsBitField.Flags.GuildVoiceStates,
+                IntentsBitField.Flags.MessageContent,
+            ],
+            silent: false,
+            simpleCommand: {
+                prefix: "!",
+            },
+        });
 
-  intents: [
-    IntentsBitField.Flags.Guilds,
-    IntentsBitField.Flags.GuildMembers,
-    IntentsBitField.Flags.GuildMessages,
-    IntentsBitField.Flags.GuildMessageReactions,
-    IntentsBitField.Flags.GuildVoiceStates,
-    IntentsBitField.Flags.MessageContent,
-  ],
+        this.initializeServices();
+        this.setupEventListeners();
+    }
 
-  silent: false,
+    private initializeServices(): void {
+        this.commandService = new CommandService();
+        this.queueService = new QueueService();
+        this.playerService = new PlayerService(this.queueService, this.commandService);
+        const yandexService = new YandexService();
+        const youtubeService = new YouTubeService();
+        this.nameService = new NameService(yandexService, youtubeService, this.queueService, this.playerService);
+    }
 
-  simpleCommand: {
-    prefix: "!",
-  },
-});
+    private setupEventListeners(): void {
+        this.client.once("ready", () => {
+            void this.client.initApplicationCommands();
+            logger.info("Bot started");
+        });
 
-bot.once("ready", () => {
+        this.client.on("interactionCreate", (interaction: Interaction) => {
+            this.client.executeInteraction(interaction);
+        });
 
-  void bot.initApplicationCommands();
+        this.client.on("messageCreate", (message: Message) => {
+            void this.client.executeCommand(message);
+        });
+    }
 
-  logger.info("Bot started");
-});
+    public async start(token: string): Promise<void> {
+        try {
+            await this.client.login(token);
+        } catch (error) {
+            logger.error("Failed to start the bot:", error);
+        }
+    }
 
-bot.on("interactionCreate", (interaction: Interaction) => {
-  bot.executeInteraction(interaction);
-});
+    public removeEvents(): void {
+        this.client.removeAllListeners();
+    }
 
-bot.on("messageCreate", (message: Message) => {
-  void bot.executeCommand(message);
-});
+    public initEvents(): void {
+        this.setupEventListeners();
+    }
+}
+
+export const bot = new Bot();

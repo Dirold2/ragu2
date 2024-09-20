@@ -52,7 +52,6 @@ const createLogger = () => {
         }));
     }
 
-    // Обработка необработанных исключений и отклонений
     logger.exceptions.handle(
         new winston.transports.File({ filename: 'logs/exceptions.log' })
     );

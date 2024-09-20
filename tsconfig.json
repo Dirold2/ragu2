@@ -27,7 +27,7 @@
       "*": ["node_modules/*", "src/types/*"],
       "@utils/*": ["src/utils/*"],
       "@api/*": ["src/api/*"],
-      "@service/*": ["src/service/*"]
+      "@service/*": ["src/services/*"]
     }
   },
   "include": ["src/**/*"],

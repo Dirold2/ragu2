@@ -1,6 +1,6 @@
 import { Discord, Slash, SlashOption } from "discordx";
 import { ApplicationCommandOptionType, TextChannel, AutocompleteInteraction, CommandInteraction } from "discord.js";
-import { CommandService, NameService } from "../service/index.js";
+import { bot } from "../bot.js";
 import logger from '../utils/logger.js';
 
 interface SearchResultItem {
@@ -16,10 +16,6 @@ interface SearchableTrack extends SearchResultItem {
 
 @Discord()
 export class PlayCommands {
-    private readonly nameService: NameService = new NameService();
-    private readonly commandService: CommandService = new CommandService();
-    private readonly logger = logger;
-
     private searchCache: Map<string, SearchableTrack[]> = new Map();
     private debounceTimers: Map<string, NodeJS.Timeout> = new Map();
 
@@ -35,14 +31,23 @@ export class PlayCommands {
         trackName: string,
         interaction: CommandInteraction | AutocompleteInteraction
     ): Promise<void> {
-        const cacheKey = trackName.toLowerCase();
+        const trimmedTrackName = trackName.trim();
         
-        if (interaction instanceof AutocompleteInteraction) {
-            this.handleAutocompleteInteraction(interaction, trackName, cacheKey);
+        if (!trimmedTrackName) {
+            if (interaction instanceof CommandInteraction) {
+                await this.safeReply(interaction, "Please provide a valid track name.");
+            }
             return;
         }
 
-        this.handleCommandInteraction(interaction, trackName, cacheKey);
+        const cacheKey = trimmedTrackName.toLowerCase();
+        
+        if (interaction instanceof AutocompleteInteraction) {
+            await this.handleAutocompleteInteraction(interaction, trimmedTrackName, cacheKey);
+            return;
+        }
+
+        await this.handleCommandInteraction(interaction, trimmedTrackName, cacheKey);
     }
 
     private async handleAutocompleteInteraction(interaction: AutocompleteInteraction, trackName: string, cacheKey: string) {
@@ -55,29 +60,30 @@ export class PlayCommands {
                 const searchResults = await this.getSearchResults(cacheKey, trackName);
                 await this.respondToAutocomplete(interaction, searchResults, trackName);
             } catch (error) {
-                this.logger.error('Error in autocomplete:', error);
-                await this.commandService.send(interaction, "An error occurred while processing your request.");
+                logger.error('Error in autocomplete:', error);
             }
         }, 300));
     }
 
     private async handleCommandInteraction(interaction: CommandInteraction, trackName: string, cacheKey: string) {
         try {
+            await interaction.deferReply({ ephemeral: true });
+
             const searchResults = await this.getSearchResults(cacheKey, trackName);
             if (!searchResults.length) {
-                await this.commandService.send(interaction, "Track not found!");
+                await this.safeReply(interaction, `No tracks found for "${trackName}". Please try a different search term.`);
                 return;
             }
 
             const firstTrack = searchResults[0];
             if (interaction.channel instanceof TextChannel) {
-                await this.nameService.processTrackSelection(firstTrack, interaction);
+                await bot.nameService.processTrackSelection(firstTrack, interaction);
             } else {
-                await this.commandService.send(interaction, "Error: This action cannot be performed in this type of channel.");
+                await this.safeReply(interaction, "Error: This action can only be performed in a text channel.");
             }
         } catch (error) {
-            this.logger.error('Error in play command:', error);
-            await this.commandService.send(interaction, "An error occurred while processing your request.");
+            logger.error('Error in play command:', error);
+            await this.safeReply(interaction, "An error occurred while processing your request. Please try again later.");
         }
     }
 
@@ -85,24 +91,40 @@ export class PlayCommands {
         if (this.searchCache.has(cacheKey)) {
             return this.searchCache.get(cacheKey)!;
         }
-        const searchResults = await this.nameService.searchName(trackName);
+        const searchResults = await bot.nameService.searchName(trackName);
         this.searchCache.set(cacheKey, searchResults);
+        setTimeout(() => this.searchCache.delete(cacheKey), 5 * 60 * 1000); // Clear cache after 5 minutes
         return searchResults;
     }
 
     private async respondToAutocomplete(interaction: AutocompleteInteraction, searchResults: SearchableTrack[], trackName: string) {
         const filtered = searchResults
             .filter(track => track.title.toLowerCase().includes(trackName.toLowerCase()))
+            .slice(0, 25) // Limit to 25 results
             .map(track => {
                 const truncatedArtists = track.artists.map(artist => artist.name).slice(0, 3).join(', ');
                 const truncatedTitle = track.title.slice(0, 50); // Limit title length
                 
                 return {
-                    name: truncatedArtists + ' - ' + truncatedTitle,
-                    value: truncatedArtists + ' - ' + truncatedTitle
+                    name: `${truncatedArtists} - ${truncatedTitle}`,
+                    value: `${truncatedArtists} - ${truncatedTitle}`
                 };
             });
     
-        await interaction.respond(filtered);
+        await interaction.respond(filtered).catch(error => {
+            logger.error('Error responding to autocomplete:', error);
+        });
+    }
+
+    private async safeReply(interaction: CommandInteraction, content: string) {
+        try {
+            if (interaction.deferred || interaction.replied) {
+                await interaction.editReply(content);
+            } else {
+                await interaction.reply({ content, ephemeral: true });
+            }
+        } catch (error) {
+            logger.error('Error replying to interaction:', error);
+        }
     }
 }

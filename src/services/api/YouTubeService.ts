@@ -1,6 +1,6 @@
 import { Discord } from "discordx";
 import YTMusic from "ytmusic-api";
-import logger from "../../utils/logger.js";
+import { logger } from "../../utils/index.js";
 import { z } from 'zod';
 import ytdl from '@distube/ytdl-core';
 import fs from 'fs';
@@ -16,7 +16,7 @@ const SearchTrackResultSchema = z.object({
 type SearchTrackResult = z.infer<typeof SearchTrackResultSchema>;
 
 @Discord()
-class YouTubeService {
+export class YouTubeService {
     private results?: SearchTrackResult[];
     private ytmusic: YTMusic;
 
@@ -70,5 +70,3 @@ class YouTubeService {
         }
     }
 }
-
-export { YouTubeService };
