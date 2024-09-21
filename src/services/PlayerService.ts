@@ -1,8 +1,8 @@
 import { Discord } from "discordx";
 import { QueueService, CommandService } from "./index.js";
-import { 
-    AudioPlayer, AudioPlayerStatus, createAudioPlayer, createAudioResource, 
-    DiscordGatewayAdapterCreator, entersState, getVoiceConnection, 
+import {
+    AudioPlayer, AudioPlayerStatus, createAudioPlayer, createAudioResource,
+    DiscordGatewayAdapterCreator, entersState, getVoiceConnection,
     joinVoiceChannel, StreamType, VoiceConnection, VoiceConnectionStatus,
     AudioResource
 } from "@discordjs/voice";
@@ -39,14 +39,20 @@ export class PlayerService {
     }
 
     public async playOrQueueTrack(track: Track): Promise<void> {
-        if (!this.currentTrack) {
-            this.currentTrack = track;
-            this.play(track);
-            await this.preloadNextTrack();
-        } else {
-            await this.queueService.setTrack(this.channelId, this.guildId, track);
-            logger.debug(`Track added to queue: ${track.info}`);
-            if (await this.queueService.countMusicTracks(this.channelId!) === 1) await this.preloadNextSaveTrack();
+        try {
+            if (!this.currentTrack) {
+                this.currentTrack = track;
+                this.play(track);
+                await this.loadNextTrack();
+            } else {
+                await this.queueService.setTrack(this.channelId, this.guildId, track);
+                logger.debug(`Track added to queue: ${track.info}`);
+                if (!this.nextTrack) {
+                    await this.loadNextTrack();
+                }
+            }
+        } catch (error) {
+            logger.error(`Failed to play or queue track: ${error.message}`, error);
         }
     }
 
@@ -65,41 +71,39 @@ export class PlayerService {
         return resource;
     }
 
-    private async preloadNextSaveTrack(): Promise<void> {
-        this.nextTrack = await this.queueService.getNextTrack(this.channelId);
-        if (this.nextTrack) {
-            this.nextResource = this.createAudioResource(this.nextTrack);
-            logger.verbose(`Preloaded next track: ${this.nextTrack.info}`);
-        } else {
-            this.nextResource = null;
-            logger.verbose('No next track to preload');
+    private async loadNextTrack(): Promise<void> {
+        try {
+            this.nextTrack = await this.queueService.getTrack(this.channelId);
+            if (this.nextTrack) {
+                this.nextResource = this.createAudioResource(this.nextTrack);
+                logger.verbose(`Loaded next track: ${this.nextTrack.info}`);
+            } else {
+                this.nextResource = null;
+                logger.verbose('No next track to load');
+            }
+        } catch (error) {
+            logger.error(`Failed to load next track: ${error.message}`, error);
         }
     }
 
-    private async preloadNextTrack(): Promise<void> {
-        this.nextTrack = await this.queueService.getTrack(this.channelId);
-        if (this.nextTrack) {
-            this.nextResource = this.createAudioResource(this.nextTrack);
-            logger.verbose(`Preloaded next track: ${this.nextTrack.info}`);
+    private async playNextTrack(): Promise<void> {
+        if (this.nextTrack && this.nextResource) {
+            this.currentTrack = this.nextTrack;
+            this.player?.play(this.nextResource);
+            logger.info(`Playing next track: ${this.currentTrack.info}`);
+            await this.loadNextTrack();
         } else {
+            this.currentTrack = null;
+            this.nextTrack = null;
             this.nextResource = null;
-            logger.verbose('No next track to preload');
+            logger.info("Queue is empty, playback stopped.");
         }
     }
 
     public async skip(interaction: CommandInteraction): Promise<void> {
         if (!this.ensureConnected(interaction)) return;
-
-        if (this.nextTrack && this.nextResource) {
-            this.currentTrack = this.nextTrack;
-            this.player?.play(this.nextResource);
-            await this.commandService.send(interaction, `Skipped to next track: ${this.currentTrack.info}`);
-            await this.preloadNextTrack();
-        } else {
-            this.player?.stop();
-            this.currentTrack = null;
-            await this.commandService.send(interaction, "No more tracks in the queue.");
-        }
+        await this.playNextTrack();
+        await this.commandService.send(interaction, `Skipped to next track: ${this.currentTrack?.info || "No track"}`);
     }
 
     public async togglePause(interaction: CommandInteraction): Promise<void> {
@@ -117,30 +121,37 @@ export class PlayerService {
     }
 
     public setVolume(volume: number): void {
-        this.volume = Math.max(0, Math.min(100, volume));
-        if (this.player?.state.status === AudioPlayerStatus.Playing) {
-            (this.player.state.resource as AudioResource).volume?.setVolume(this.volume / 100);
+        const newVolume = Math.max(0, Math.min(100, volume));
+        if (this.volume !== newVolume) {
+            this.volume = newVolume;
+            if (this.player?.state.status === AudioPlayerStatus.Playing) {
+                (this.player.state.resource as AudioResource).volume?.setVolume(this.volume / 100);
+            }
         }
     }
 
     public async joinChannel(interaction: CommandInteraction): Promise<void> {
-        const member = interaction.member as GuildMember;
-        const voiceChannelId = member.voice.channel?.id;
-        const guildId = interaction.guild?.id;
+        try {
+            const member = interaction.member as GuildMember;
+            const voiceChannelId = member.voice.channel?.id;
+            const guildId = interaction.guild?.id;
 
-        if (!this.hasVoiceChannelAccess(member) || !guildId || !voiceChannelId) {
-            await this.commandService.send(interaction, "No access to voice channel or invalid guild/channel ID.");
-            return;
+            if (!this.hasVoiceChannelAccess(member) || !guildId || !voiceChannelId) {
+                await this.commandService.send(interaction, "No access to voice channel or invalid guild/channel ID.");
+                return;
+            }
+
+            this.channelId = voiceChannelId;
+            this.guildId = guildId;
+
+            this.connection = getVoiceConnection(guildId) || await this.connectToChannel(guildId, voiceChannelId, interaction);
+            const track = await this.queueService.getTrack(voiceChannelId);
+            if (track) await this.playOrQueueTrack(track);
+
+            this.handleDisconnection();
+        } catch (error) {
+            logger.error(`Failed to join voice channel: ${error.message}`, error);
         }
-
-        this.channelId = voiceChannelId;
-        this.guildId = guildId;
-
-        this.connection = getVoiceConnection(guildId) || await this.connectToChannel(guildId, voiceChannelId, interaction);
-        const track = await this.queueService.getTrack(voiceChannelId);
-        if (track) await this.playOrQueueTrack(track);
-
-        this.handleDisconnection();
     }
 
     public leaveChannel(): void {
@@ -158,7 +169,7 @@ export class PlayerService {
             adapterCreator: interaction.guild?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
             selfDeaf: false,
         });
-    
+
         try {
             await entersState(connection, VoiceConnectionStatus.Ready, 30000);
             connection.subscribe(this.player ?? createAudioPlayer());
@@ -184,7 +195,7 @@ export class PlayerService {
         const permissions = member.voice.channel?.permissionsFor(member);
         return (permissions?.has(PermissionFlagsBits.Connect) && permissions?.has(PermissionFlagsBits.Speak)) ?? false;
     }
-    
+
     private handleDisconnection(): void {
         this.connection?.on(VoiceConnectionStatus.Disconnected, async () => {
             try {
@@ -213,13 +224,7 @@ export class PlayerService {
     }
 
     private async handleTrackEnd(): Promise<void> {
-        if (this.nextTrack && this.nextResource) {
-            this.currentTrack = this.nextTrack;
-            this.player?.play(this.nextResource);
-            await this.preloadNextTrack();
-        } else {
-            this.currentTrack = null;
-            logger.info("Queue is empty, playback stopped.");
-        }
-    }    
+        logger.info(`Track ended: ${this.currentTrack?.info}`);
+        await this.playNextTrack();
+    }
 }

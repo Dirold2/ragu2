@@ -3,6 +3,21 @@ import logger from '../utils/logger.js';
 import NodeCache from 'node-cache';
 import { z } from 'zod';
 
+// PrismaClientSingleton для избежания множественных соединений с базой данных
+class PrismaClientSingleton {
+    private static instance: PrismaClient;
+
+    private constructor() {}
+
+    public static getInstance(): PrismaClient {
+        if (!PrismaClientSingleton.instance) {
+            PrismaClientSingleton.instance = new PrismaClient();
+        }
+        return PrismaClientSingleton.instance;
+    }
+}
+
+// Валидация треков через отдельный класс
 const TrackSchema = z.object({
     trackId: z.string(),
     addedAt: z.bigint().optional(),
@@ -13,6 +28,12 @@ const TrackSchema = z.object({
 });
 
 type Track = z.infer<typeof TrackSchema>;
+
+class TrackValidator {
+    public static validateTrack(track: Track): Track {
+        return TrackSchema.parse(track);
+    }
+}
 
 interface QueueResult {
     tracks: Track[];
@@ -26,52 +47,46 @@ export class QueueService {
     private cache: NodeCache;
 
     constructor() {
-        this.prisma = new PrismaClient();
-        this.cache = new NodeCache({ stdTTL: 600 });
+        this.prisma = PrismaClientSingleton.getInstance();
+        this.cache = new NodeCache({ stdTTL: 600, checkperiod: 60 });
     }
 
     public async setTrack(channelId: string | null, guildId: string | null = '', track: Omit<Track, 'id'>, priority: boolean = false): Promise<void> {
         try {
-            const validatedTrack = TrackSchema.parse(track);
-            
+            const validatedTrack = TrackValidator.validateTrack(track);
+
             await this.prisma.$transaction(async (prisma) => {
+                // Проверяем, существует ли трек в очереди
                 const existingTrack = await prisma.tracks.findFirst({
-                    where: { trackId: track.trackId }
+                    where: {
+                        trackId: track.trackId,
+                        Queue: { channelId: channelId ?? '' }
+                    }
                 });
 
                 if (existingTrack) {
-                    await prisma.tracks.update({
-                        where: { id: existingTrack.id },
-                        data: {
-                            ...validatedTrack,
-                            addedAt: BigInt(Date.now()),
-                            Queue: {
-                                connectOrCreate: {
-                                    where: { channelId_priority: { channelId: channelId ?? '', priority } },
-                                    create: { channelId: channelId ?? '', guildId: guildId ?? '', priority }
-                                }
-                            }
-                        }
-                    });
-                } else {
-                    await prisma.tracks.create({
-                        data: {
-                            ...validatedTrack,
-                            addedAt: BigInt(Date.now()),
-                            Queue: {
-                                connectOrCreate: {
-                                    where: { channelId_priority: { channelId: channelId ?? '', priority } },
-                                    create: { channelId: channelId ?? '', guildId: guildId ?? '', priority }
-                                }
-                            }
-                        }
-                    });
+                    logger.info(`Track ${track.trackId} already exists in the queue. Skipping.`);
+                    return;
                 }
+
+                // Создаём новый трек в базе данных
+                await prisma.tracks.create({
+                    data: {
+                        ...validatedTrack,
+                        addedAt: BigInt(Date.now()),
+                        Queue: {
+                            connectOrCreate: {
+                                where: { channelId_priority: { channelId: channelId ?? '', priority } },
+                                create: { channelId: channelId ?? '', guildId: guildId ?? '', priority }
+                            }
+                        }
+                    }
+                });
             });
-    
+
             this.invalidateCache(channelId, priority);
         } catch (error) {
-            logger.error('Error adding track to queue:', error);
+            logger.error(`Error adding track ${track.trackId} to queue in channel ${channelId}`, error);
             throw new Error('Failed to add track to queue');
         }
     }
@@ -81,10 +96,11 @@ export class QueueService {
             const result = await this.prisma.$transaction(async (prisma) => {
                 const nextTrack = await prisma.tracks.findFirst({
                     where: { Queue: { channelId: channelId ?? '' } },
-                    orderBy: { id: 'desc' }
+                    orderBy: { addedAt: 'asc' }
                 });
                 if (!nextTrack) return null;
-                
+
+                // Удаляем трек из базы данных
                 await prisma.tracks.delete({ where: { id: nextTrack.id } });
                 return nextTrack;
             });
@@ -92,57 +108,53 @@ export class QueueService {
             if (!result) return null;
 
             this.invalidateCache(channelId);
-            return TrackSchema.parse(this.mapPrismaTrackToTrack(result));
+            return TrackValidator.validateTrack(this.mapPrismaTrackToTrack(result));
         } catch (error) {
-            logger.error('Error getting next track:', error);
+            logger.error(`Error getting next track from channel ${channelId}`, error);
             throw new Error('Failed to get next track');
         }
     }
 
-    public async getNextTrack(channelId: string | null): Promise<Track | null> {
+    // Метод для получения следующего трека без его удаления
+    public async peekNextTrack(channelId: string | null): Promise<Track | null> {
         try {
             const nextTrack = await this.prisma.tracks.findFirst({
                 where: { Queue: { channelId: channelId ?? '' } },
-                orderBy: { id: 'desc' }
+                orderBy: { addedAt: 'asc' }
             });
 
             if (!nextTrack) return null;
 
-            return TrackSchema.parse(this.mapPrismaTrackToTrack(nextTrack));
+            return TrackValidator.validateTrack(this.mapPrismaTrackToTrack(nextTrack));
         } catch (error) {
-            logger.error('Error getting next track:', error);
+            logger.error(`Error peeking next track from channel ${channelId}`, error);
             throw new Error('Failed to get next track');
-        }
-    }
-
-    public async setGuildChannelId(guildId: string, channelId: string | null, priority: boolean = false): Promise<void> {
-        try {
-          await this.prisma.queue.upsert({
-            where: { channelId_priority: { channelId: channelId ?? '', priority } },
-            update: { channelId: channelId ?? '' },
-            create: { guildId: guildId, channelId: channelId ?? '', priority}
-          });
-      
-          this.invalidateCache(guildId);
-        } catch (error) {
-          logger.error('Error setting channel ID for guild:', error);
-          throw new Error('Failed to set channel ID');
         }
     }
 
     public async getQueue(channelId: string, priority: boolean = false): Promise<QueueResult> {
         const cacheKey = `queue_${channelId}_${priority}`;
         const cachedQueue = this.cache.get<QueueResult>(cacheKey);
-        if (cachedQueue) return cachedQueue;
-    
+
+        if (!cachedQueue) {
+            const queue = await this.fetchQueueFromDatabase(channelId, priority);
+            this.cache.set(cacheKey, queue);
+            return queue;
+        }
+
+        return cachedQueue;
+    }
+
+    private async fetchQueueFromDatabase(channelId: string, priority: boolean): Promise<QueueResult> {
         try {
             const queue = await this.prisma.queue.findUnique({
                 where: {
                     channelId_priority: { channelId, priority },
                 },
-                include: { tracks: { orderBy: { id: `asc` } } }
+                include: { tracks: { orderBy: { addedAt: 'asc' } } }
             });
-            const result: QueueResult = queue
+
+            return queue
                 ? {
                     tracks: queue.tracks.map(this.mapPrismaTrackToTrack),
                     lastTrackId: queue.lastTrackId ?? undefined,
@@ -150,12 +162,9 @@ export class QueueService {
                     volume: queue.volume ?? undefined
                 }
                 : { tracks: [], waveStatus: false, lastTrackId: undefined, volume: undefined };
-            
-            this.cache.set(cacheKey, result);
-            return result;
         } catch (error) {
-            logger.error('Error getting queue:', error);
-            throw new Error('Failed to get queue');
+            logger.error(`Error fetching queue from database for channel ${channelId}`, error);
+            throw new Error('Failed to fetch queue from database');
         }
     }
 
@@ -173,13 +182,15 @@ export class QueueService {
     }
 
     public async clearQueue(channelId: string, priority: boolean = false): Promise<void> {
-        await this.prisma.queue.update({
-            where: {
-                channelId_priority: { channelId, priority },
-            },
-            data: { tracks: { deleteMany: {} }, lastTrackId: null }
-        });
-        this.invalidateCache(channelId, priority);
+        await Promise.all([
+            this.prisma.queue.update({
+                where: {
+                    channelId_priority: { channelId, priority },
+                },
+                data: { tracks: { deleteMany: {} }, lastTrackId: null }
+            }),
+            this.invalidateCache(channelId, priority)
+        ]);
     }
 
     public async getWaveStatus(channelId: string): Promise<boolean> {
@@ -196,10 +207,9 @@ export class QueueService {
     }
 
     public async countMusicTracks(channelId: string, priority: boolean = false): Promise<number> {
-        const result = await this.prisma.tracks.count({
+        return await this.prisma.tracks.count({
             where: { Queue: { channelId, priority } }
         });
-        return result;
     }
 
     public async removeTrack(channelId: string, trackId: string): Promise<void> {
@@ -214,33 +224,8 @@ export class QueueService {
         this.invalidateCache(channelId);
     }
 
-    public async addMultipleTracks(channelId: string, tracks: Omit<Track, 'id'>[], priority: boolean = false): Promise<void> {
-        try {
-            const validatedTracks = tracks.map(track => TrackSchema.parse(track));
-            await this.prisma.$transaction(async (prisma) => {
-                await prisma.tracks.createMany({
-                    data: validatedTracks.map(track => ({
-                        ...track,
-                        addedAt: BigInt(Date.now()),
-                        Queue: {
-                            connectOrCreate: {
-                                where: { channelId_priority: { channelId, priority } },
-                                create: { channelId, priority }
-                            }
-                        },
-                        queueId: 1
-                    }))
-                });
-            });
-            this.invalidateCache(channelId, priority);
-        } catch (error) {
-            logger.error('Error adding multiple tracks to queue:', error);
-            throw new Error('Failed to add multiple tracks to queue');
-        }
-    }
-
     private mapPrismaTrackToTrack(prismaTrack: Tracks): Track {
-        return TrackSchema.parse({
+        return TrackValidator.validateTrack({
             trackId: prismaTrack.trackId,
             addedAt: prismaTrack.addedAt,
             info: prismaTrack.info,
