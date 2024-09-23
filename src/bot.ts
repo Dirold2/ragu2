@@ -42,7 +42,8 @@ class Bot {
     private setupEventListeners(): void {
         this.client.once("ready", () => {
             void this.client.initApplicationCommands();
-            logger.info("Bot started");
+            // this.rpc.user?.setActivity()
+            logger.info("Bot initialized");
         });
 
         this.client.on("interactionCreate", (interaction: Interaction) => {
@@ -57,6 +58,7 @@ class Bot {
     public async start(token: string): Promise<void> {
         try {
             await this.client.login(token);
+            logger.info("Bot started");
         } catch (error) {
             logger.error("Failed to start the bot:", error);
         }

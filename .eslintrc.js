@@ -26,4 +26,7 @@ export default defineConfig({
     'eqeqeq': ['error', 'always'],
     'curly': ['error', 'all'],
   },
+  ignores: [
+    '**/build/**'
+  ],
 });
