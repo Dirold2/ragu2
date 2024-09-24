@@ -3,7 +3,6 @@ import YTMusic from "ytmusic-api";
 import { logger } from "../../utils/index.js";
 import { z } from 'zod';
 import ytdl from '@distube/ytdl-core';
-import fs from 'fs';
 
 const SearchTrackResultSchema = z.object({
     id: z.string().optional(),
@@ -23,6 +22,8 @@ export class YouTubeService {
     constructor() {
         this.ytmusic = new YTMusic();
         this.ytmusic.initialize();
+
+        ytdl.createProxyAgent({ uri: `https://195.3.222.15/`})
     }
 
     hasAvailableResults(): boolean {
@@ -31,12 +32,12 @@ export class YouTubeService {
 
     async searchName(trackName: string): Promise<SearchTrackResult[]> {
         try {
-            const tracks = await this.ytmusic.searchSongs(trackName);
+            const tracks = await this.ytmusic.searchVideos(trackName);
             const formattedTracks = tracks.map(track => ({
                 id: track.videoId,
                 title: track.name,
                 artists: [{ name: track.artist.name }],
-                albums: track.album ? [{ title: track.album.name }] : [],
+                albums: [],
                 source: 'youtube'
             }));
 
@@ -49,6 +50,11 @@ export class YouTubeService {
         }
     }
 
+    async searchURL(url: string) {
+        logger.info(url);
+        return '';
+    }
+
     async getTrackUrl(videoId?: string): Promise<string> {
         if (!videoId) {
             logger.error("Error getting track URL: videoId is undefined");
@@ -57,13 +63,17 @@ export class YouTubeService {
 
         try {
             const url = `http://www.youtube.com/watch?v=${videoId}`;
-            const filePath = `./lib/${videoId}.mp3`;
-            const stream = ytdl(url).pipe(fs.createWriteStream(filePath));
-
-            return new Promise((resolve, reject) => {
-                stream.on('finish', () => resolve(`lib/${videoId}.mp3`));
-                stream.on('error', (error) => reject(error));
-            });
+            const info = await ytdl.getInfo(url);
+            const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
+            
+            if (audioFormat && audioFormat.url) {
+                logger.info(`YouTube | Got download URL for video: ${videoId}`);
+                logger.warn(audioFormat.url)
+                return audioFormat.url;
+            } else {
+                logger.error(`No suitable audio format found for video: ${videoId}`);
+                return '';
+            }
         } catch (error) {
             logger.error(`Error getting YouTube audio URL: ${error.message}`);
             return '';

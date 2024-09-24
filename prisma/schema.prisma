@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Queue {
@@ -18,7 +18,7 @@ model Queue {
   
   tracks      Tracks[]
   
-  @@unique([channelId, priority]) // Определяем составной уникальный ключ
+  @@unique([channelId, priority])
 }
 
 model Tracks {

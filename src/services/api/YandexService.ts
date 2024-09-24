@@ -56,31 +56,55 @@ export class YandexService {
         return this.updateCacheInBackground(trackName, cacheKey);
     }
 
-    async searchURL(url: string): Promise<string> {
+    async searchURL(url: string): Promise<SearchTrackResult | null> {
         await this.ensureInitialized();
-
+    
         try {
             const parsedUrl = new URL(url);
             if (!parsedUrl.hostname.includes('music.yandex.ru')) {
-                return '';
+                return null;
             }
-
-            const pathSegments = parsedUrl.pathname.split('/');
-            const trackIndex = pathSegments.indexOf('track');
-            if (trackIndex === -1 || trackIndex === pathSegments.length - 1) {
+    
+            // Извлекаем trackId с помощью регулярного выражения
+            const match = parsedUrl.pathname.match(/\/album\/\d+\/track\/(\d+)/);
+            if (!match) {
                 logger.warn('Invalid URL structure');
-                return '';
+                return null;
             }
-
-            const trackId = pathSegments[trackIndex + 1];
+    
+            const trackId = match[1];
             logger.info(`Extracted track ID: ${trackId}`);
-
-            return trackId;
+    
+            // Получаем информацию о треке по его ID
+            const trackInfo = await this.api.getTrack(Number(trackId));
+    
+            if (!trackInfo) {
+                logger.warn(`No track info found for track ID: ${trackId}`);
+                return null;
+            }
+    
+            // Формируем объект согласно схеме SearchTrackResultSchema
+            const searchResult: SearchTrackResult = {
+                id: trackInfo[0].id?.toString(),
+                title: trackInfo[0].title,
+                artists: trackInfo[0].artists.map((artist: { name: string }) => ({ name: artist.name })),
+                albums: trackInfo[0].albums.map((album: { title?: string }) => ({ title: album.title })),
+                source: 'yandex'
+            };
+    
+            // Валидация объекта по схеме
+            const validation = SearchTrackResultSchema.safeParse(searchResult);
+            if (!validation.success) {
+                logger.warn(`Invalid track data for track ID: ${trackId}`);
+                return null;
+            }
+    
+            return validation.data;
         } catch (error) {
-            logger.error("Error parsing URL:", error instanceof Error ? error.message : String(error));
-            return '';
+            logger.error(`Error processing URL: ${error instanceof Error ? error.message : String(error)}`);
+            return null;
         }
-    }
+    }    
 
     async getTrackUrl(trackId?: string): Promise<string> {
         await this.ensureInitialized();

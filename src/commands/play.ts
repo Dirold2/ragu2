@@ -22,7 +22,7 @@ export class PlayCommands {
     @Slash({ description: "Play a track", name: "play" })
     async play(
         @SlashOption({
-            description: "Track name",
+            description: "Track name or URL",
             name: "track",
             required: true,
             type: ApplicationCommandOptionType.String,
@@ -32,31 +32,22 @@ export class PlayCommands {
         interaction: CommandInteraction | AutocompleteInteraction
     ): Promise<void> {
         const trimmedTrackName = trackName.trim();
-        
+
         if (!trimmedTrackName) {
-            if (interaction instanceof CommandInteraction) {
-                await this.safeReply(interaction, "Please provide a valid track name.");
-            }
-            return;
+            return this.safeReply(interaction as CommandInteraction, "Please provide a valid track name.");
         }
 
         const cacheKey = trimmedTrackName.toLowerCase();
-        
+
         if (interaction instanceof AutocompleteInteraction) {
             await this.handleAutocompleteInteraction(interaction, trimmedTrackName, cacheKey);
-            return;
+        } else {
+            await this.handleCommandInteraction(interaction as CommandInteraction, trimmedTrackName, cacheKey);
         }
-
-        await this.handleCommandInteraction(interaction, trimmedTrackName, cacheKey);
     }
 
     private async handleAutocompleteInteraction(interaction: AutocompleteInteraction, trackName: string, cacheKey: string) {
-        if (!(interaction instanceof AutocompleteInteraction)) {
-            logger.error('Invalid interaction type');
-        }
-        if (this.debounceTimers.has(cacheKey)) {
-            clearTimeout(this.debounceTimers.get(cacheKey)!);
-        }
+        this.clearDebounceTimer(cacheKey);
 
         this.debounceTimers.set(cacheKey, setTimeout(async () => {
             try {
@@ -74,8 +65,7 @@ export class PlayCommands {
 
             const searchResults = await this.getSearchResults(cacheKey, trackName);
             if (!searchResults.length) {
-                await this.safeReply(interaction, `No tracks found for "${trackName}". Please try a different search term.`);
-                return;
+                return this.safeReply(interaction, `No tracks found for "${trackName}". Please try a different search term.`);
             }
 
             const firstTrack = searchResults[0];
@@ -94,26 +84,22 @@ export class PlayCommands {
         if (this.searchCache.has(cacheKey)) {
             return this.searchCache.get(cacheKey)!;
         }
+
         const searchResults = await bot.nameService.searchName(trackName);
         this.searchCache.set(cacheKey, searchResults);
-        setTimeout(() => this.searchCache.delete(cacheKey), 5 * 60 * 1000); // Clear cache after 5 minutes
+        setTimeout(() => this.searchCache.delete(cacheKey), 5 * 60 * 1000);
         return searchResults;
     }
 
     private async respondToAutocomplete(interaction: AutocompleteInteraction, searchResults: SearchableTrack[], trackName: string) {
         const filtered = searchResults
             .filter(track => track.title.toLowerCase().includes(trackName.toLowerCase()))
-            .slice(0, 25) // Limit to 25 results
-            .map(track => {
-                const truncatedArtists = track.artists.map(artist => artist.name).slice(0, 3).join(', ');
-                const truncatedTitle = track.title.slice(0, 50); // Limit title length
-                
-                return {
-                    name: `${truncatedArtists} - ${truncatedTitle}`,
-                    value: `${truncatedArtists} - ${truncatedTitle}`
-                };
-            });
-    
+            .slice(0, 25)
+            .map(track => ({
+                name: `${track.artists.map(artist => artist.name).slice(0, 3).join(', ')} - ${track.title.slice(0, 50)}`,
+                value: `${track.artists.map(artist => artist.name).slice(0, 3).join(', ')} - ${track.title.slice(0, 50)}`
+            }));
+
         await interaction.respond(filtered).catch(error => {
             logger.error('Error responding to autocomplete:', error);
         });
@@ -124,10 +110,18 @@ export class PlayCommands {
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(content);
             } else {
-                await interaction.reply({ content, ephemeral: true });
+                await interaction.followUp({ content, ephemeral: true });
             }
         } catch (error) {
             logger.error('Error replying to interaction:', error);
+        }
+    }
+
+    private clearDebounceTimer(cacheKey: string) {
+        const timer = this.debounceTimers.get(cacheKey);
+        if (timer) {
+            clearTimeout(timer);
+            this.debounceTimers.delete(cacheKey);
         }
     }
 }
