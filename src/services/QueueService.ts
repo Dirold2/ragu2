@@ -1,7 +1,8 @@
 import { PrismaClient, Tracks } from '@prisma/client';
 import logger from '../utils/logger.js';
 import NodeCache from 'node-cache';
-import { z } from 'zod';
+import { QueueResult } from '../interfaces/index.js';
+import { Track, TrackSchema } from './index.js';
 
 // PrismaClientSingleton для избежания множественных соединений с базой данных
 class PrismaClientSingleton {
@@ -18,16 +19,6 @@ class PrismaClientSingleton {
 }
 
 // Валидация треков через отдельный класс
-const TrackSchema = z.object({
-    trackId: z.string(),
-    addedAt: z.bigint().optional(),
-    info: z.string(),
-    url: z.string().url(),
-    source: z.string(),
-    waveStatus: z.boolean().optional()
-});
-
-type Track = z.infer<typeof TrackSchema>;
 
 class TrackValidator {
     public static validateTrack(track: Track): Track {
@@ -35,14 +26,9 @@ class TrackValidator {
     }
 }
 
-interface QueueResult {
-    tracks: Track[];
-    lastTrackId?: string;
-    waveStatus?: boolean;
-    volume?: number;
-}
 
-export class QueueService {
+
+export default class QueueService {
     private prisma: PrismaClient;
     private cache: NodeCache;
 

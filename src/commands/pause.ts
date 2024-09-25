@@ -6,6 +6,6 @@ import { bot } from "../bot.js";
 export class PauseCommand {
     @Slash({ name: "pause", description: "Приостановить или возобновить текущий трек" })
     async pause(interaction: CommandInteraction): Promise<void> {
-        await bot.playerService.togglePause(interaction);
+        await bot.playerManager.togglePause(interaction);
     }
 }

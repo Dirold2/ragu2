@@ -10,7 +10,7 @@ interface SearchResultItem {
 
 interface SearchableTrack extends SearchResultItem {
     id: string;
-    source: "yandex" | "youtube";
+    source: string;
     albums?: { title?: string }[];
 }
 
@@ -32,10 +32,6 @@ export class PlayCommands {
         interaction: CommandInteraction | AutocompleteInteraction
     ): Promise<void> {
         const trimmedTrackName = trackName.trim();
-
-        if (!trimmedTrackName) {
-            return this.safeReply(interaction as CommandInteraction, "Please provide a valid track name.");
-        }
 
         const cacheKey = trimmedTrackName.toLowerCase();
 
@@ -110,7 +106,7 @@ export class PlayCommands {
             if (interaction.deferred || interaction.replied) {
                 await interaction.editReply(content);
             } else {
-                await interaction.followUp({ content, ephemeral: true });
+                await interaction.reply({ content, ephemeral: true });
             }
         } catch (error) {
             logger.error('Error replying to interaction:', error);

@@ -1,21 +1,13 @@
-import { Discord } from "discordx";
-import YTMusic from "ytmusic-api";
-import { logger } from "../../utils/index.js";
-import { z } from 'zod';
+import YTMusic from 'ytmusic-api';
 import ytdl from '@distube/ytdl-core';
 
-const SearchTrackResultSchema = z.object({
-    id: z.string().optional(),
-    title: z.string(),
-    artists: z.array(z.object({ name: z.string().min(1) })),
-    albums: z.array(z.object({ title: z.string().optional() })),
-    source: z.string()
-});
+import { logger } from '../utils/index.js';
+import { MusicServicePlugin } from '../interfaces/index.js';
+import { SearchTrackResult, TrackResultSchema } from '../types/index.js';
 
-type SearchTrackResult = z.infer<typeof SearchTrackResultSchema>;
-
-@Discord()
-export class YouTubeService {
+export default class YouTubeMusicPlagin implements MusicServicePlugin {
+    name = 'youtube';
+    urlPatterns = [/youtube\.com/];
     private results?: SearchTrackResult[];
     private ytmusic: YTMusic;
 
@@ -23,7 +15,8 @@ export class YouTubeService {
         this.ytmusic = new YTMusic();
         this.ytmusic.initialize();
 
-        ytdl.createProxyAgent({ uri: `https://195.3.222.15/`})
+        const cookies = JSON.parse(process.env.YOUTUBE_COOKIES as string);
+        ytdl.createAgent(cookies);
     }
 
     hasAvailableResults(): boolean {
@@ -32,7 +25,7 @@ export class YouTubeService {
 
     async searchName(trackName: string): Promise<SearchTrackResult[]> {
         try {
-            const tracks = await this.ytmusic.searchVideos(trackName);
+            const tracks = await this.ytmusic.searchSongs(trackName);
             const formattedTracks = tracks.map(track => ({
                 id: track.videoId,
                 title: track.name,
@@ -41,7 +34,7 @@ export class YouTubeService {
                 source: 'youtube'
             }));
 
-            this.results = formattedTracks.map(track => SearchTrackResultSchema.parse(track));
+            this.results = formattedTracks.map(track => TrackResultSchema.parse(track));
             logger.info(`YouTube | Found ${this.results.length} tracks for: ${trackName}`);
             return this.results;
         } catch (error) {
@@ -50,28 +43,28 @@ export class YouTubeService {
         }
     }
 
-    async searchURL(url: string) {
+    async searchURL(url: string): Promise<SearchTrackResult | null> {
         logger.info(url);
-        return '';
+        return null;
     }
 
-    async getTrackUrl(videoId?: string): Promise<string> {
-        if (!videoId) {
+    async getTrackUrl(trackId: string): Promise<string> {
+        if (!trackId) {
             logger.error("Error getting track URL: videoId is undefined");
             return '';
         }
 
         try {
-            const url = `http://www.youtube.com/watch?v=${videoId}`;
+            const url = `https://music.youtube.com/watch?v=${trackId}`;
             const info = await ytdl.getInfo(url);
             const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
             
             if (audioFormat && audioFormat.url) {
-                logger.info(`YouTube | Got download URL for video: ${videoId}`);
+                logger.info(`YouTube | Got download URL for video: ${trackId}`);
                 logger.warn(audioFormat.url)
                 return audioFormat.url;
             } else {
-                logger.error(`No suitable audio format found for video: ${videoId}`);
+                logger.error(`No suitable audio format found for video: ${trackId}`);
                 return '';
             }
         } catch (error) {

@@ -1,0 +1,22 @@
+import { MusicServicePlugin } from '../interfaces/MusicServicePlugin';
+import { SearchTrackResult } from '../types/SearchTrackResult';
+
+export default class YandexMusicPlugin implements MusicServicePlugin {
+    name = 'yandex';
+    urlPatterns = [/music\.yandex\.ru/];
+
+    async searchName(trackName: string): Promise<SearchTrackResult[]> {
+        // Implement Yandex Music search logic here
+        // Return an array of SearchTrackResult objects
+    }
+
+    async searchURL(url: string): Promise<SearchTrackResult | null> {
+        // Implement Yandex Music URL processing logic here
+        // Return a SearchTrackResult object or null
+    }
+
+    async getTrackUrl(trackId: string): Promise<string> {
+        // Implement logic to get the playable track URL
+        // Return the URL as a string
+    }
+}

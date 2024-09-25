@@ -10,7 +10,7 @@ export class SkipCommand {
         await interaction.deferReply({ ephemeral: true });
 
         try {
-            await bot.playerService.skip(interaction);
+            await bot.playerManager.skip(interaction);
         } catch (error) {
             logger.error('Error skipping track:', error);
             await bot.commandService.send(interaction, "Произошла ошибка при попытке пропустить трек.");

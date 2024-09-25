@@ -1,11 +1,12 @@
+// SCHEMA TYPE
+export { TrackSchema, TrackResultSchema } from "../types/index.js"
 // TYPE
-
-// API
-export { YouTubeService } from "./api/YouTubeService.js"
-export { YandexService } from "./api/YandexService.js"
+export type { Track, SearchTrackResult } from "../types/index.js"
 
 // SERVICE
-export { QueueService } from "./QueueService.js";
-export { CommandService } from "./CommandService.js";
-export { PlayerService } from "./PlayerService.js"
-export { NameService } from "./NameService.js"
+export { default as QueueService } from "./QueueService.js";
+export { default as CommandService } from "./CommandService.js";
+export { default as PlayerService } from "./PlayerService.js"
+export { default as PlayerManager} from "./PlayerManager.js"
+export { default as PluginManager } from "./PluginManager.js"
+export { default as NameService} from "./NameService.js"

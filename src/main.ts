@@ -10,7 +10,7 @@ async function run() {
     if (!process.env.BOT_TOKEN) {
         throw Error("Could not find BOT_TOKEN in your environment");
     }
-
+    
     await bot.start(process.env.BOT_TOKEN);
 }
 
