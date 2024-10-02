@@ -22,12 +22,12 @@ model Queue {
 }
 
 model Tracks {
-  id        Int    @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   trackId   String
   addedAt   BigInt
   info      String
   url       String
   source    String
   queueId   Int
-  Queue     Queue   @relation(fields: [queueId], references: [id])
+  Queue     Queue     @relation(fields: [queueId], references: [id])
 }

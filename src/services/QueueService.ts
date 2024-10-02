@@ -86,6 +86,12 @@ export default class QueueService {
                 });
                 if (!nextTrack) return null;
 
+                const trackExists = await prisma.tracks.count({ where: { id: nextTrack.id } });
+                if (trackExists === 0) {
+                    logger.warn(`Track with id ${nextTrack.id} does not exist in database`);
+                    return null;
+                }
+
                 // Удаляем трек из базы данных
                 await prisma.tracks.delete({ where: { id: nextTrack.id } });
                 return nextTrack;

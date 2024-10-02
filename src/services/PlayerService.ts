@@ -1,14 +1,11 @@
 import { Discord } from "discordx";
-import { CommandInteraction, GuildMember, 
-    PermissionFlagsBits, VoiceChannel 
-} from "discord.js";
-import { AudioPlayer, AudioPlayerStatus, 
-    createAudioPlayer, createAudioResource, 
-    DiscordGatewayAdapterCreator, entersState, 
-    getVoiceConnection, joinVoiceChannel, 
-    StreamType, VoiceConnection, 
-    VoiceConnectionStatus, AudioResource, 
-NoSubscriberBehavior } from "@discordjs/voice";
+import { CommandInteraction, GuildMember, PermissionFlagsBits, VoiceChannel } from "discord.js";
+import { 
+    AudioPlayer, AudioPlayerStatus, createAudioPlayer, createAudioResource, 
+    DiscordGatewayAdapterCreator, entersState, getVoiceConnection, joinVoiceChannel, 
+    StreamType, VoiceConnection, VoiceConnectionStatus, AudioResource, 
+    NoSubscriberBehavior 
+} from "@discordjs/voice";
 
 import { bot } from "../bot.js";
 import logger from "../utils/logger.js";
@@ -25,7 +22,6 @@ export default class PlayerService {
     public volume = 30;
     private currentTrack: Track | null = null;
     private nextTrack: Track | null = null;
-    private nextResource: AudioResource | null = null;
     private isConnecting = false;
     private emptyChannelCheckInterval: NodeJS.Timeout | null = null;
 
@@ -44,7 +40,7 @@ export default class PlayerService {
                 await this.play(track);
             } else {
                 await this.queueService.setTrack(this.channelId, this.guildId, track);
-                logger.debug(`Track added to queue: ${track.info}`);
+                logger.info(`Track added to queue: ${track.info}`);
             }
             if (!this.nextTrack) await this.loadNextTrack();
         } catch (error) {
@@ -56,7 +52,7 @@ export default class PlayerService {
         const resource = await this.createAudioResource(track);
         this.player.play(resource);
         logger.info(`Playing track: ${track.info}`);
-        bot.client.user?.setActivity(track.info, {type: 3})
+        await bot.client.user?.setActivity(track.info, {type: 3});
     }
 
     private createAudioResource(track: Track): Promise<AudioResource> {
@@ -80,7 +76,6 @@ export default class PlayerService {
     private async loadNextTrack(): Promise<void> {
         try {
             this.nextTrack = await this.queueService.getTrack(this.channelId);
-            this.nextResource = this.nextTrack ? await this.createAudioResource(this.nextTrack) : null;
             logger.verbose(this.nextTrack ? `Loaded next track: ${this.nextTrack.info}` : 'No next track to load');
         } catch (error) {
             logger.error(`Failed to load next track: ${error.message}`, error);
@@ -88,14 +83,13 @@ export default class PlayerService {
     }
 
     private async playNextTrack(): Promise<void> {
-        if (this.nextTrack && this.nextResource) {
+        if (this.nextTrack) {
             this.currentTrack = this.nextTrack;
-            this.player.play(this.nextResource);
-            logger.info(`Playing next track: ${this.currentTrack.info}`);
+            await this.play(this.currentTrack);
             await this.loadNextTrack();
         } else {
-            this.currentTrack = this.nextTrack = this.nextResource = null;
-            bot.client.user?.setActivity()
+            this.currentTrack = this.nextTrack = null;
+            await bot.client.user?.setActivity();
             logger.info("Queue is empty, playback stopped.");
         }
     }
@@ -105,8 +99,6 @@ export default class PlayerService {
         
         await this.playNextTrack();
         await this.commandService.send(interaction, `Skipped to next track: ${this.currentTrack?.info || "No track"}`);
-        
-        if (this.channelId && this.guildId) await this.joinChannel(interaction);
     }
     
     public async togglePause(interaction: CommandInteraction): Promise<void> {
@@ -122,8 +114,6 @@ export default class PlayerService {
         } else {
             await this.commandService.send(interaction, "No track is currently playing.");
         }
-    
-        if (this.channelId && this.guildId) await this.joinChannel(interaction);
     }
 
     public setVolume(volume: number): void {
@@ -166,27 +156,27 @@ export default class PlayerService {
     public leaveChannel(): void {
         if (this.connection) {
             this.connection.destroy();
-            this.currentTrack = this.nextTrack = this.nextResource = null;
+            this.currentTrack = this.nextTrack = null;
             this.stopEmptyChannelCheck();
-            bot.client.user?.setActivity()
+            bot.client.user?.setActivity();
             logger.info("Disconnected from voice channel.");
         }
     }
 
     private async connectToChannel(guildId: string, channelId: string, interaction: CommandInteraction): Promise<VoiceConnection> {
+        const connection = joinVoiceChannel({
+            channelId,
+            guildId,
+            adapterCreator: interaction.guild?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+            selfDeaf: false,
+        });
+
         try {
-            const connection = joinVoiceChannel({
-                channelId,
-                guildId,
-                adapterCreator: interaction.guild?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
-                selfDeaf: false,
-            });
-    
             await entersState(connection, VoiceConnectionStatus.Ready, 30000);
             connection.subscribe(this.player);
-    
             return connection;
         } catch (error) {
+            connection.destroy();
             logger.error("Failed to connect to voice channel:", error);
             throw new Error(`Connection timeout: ${error.message}`);
         }
@@ -208,15 +198,14 @@ export default class PlayerService {
 
     private handleDisconnectionError(): void {
         if (this.connection) {
-            this.connection.removeListener(VoiceConnectionStatus.Disconnected, this.handleDisconnection);
+            this.connection.removeAllListeners();
             this.connection.destroy();
-            this.currentTrack = this.nextTrack = this.nextResource = null;
-            this.stopEmptyChannelCheck();
-            bot.client.user?.setActivity()
-            logger.info("Connection terminated.");
-        } else {
-            logger.error("Error reconnecting: Connection is null");
         }
+        this.connection = null;
+        this.currentTrack = this.nextTrack = null;
+        this.stopEmptyChannelCheck();
+        bot.client.user?.setActivity();
+        logger.info("Connection terminated.");
     }
 
     private startEmptyChannelCheck(): void {
@@ -234,21 +223,16 @@ export default class PlayerService {
     private async checkEmptyChannel(): Promise<void> {
         if (!this.connection || !this.channelId) return;
     
-        const guild = await bot.client.guilds.fetch(this.guildId);
-        if (!guild) {
-            logger.error(`Failed to fetch guild with ID ${this.guildId}`);
-            return;
-        }
-    
-        const channel = await guild.channels.fetch(this.channelId) as VoiceChannel | null;
-        if (!channel || !(channel instanceof VoiceChannel)) {
-            logger.error(`Failed to fetch voice channel with ID ${this.channelId}`);
-            return;
-        }
-    
-        if (channel.members.filter(member => !member.user.bot).size === 0) {
-            logger.info("Voice channel is empty. Disconnecting.");
-            this.leaveChannel();
+        try {
+            const guild = await bot.client.guilds.fetch(this.guildId);
+            const channel = await guild.channels.fetch(this.channelId) as VoiceChannel;
+            
+            if (channel instanceof VoiceChannel && channel.members.filter(member => !member.user.bot).size === 0) {
+                logger.info("Voice channel is empty. Disconnecting.");
+                this.leaveChannel();
+            }
+        } catch (error) {
+            logger.error(`Failed to check empty channel: ${error.message}`, error);
         }
     }
 
