@@ -19,7 +19,7 @@ export default class PlayerService {
     private player: AudioPlayer;
     private connection: VoiceConnection | null = null;
     public channelId: string | null = null;
-    public volume = 30;
+    public volume = 15;
     private currentTrack: Track | null = null;
     private nextTrack: Track | null = null;
     private isConnecting = false;

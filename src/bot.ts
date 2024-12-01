@@ -7,7 +7,10 @@ import { NameService, QueueService,
 import logger from "./utils/logger.js";
 import fs from 'fs';
 import path from 'path';
-import { dirname } from "@discordx/importer";
+import { pathToFileURL } from 'url';
+import { dirname } from 'dirname-filename-esm';
+
+const __dirname = dirname(import.meta);
 
 class Bot {
     public client: Client;
@@ -46,11 +49,11 @@ class Bot {
     }
 
     private registerPlugins(pluginManager: PluginManager): void {
-        const pluginsDir = path.resolve(dirname(import.meta.url), 'plugins');
+        const pluginsDir = path.resolve(__dirname, 'plugins');
         fs.readdirSync(pluginsDir).forEach(async (file) => {
             // Проверяем, является ли файл плагином
             if (file.endsWith('.ts') || file.endsWith('.js')) {
-                const pluginPath = path.join(pluginsDir, file);
+                const pluginPath = String(pathToFileURL(path.join(pluginsDir, file)));
                 const { default: Plugin } = await import(pluginPath);
                 const pluginInstance = new Plugin();
                 pluginManager.registerPlugin(pluginInstance);

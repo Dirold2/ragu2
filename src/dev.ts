@@ -1,14 +1,17 @@
-import { dirname, resolve } from "@discordx/importer";
+import { resolve } from "@discordx/importer";
 import chokidar from "chokidar";
 import { DIService, MetadataStorage } from "discordx";
 import { bot } from "./bot.js";
 import logger from './utils/logger.js';
 import dotenv from 'dotenv';
+import { dirname } from 'dirname-filename-esm';
+
+const __dirname = dirname(import.meta);
 
 dotenv.config();
 
-const commandsPattern = `${dirname(import.meta.url)}/commands/**/*.{ts,js}`;
-const eventsPattern = `${dirname(import.meta.url)}/events/**/*.{ts,js}`;
+const commandsPattern = `${__dirname}/commands/**/*.{ts,js}`;
+const eventsPattern = `${__dirname}/events/**/*.{ts,js}`;
 
 async function loadFiles(src: string): Promise<void> {
     const files = await resolve(src);

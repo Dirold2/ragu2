@@ -5,7 +5,7 @@ import { ru } from 'date-fns/locale';
 
 const createLogger = () => {
     const customFormat = winston.format.printf(({ level, message, timestamp, stack }) => {
-        const formattedTime = format(new Date(timestamp), 'dd.MM.yyyy HH:mm:ss', { locale: ru });
+        const formattedTime = format(new Date(timestamp as unknown as string), 'dd.MM.yyyy HH:mm:ss', { locale: ru });
         const logMessage = `${formattedTime} | ${level}: ${message}`;
         return stack ? `${logMessage}\n${stack}` : logMessage;
     });
