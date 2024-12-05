@@ -2,9 +2,9 @@ import { z } from "zod";
 import { Discord } from "discordx";
 import { CommandInteraction, GuildMember } from "discord.js";
 import { logger, trackPlayCounter } from "../utils/index.js";
-import { QueueService, PlayerManager, 
-    PluginManager, SearchTrackResult
-} from "./index.js";
+import { QueueService, PlayerManager, PluginManager, SearchTrackResult } from "./index.js";
+import { UserNotInVoiceChannelError, PluginNotFoundError } from "../errors/index.js";
+import { MusicServicePlugin } from "../interfaces/index.js";
 
 const TrackUrlSchema = z.string().url();
 
@@ -18,36 +18,41 @@ export default class NameService {
 
     public async searchName(trackName: string): Promise<SearchTrackResult[]> {
         logger.debug(`Searching for track or URL "${trackName}"...`);
-    
+
         if (!trackName.trim()) {
-            logger.debug('Empty search string');
+            logger.debug("Empty search string");
             return [];
         }
-    
+
         if (TrackUrlSchema.safeParse(trackName).success) {
             const trackFromUrl = await this.searchAndProcessURL(trackName);
             if (trackFromUrl) return [trackFromUrl];
         }
-    
+
         for (const plugin of this.pluginManager.getAllPlugins()) {
-            try {
-                const results = await plugin.searchName(trackName);
-                if (results.length > 0) return results;
-            } catch (error) {
-                logger.warn(`Error searching in ${plugin.name}: ${error.message}`);
-            }
+            const results = await this.searchWithPlugin(plugin, trackName);
+            if (results.length > 0) return results;
         }
-    
-        logger.warn('No results found');
+
+        logger.warn("No results found");
         return [];
-    }    
+    }
+
+    private async searchWithPlugin(plugin: MusicServicePlugin, trackName: string): Promise<SearchTrackResult[]> {
+        try {
+            return await plugin.searchName(trackName);
+        } catch (error) {
+            logger.warn(`Error searching in ${plugin.name}: ${error.message}`);
+            return [];
+        }
+    }
 
     private async searchAndProcessURL(url: string): Promise<SearchTrackResult | null> {
         logger.debug(`Processing URL: ${url}`);
 
         const plugin = this.pluginManager.getPluginForUrl(url);
-            if (!plugin) {
-            logger.warn('Unsupported URL');
+        if (!plugin) {
+            logger.warn("Unsupported URL");
             return null;
         }
 
@@ -64,30 +69,35 @@ export default class NameService {
             const member = interaction.member as GuildMember;
             const channelId = member.voice.channel?.id;
             const guildId = interaction.guildId;
-            if (!channelId || !guildId) throw new Error('User not in voice channel or invalid guild');
+            if (!channelId || !guildId) throw new UserNotInVoiceChannelError();
 
             const plugin = this.pluginManager.getPlugin(selectedTrack.source);
-            if (!plugin) throw new Error(`No plugin found for source: ${selectedTrack.source}`);
+            if (!plugin) throw new PluginNotFoundError(selectedTrack.source);
 
             const trackUrl = await plugin.getTrackUrl(selectedTrack.id);
             TrackUrlSchema.parse(trackUrl);
 
-            const trackInfo = `${selectedTrack.artists.map(a => a.name).join(', ')} - ${selectedTrack.title}`;
-
+            const trackInfo = `${selectedTrack.artists.map(a => a.name).join(", ")} - ${selectedTrack.title}`;
             const track = { trackId: selectedTrack.id, info: trackInfo, url: trackUrl, source: selectedTrack.source };
 
             await Promise.all([
                 this.playerManager.playOrQueueTrack(guildId, track),
                 this.queueService.setLastTrackID(channelId, selectedTrack.id),
                 this.safeReply(interaction, `Added to queue: ${trackInfo}`),
-                this.playerManager.joinChannel(interaction)
+                this.playerManager.joinChannel(interaction),
             ]);
 
-            trackPlayCounter.inc({ status: 'success' });
+            trackPlayCounter.inc({ status: "success" });
         } catch (error) {
             logger.error(`Error processing track selection: ${error.message}`, error);
-            await this.safeReply(interaction, "An error occurred while processing your request.");
-            trackPlayCounter.inc({ status: 'failure' });
+            if (error instanceof UserNotInVoiceChannelError) {
+                await this.safeReply(interaction, "You need to be in a voice channel to use this command.");
+            } else if (error instanceof PluginNotFoundError) {
+                await this.safeReply(interaction, "The selected track source is not supported.");
+            } else {
+                await this.safeReply(interaction, "An unexpected error occurred.");
+            }
+            trackPlayCounter.inc({ status: "failure" });
         }
     }
 
@@ -99,7 +109,7 @@ export default class NameService {
                 await interaction.reply({ content, ephemeral: true });
             }
         } catch (error) {
-            logger.error('Error replying to interaction:', error);
+            logger.error("Error replying to interaction:", error);
         }
     }
 }

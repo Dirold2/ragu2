@@ -14,10 +14,10 @@ const __dirname = dirname(import.meta);
 
 class Bot {
     public client: Client;
-    public nameService: NameService;
-    public queueService: QueueService;
-    public playerManager: PlayerManager;
-    public commandService: CommandService;
+    public nameService!: NameService;
+    public queueService!: QueueService;
+    public playerManager!: PlayerManager;
+    public commandService!: CommandService;
 
     constructor() {
         this.client = new Client({

@@ -12,7 +12,10 @@ export default class PlayerManager {
     private queueService: QueueService;
     private commandService: CommandService;
 
-    constructor(queueService: QueueService, commandService: CommandService) {
+    constructor(
+        queueService: QueueService, 
+        commandService: CommandService,
+    ) {
         this.queueService = queueService;
         this.commandService = commandService;
     }
@@ -61,7 +64,12 @@ export default class PlayerManager {
         await player.togglePause(interaction);
     }
 
-    public setVolume(guildId: string, volume: number): void {
+    public async setVolume(interaction: CommandInteraction, volume: number): Promise<void> {
+        const guildId = interaction.guildId;
+        if (!guildId) {
+            await this.commandService.send(interaction, "This command can only be used in a server.");
+            return;
+        }
         const player = this.getPlayer(guildId);
         player.setVolume(volume);
     }

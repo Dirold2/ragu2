@@ -7,7 +7,6 @@ import { Track, TrackSchema } from './index.js';
 // PrismaClientSingleton для избежания множественных соединений с базой данных
 class PrismaClientSingleton {
     private static instance: PrismaClient;
-
     private constructor() {}
 
     public static getInstance(): PrismaClient {
@@ -25,8 +24,6 @@ class TrackValidator {
         return TrackSchema.parse(track);
     }
 }
-
-
 
 export default class QueueService {
     private prisma: PrismaClient;

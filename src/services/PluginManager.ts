@@ -1,7 +1,9 @@
+import NodeCache from 'node-cache';
 import { MusicServicePlugin } from '../interfaces/index.js';
 
 export default class PluginManager {
     private plugins: Map<string, MusicServicePlugin> = new Map();
+    private urlCache: NodeCache = new NodeCache({ stdTTL: 3600, checkperiod: 600 });
 
     registerPlugin(plugin: MusicServicePlugin): void {
         this.plugins.set(plugin.name, plugin);
@@ -16,8 +18,19 @@ export default class PluginManager {
     }
 
     getPluginForUrl(url: string): MusicServicePlugin | undefined {
-        return this.getAllPlugins().find(plugin => 
-            plugin.urlPatterns.some(pattern => pattern.test(url))
+        const cachedPlugin = this.urlCache.get<string>(url);
+        if (cachedPlugin) {
+          return this.plugins.get(cachedPlugin);
+        }
+    
+        const plugin = this.getAllPlugins().find(plugin => 
+          plugin.urlPatterns.some(pattern => pattern.test(url))
         );
-    }
+    
+        if (plugin) {
+          this.urlCache.set(url, plugin.name);
+        }
+    
+        return plugin;
+      }
 }

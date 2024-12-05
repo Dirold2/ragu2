@@ -1,36 +1,27 @@
-## build runner
-FROM node:lts-alpine as build-runner
+# Базовый образ
+FROM node:20-slim AS base
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable && apt-get update && apt-get install -y openssl
 
-# Set temp directory
-WORKDIR /tmp/app
-
-# Move package.json
-COPY package.json .
-
-# Install dependencies
-RUN npm install
-
-# Move source files
-COPY src ./src
-COPY tsconfig.json   .
-
-# Build project
-RUN npm run build
-
-## production runner
-FROM node:lts-alpine as prod-runner
-
-# Set work directory
+# Копируем исходный код в контейнер
+COPY . /app
 WORKDIR /app
 
-# Copy package.json from build-runner
-COPY --from=build-runner /tmp/app/package.json /app/package.json
+# Устанавливаем только production-зависимости
+FROM base AS prod-deps
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --prod --frozen-lockfile
 
-# Install dependencies
-RUN npm install --omit=dev
+# Устанавливаем все зависимости и собираем проект
+FROM base AS build
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpx prisma generate
+RUN pnpm run build
 
-# Move build files
-COPY --from=build-runner /tmp/app/build /app/build
-
-# Start bot
-CMD [ "npm", "run", "start" ]
+# Финальный образ
+FROM base
+COPY --from=prod-deps /app/node_modules /app/node_modules
+COPY --from=build /app/build /app/build
+COPY .env /app/.env
+EXPOSE 3000
+CMD ["pnpm", "start"]
