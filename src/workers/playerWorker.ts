@@ -1,5 +1,5 @@
 import { parentPort } from 'worker_threads';
-import { validateMessage, prepareResourceData, WorkerMessage, ResourceData } from './workerUtils';
+import { validateMessage, prepareResourceData, WorkerMessage, ResourceData } from './workerUtils.js';
 
 if (!parentPort) {
   throw new Error('This script must be run as a Worker thread');
