@@ -6,6 +6,7 @@ export interface MusicServicePlugin {
     searchName(trackName: string): Promise<SearchTrackResult[]>;
     searchURL(url: string): Promise<SearchTrackResult | null>;
     getTrackUrl(trackId: string): Promise<string>;
+    getPlaylistURL?(url: string): Promise<SearchTrackResult[] | null>;
 }
 
 export interface Track {
@@ -22,6 +23,8 @@ export interface TrackYandex {
     title: string;
     artists: Array<{ name: string }>;
     albums: Array<{ title?: string }>;
+    durationMs: number | undefined;
+    coverUri: string | undefined;
 }
 
 export interface QueueResult {
@@ -29,4 +32,11 @@ export interface QueueResult {
     lastTrackId?: string;
     waveStatus?: boolean;
     volume?: number;
+}
+
+export interface TrackInfo {
+    trackId: string;
+    info: string;
+    url: string;
+    source: string;
 }

@@ -1,14 +1,14 @@
-import { Client } from "discordx";
-import { IntentsBitField, Interaction, Message } from "discord.js";
-import { NameService, QueueService, 
-    PlayerManager, PluginManager, 
-    CommandService 
-} from "./services/index.js";
-import logger from "./utils/logger.js";
+import { dirname } from 'dirname-filename-esm';
+import { IntentsBitField, Interaction, Message } from 'discord.js';
+import { Client } from 'discordx';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { dirname } from 'dirname-filename-esm';
+
+import {
+    CommandService, NameService, PlayerManager, PluginManager, QueueService
+} from './services/index.js';
+import logger from './utils/logger.js';
 
 const __dirname = dirname(import.meta);
 

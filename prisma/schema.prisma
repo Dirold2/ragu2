@@ -16,13 +16,28 @@ model Queue {
   lastTrackId String?
   waveStatus  Boolean?
   volume      Int?
-  
   tracks      Tracks[]
-  
+  Playlist    Playlist[]
+
   @@unique([channelId, priority])
+  @@index([channelId])
 }
 
 model Tracks {
+  id        Int       @id @default(autoincrement())
+  trackId   String
+  addedAt   BigInt
+  info      String
+  url       String
+  source    String
+  queueId   Int
+  Queue     Queue     @relation(fields: [queueId], references: [id])
+
+  @@index([trackId])
+  @@index([queueId])
+}
+
+model Playlist {
   id        Int       @id @default(autoincrement())
   trackId   String
   addedAt   BigInt

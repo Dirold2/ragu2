@@ -1,6 +1,7 @@
-import { ApplicationCommandOptionType, CommandInteraction } from "discord.js";
-import { Discord, Slash, SlashOption } from "discordx";
-import { bot } from "../bot.js";
+import { ApplicationCommandOptionType, CommandInteraction } from 'discord.js';
+import { Discord, Slash, SlashOption } from 'discordx';
+
+import { bot } from '../bot.js';
 import logger from '../utils/logger.js';
 
 @Discord()

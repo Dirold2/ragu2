@@ -1,20 +1,18 @@
-import { URL } from 'url';
 import retry from 'async-retry';
-import { Discord } from "discordx";
-import NodeCache from "node-cache";
-import { Types, WrappedYMApi, YMApi } from "ym-api-meowed";
+import { Discord } from 'discordx';
+import NodeCache from 'node-cache';
+import { URL } from 'url';
+import { Types, WrappedYMApi, YMApi } from 'ym-api-meowed';
 
-import { logger } from "../utils/index.js";
 import { MusicServicePlugin, TrackYandex } from '../interfaces/index.js';
-import { Config, ConfigSchema, 
-    SearchTrackResult, TrackResultSchema 
-} from '../types/index.js';
+import { Config, ConfigSchema, SearchTrackResult, TrackResultSchema } from '../types/index.js';
+import { logger } from '../utils/index.js';
 
 @Discord()
 export default class YandexMusicPlugin implements MusicServicePlugin {
     name = 'yandex';
     urlPatterns = [/music\.yandex\.ru/];
-    
+
     private results: SearchTrackResult[] = [];
     private wrapper: WrappedYMApi = new WrappedYMApi();
     private api: YMApi = new YMApi();
@@ -64,6 +62,42 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
         }
     }
 
+    async getPlaylistURL(url: string): Promise<SearchTrackResult[] | null> {
+        await this.ensureInitialized();
+        try {
+            const parsedUrl = new URL(url);
+            if (!parsedUrl.hostname.includes('music.yandex.ru')) return null;
+
+            const playlistId = this.extractPlaylistId(parsedUrl);
+            if (!playlistId.playlistId || !playlistId.playlistName) {
+                logger.warn(`Не удалось извлечь данные плейлиста из URL: ${url}`);
+                return null;
+            }
+
+            const playlistInfo = await this.api.getPlaylist(Number(playlistId.playlistId), playlistId.playlistName);
+            if (!playlistInfo || !playlistInfo.tracks) {
+                logger.warn(`Плейлист с ID ${playlistId.playlistId} не найден.`);
+                return null;
+            }
+
+            logger.info(`Получено ${playlistInfo.tracks.length} треков из плейлиста.`);
+
+            const tracks: SearchTrackResult[] = playlistInfo.tracks.map(track => ({
+                id: track.id.toString(),
+                title: track.track.title,
+                artists: track.track.artists.map(artist => ({ name: artist.name })),
+                albums: track.track.albums.map(album => ({ title: album.title })),
+                duration: `${Math.floor(track.track.durationMs / 60000)}:${Math.floor((track.track.durationMs % 60000) / 1000).toString().padStart(2, '0')}`,
+                source: 'yandex',
+            }));
+
+            return tracks;
+        } catch (error) {
+            logger.error(`Ошибка при получении плейлиста: ${error.message}`);
+            return null;
+        }
+    }
+
     clearCache(): void {
         this.cache.flushAll();
         this.results = [];
@@ -77,7 +111,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
         try {
             const result = await retry(() => this.api.searchTracks(trackName), { retries: 3 });
             if (!result?.tracks?.results) {
-                logger.warn(`No results found for track: ${trackName}`);
                 return [];
             }
 
@@ -96,12 +129,22 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
         return match ? match[1] : null;
     }
 
+    private extractPlaylistId(parsedUrl: URL): { playlistName: string | null, playlistId: string | null } {
+        const match = parsedUrl.pathname.match(/\/users\/([^/]+)\/playlists\/(\d+)/);
+        return {
+            playlistName: match ? match[1] : null,
+            playlistId: match ? match[2] : null
+        };
+    }
+
     private formatTrackInfo(trackInfo: TrackYandex): SearchTrackResult {
         return {
             id: trackInfo.id.toString(),
             title: trackInfo.title,
             artists: trackInfo.artists.map(artist => ({ name: artist.name })),
             albums: trackInfo.albums.map(album => ({ title: album.title })),
+            duration: `${Math.floor(trackInfo.durationMs || 0 / 60000)}:${Math.floor((trackInfo.durationMs || 0 % 60000) / 1000).toString().padStart(2, '0')}`,
+            cover: (trackInfo.coverUri || ''),
             source: 'yandex',
         };
     }

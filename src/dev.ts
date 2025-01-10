@@ -1,10 +1,12 @@
-import { resolve } from "@discordx/importer";
-import chokidar from "chokidar";
-import { DIService, MetadataStorage } from "discordx";
-import { bot } from "./bot.js";
-import logger from './utils/logger.js';
-import dotenv from 'dotenv';
+import chokidar from 'chokidar';
 import { dirname } from 'dirname-filename-esm';
+import { DIService, MetadataStorage } from 'discordx';
+import dotenv from 'dotenv';
+
+import { resolve } from '@discordx/importer';
+
+import { bot } from './bot.js';
+import logger from './utils/logger.js';
 
 const __dirname = dirname(import.meta);
 

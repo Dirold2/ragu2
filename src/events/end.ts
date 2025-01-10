@@ -1,6 +1,7 @@
 import { Client } from 'discord.js';
+import { On } from 'discordx';
+
 import { logger } from '../utils/index.js';
-import { On } from "discordx";
 
 export const handleEnd = async (client: Client) => {
     On()

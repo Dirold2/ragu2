@@ -1,7 +1,8 @@
-import { CommandInteraction, Message, 
-    DiscordAPIError, InteractionResponse, 
-    CacheType, AutocompleteInteraction 
-} from "discord.js";
+import {
+    AutocompleteInteraction, CacheType, CommandInteraction, DiscordAPIError, InteractionResponse,
+    Message
+} from 'discord.js';
+
 import logger from '../utils/logger.js';
 
 export default class CommandService {

@@ -1,7 +1,7 @@
-import winston from 'winston';
-import DailyRotateFile from 'winston-daily-rotate-file';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import winston from 'winston';
+import DailyRotateFile from 'winston-daily-rotate-file';
 
 const createLogger = () => {
     const customFormat = winston.format.printf(({ level, message, timestamp, stack }) => {

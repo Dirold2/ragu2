@@ -1,6 +1,7 @@
-import { CommandInteraction } from "discord.js";
-import { Discord, Slash } from "discordx";
-import { bot } from "../bot.js";
+import { CommandInteraction } from 'discord.js';
+import { Discord, Slash } from 'discordx';
+
+import { bot } from '../bot.js';
 
 @Discord()
 export class PauseCommand {

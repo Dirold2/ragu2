@@ -1,6 +1,7 @@
-import { CommandInteraction, GuildMember } from "discord.js";
-import { Discord, Slash } from "discordx";
-import { bot } from "../bot.js";
+import { CommandInteraction, GuildMember } from 'discord.js';
+import { Discord, Slash } from 'discordx';
+
+import { bot } from '../bot.js';
 
 @Discord()
 export class QueueDelCommand {

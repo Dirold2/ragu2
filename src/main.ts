@@ -1,7 +1,9 @@
-import { importx } from "@discordx/importer";
-import { bot } from "./bot.js";
-import dotenv from 'dotenv';
 import { dirname } from 'dirname-filename-esm';
+import dotenv from 'dotenv';
+
+import { importx } from '@discordx/importer';
+
+import { bot } from './bot.js';
 
 const __dirname = dirname(import.meta);
 
@@ -13,7 +15,7 @@ async function run() {
     if (!process.env.BOT_TOKEN) {
         throw Error("Could not find BOT_TOKEN in your environment");
     }
-    
+
     await bot.start(process.env.BOT_TOKEN);
 }
 

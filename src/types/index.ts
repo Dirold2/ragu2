@@ -1,4 +1,5 @@
-import { z } from "zod";
+import { StreamType } from '@discordjs/voice/dist';
+import { z } from 'zod';
 
 // Define schema for individual track search result
 export const TrackResultSchema = z.object({
@@ -16,7 +17,10 @@ export const TrackResultSchema = z.object({
             })
         )
         .optional(),
+    duration: z.string().optional(),
+    cover: z.string().optional(),
     source: z.string(),
+    url: z.string().optional(),
 });
 
 // Type definition inferred from the TrackResultSchema
@@ -43,3 +47,15 @@ export const ConfigSchema = z.object({
 
 // Type definition inferred from the ConfigSchema
 export type Config = z.infer<typeof ConfigSchema>;
+
+export interface WorkerMessage {
+    type: string;
+    url: string;
+    volume: number;
+}
+
+export interface ResourceData {
+    url: string;
+    volume: number;
+    inputType: StreamType;
+}

@@ -1,11 +1,10 @@
 import { CommandInteraction } from 'discord.js';
-import { 
-    PlayerService, 
-    QueueService, 
-    CommandService 
-} from './index.js';
-import logger from '../utils/logger.js';
+
 import { Track } from '../interfaces/index.js';
+import logger from '../utils/logger.js';
+import { CommandService, PlayerService, QueueService } from './index.js';
+
+const SERVER_ONLY_ERROR = "This command can only be used in a server.";
 
 export default class PlayerManager {
     private players: Map<string, PlayerService> = new Map();
@@ -13,7 +12,7 @@ export default class PlayerManager {
     private commandService: CommandService;
 
     constructor(
-        queueService: QueueService, 
+        queueService: QueueService,
         commandService: CommandService,
     ) {
         this.queueService = queueService;
@@ -21,18 +20,19 @@ export default class PlayerManager {
     }
 
     public getPlayer(guildId: string): PlayerService {
-        if (!this.players.has(guildId)) {
+        let player = this.players.get(guildId);
+        if (!player) {
             logger.debug(`Creating new PlayerService for guild ${guildId}`);
-            const player = new PlayerService(this.queueService, this.commandService, guildId);
+            player = new PlayerService(this.queueService, this.commandService, guildId);
             this.players.set(guildId, player);
         }
-        return this.players.get(guildId)!;
+        return player;
     }
 
     public async joinChannel(interaction: CommandInteraction): Promise<void> {
         const guildId = interaction.guildId;
-            if (!guildId) {
-            await this.commandService.send(interaction, "This command can only be used in a server.");
+        if (!guildId) {
+            await this.commandService.send(interaction, SERVER_ONLY_ERROR);
             return;
         }
         const player = this.getPlayer(guildId);
@@ -46,8 +46,8 @@ export default class PlayerManager {
 
     public async skip(interaction: CommandInteraction): Promise<void> {
         const guildId = interaction.guildId;
-            if (!guildId) {
-            await this.commandService.send(interaction, "This command can only be used in a server.");
+        if (!guildId) {
+            await this.commandService.send(interaction, SERVER_ONLY_ERROR);
             return;
         }
         const player = this.getPlayer(guildId);
@@ -56,8 +56,8 @@ export default class PlayerManager {
 
     public async togglePause(interaction: CommandInteraction): Promise<void> {
         const guildId = interaction.guildId;
-            if (!guildId) {
-            await this.commandService.send(interaction, "This command can only be used in a server.");
+        if (!guildId) {
+            await this.commandService.send(interaction, SERVER_ONLY_ERROR);
             return;
         }
         const player = this.getPlayer(guildId);
@@ -67,18 +67,23 @@ export default class PlayerManager {
     public async setVolume(interaction: CommandInteraction, volume: number): Promise<void> {
         const guildId = interaction.guildId;
         if (!guildId) {
-            await this.commandService.send(interaction, "This command can only be used in a server.");
+            await this.commandService.send(interaction, SERVER_ONLY_ERROR);
             return;
         }
         const player = this.getPlayer(guildId);
-        player.setVolume(volume);
+
+        // await this.queueService.setVolume(guildId, volume);
+
+        await player.setVolume(volume);
     }
 
     public leaveChannel(guildId: string): void {
         const player = this.players.get(guildId);
-            if (player) {
+        if (player) {
             player.leaveChannel();
             this.players.delete(guildId);
+        } else {
+            logger.warn(`Attempted to leave channel for non-existent player in guild ${guildId}`);
         }
     }
 }
