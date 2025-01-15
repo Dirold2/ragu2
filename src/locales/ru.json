@@ -33,5 +33,8 @@
     "started": "Бот успешно запустился.",
     "failed": "Не удалось запустить бота: {{error}}",
     "ready": "Бот инициализирован!"
-  }
+  },
+  "error-clearing-queue-for-channel-channelid": "Error clearing queue for channel {0}",
+  "error-fetching-queue-for-channel-channelid": "Error fetching queue for channel {0}",
+  "error-adding-track-track-trackid-to-queue": "Error adding track {0} to queue"
 }

@@ -1,6 +1,7 @@
 import { CommandInteraction, GuildMember } from 'discord.js';
 import { z } from 'zod';
-import { UserNotInVoiceChannelError, PluginNotFoundError } from '../errors/index.js';
+
+import { PluginNotFoundError, UserNotInVoiceChannelError } from '../errors/index.js';
 import { MusicServicePlugin, TrackInfo } from '../interfaces/index.js';
 import { logger, trackPlayCounter } from '../utils/index.js';
 import { PlayerManager, PluginManager, QueueService, SearchTrackResult } from './index.js';
@@ -21,19 +22,43 @@ export default class NameService {
         private readonly queueService: QueueService,
         private readonly playerManager: PlayerManager,
         private readonly pluginManager: PluginManager
-    ) { }
+    ) {}
 
     async searchName(trackName: string): Promise<SearchTrackResult[]> {
         logger.debug(`Searching for track or URL "${trackName}"...`);
-
-        if (!trackName.trim()) {
-            logger.debug("Empty search string");
-            return [];
-        }
+        if (!trackName.trim()) return [];
 
         return TrackUrlSchema.safeParse(trackName).success
             ? this.searchAndProcessURL(trackName)
             : this.searchAcrossPlugins(trackName);
+    }
+
+    async processTrackSelection(selectedTrack: SearchTrackResult, interaction: CommandInteraction): Promise<void> {
+        try {
+            const { channel, guildId } = this.getVoiceChannelInfo(interaction);
+            const plugin = this.getPluginForTrack(selectedTrack);
+            const trackUrl = await this.getTrackUrl(plugin, selectedTrack);
+            const track = this.createTrackInfo(selectedTrack, trackUrl);
+
+            await this.addTrackToQueue(track, channel.id, guildId, interaction);
+            trackPlayCounter.inc({ status: "success" });
+        } catch (error) {
+            await this.handleTrackSelectionError(error);
+            trackPlayCounter.inc({ status: "failure" });
+        }
+    }
+
+    async processPlaylist(url: string, interaction: CommandInteraction): Promise<void> {
+        const playlistTracks = await this.searchAndProcessPlaylistURL(url);
+        if (!playlistTracks?.length) {
+            await this.safeReply(interaction, MESSAGES.EMPTY_PLAYLIST);
+            return;
+        }
+
+        const { channel, guildId } = this.getVoiceChannelInfo(interaction);
+        await this.addPlaylistTracksToQueue(playlistTracks, channel.id, guildId);
+        await this.playerManager.joinChannel(interaction);
+        await this.safeReply(interaction, MESSAGES.PLAYLIST_ADDED(playlistTracks.length));
     }
 
     private async searchAcrossPlugins(trackName: string): Promise<SearchTrackResult[]> {
@@ -53,7 +78,6 @@ export default class NameService {
     }
 
     private async searchAndProcessURL(url: string): Promise<SearchTrackResult[]> {
-        logger.debug(`Processing URL: ${url}`);
         const plugin = this.pluginManager.getPluginForUrl(url);
         if (!plugin) {
             logger.warn("Unsupported URL");
@@ -66,25 +90,6 @@ export default class NameService {
         } catch (error) {
             logger.warn(`Error processing URL with ${plugin.name}: ${error instanceof Error ? error.message : String(error)}`);
             return [];
-        }
-    }
-
-    async processTrackSelection(selectedTrack: SearchTrackResult, interaction: CommandInteraction): Promise<void> {
-        try {
-            const { channel, guildId } = this.getVoiceChannelInfo(interaction);
-            const plugin = this.getPluginForTrack(selectedTrack);
-            const trackUrl = await this.getTrackUrl(plugin, selectedTrack);
-            const track = this.createTrackInfo(selectedTrack, trackUrl);
-
-            if (!channel) {
-                throw new UserNotInVoiceChannelError();
-            }
-
-            await this.addTrackToQueue(track, channel.id!, guildId, interaction);
-            trackPlayCounter.inc({ status: "success" });
-        } catch (error) {
-            await this.handleTrackSelectionError(error, interaction);
-            trackPlayCounter.inc({ status: "failure" });
         }
     }
 
@@ -121,14 +126,14 @@ export default class NameService {
         ]);
     }
 
-    private async handleTrackSelectionError(error: unknown, interaction: CommandInteraction): Promise<void> {
+    private async handleTrackSelectionError(error: unknown): Promise<void> {
         logger.error(`Error processing track selection: ${error instanceof Error ? error.message : String(error)}`, error);
         if (error instanceof UserNotInVoiceChannelError) {
-            await this.safeReply(interaction, MESSAGES.NOT_IN_VOICE_CHANNEL);
+            logger.error(MESSAGES.NOT_IN_VOICE_CHANNEL);
         } else if (error instanceof PluginNotFoundError) {
-            await this.safeReply(interaction, MESSAGES.UNSUPPORTED_TRACK_SOURCE);
+            logger.error(MESSAGES.UNSUPPORTED_TRACK_SOURCE);
         } else {
-            await this.safeReply(interaction, MESSAGES.UNEXPECTED_ERROR);
+            logger.error(MESSAGES.UNEXPECTED_ERROR);
         }
     }
 
@@ -144,21 +149,7 @@ export default class NameService {
         }
     }
 
-    async processPlaylist(url: string, interaction: CommandInteraction): Promise<void> {
-        const playlistTracks = await this.searchAndProcessPlaylistURL(url);
-        if (!playlistTracks?.length) {
-            await this.safeReply(interaction, MESSAGES.EMPTY_PLAYLIST);
-            return;
-        }
-
-        const { channel, guildId } = this.getVoiceChannelInfo(interaction);
-        await this.addPlaylistTracksToQueue(playlistTracks, channel.id, guildId);
-        await this.playerManager.joinChannel(interaction);
-        await this.safeReply(interaction, MESSAGES.PLAYLIST_ADDED(playlistTracks.length));
-    }
-
     private async searchAndProcessPlaylistURL(url: string): Promise<SearchTrackResult[]> {
-        logger.debug(`Processing playlist URL: ${url}`);
         const plugin = this.pluginManager.getPluginForUrl(url);
         if (!plugin || !plugin.getPlaylistURL) {
             logger.warn("Unsupported playlist URL");
@@ -167,12 +158,7 @@ export default class NameService {
 
         try {
             const tracks = await plugin.getPlaylistURL(url);
-            if (!Array.isArray(tracks)) {
-                logger.warn("Playlist is not an array");
-                return [];
-            }
-            logger.debug(`Found ${tracks.length} tracks in the playlist.`);
-            return tracks;
+            return Array.isArray(tracks) ? tracks : [];
         } catch (error) {
             logger.warn(`Error processing playlist URL with ${plugin.name}: ${error instanceof Error ? error.message : String(error)}`);
             return [];
