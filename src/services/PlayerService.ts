@@ -325,7 +325,7 @@ export default class PlayerService {
             guildId: this.guildId,
             adapterCreator: interaction.guild
                 ?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
-            selfDeaf: false,
+            selfDeaf: false, 
         });
 
         try {
