@@ -1,27 +1,50 @@
-import { CommandInteraction, GuildMember, PermissionFlagsBits, VoiceChannel } from 'discord.js';
-import { Discord } from 'discordx';
-
 import {
-    AudioPlayer, AudioPlayerStatus, AudioResource, createAudioPlayer, createAudioResource,
-    DiscordGatewayAdapterCreator, entersState, getVoiceConnection, joinVoiceChannel,
-    NoSubscriberBehavior, StreamType, VoiceConnection, VoiceConnectionStatus
-} from '@discordjs/voice';
+    CommandInteraction,
+    GuildMember, 
+    PermissionFlagsBits,
+    VoiceChannel
+} from "discord.js";
+import { Discord } from "discordx";
+import {
+    AudioPlayer,
+    AudioPlayerStatus,
+    AudioResource,
+    createAudioPlayer,
+    createAudioResource,
+    DiscordGatewayAdapterCreator,
+    entersState,
+    getVoiceConnection,
+    joinVoiceChannel,
+    NoSubscriberBehavior,
+    StreamType,
+    VoiceConnection,
+    VoiceConnectionStatus
+} from "@discordjs/voice";
+import { Worker } from 'worker_threads';
 
-import { bot } from '../bot.js';
-import { DEFAULT_VOLUME, EMPTY_CHANNEL_CHECK_INTERVAL, RECONNECTION_TIMEOUT } from '../config.js';
-import logger from '../utils/logger.js';
-import { CommandService, QueueService, Track } from './index.js';
+import { bot } from "../bot.js";
+import {
+    DEFAULT_VOLUME,
+    EMPTY_CHANNEL_CHECK_INTERVAL,
+    RECONNECTION_TIMEOUT
+} from "../config.js";
+import logger from "../utils/logger.js";
+import { CommandService, QueueService, Track } from "./index.js";
 
 @Discord()
 export default class PlayerService {
+    // Приватные свойства
     private player: AudioPlayer;
     private connection: VoiceConnection | null = null;
     private isPlaying = false;
     private emptyChannelCheckInterval: NodeJS.Timeout | null = null;
+    private resource: AudioResource | null = null;
+    private fadeOutTimeout: NodeJS.Timeout | null = null;
 
+    // Публичные свойства
     public channelId: string | null = null;
     public volume = DEFAULT_VOLUME;
-    public currentTrack: Track | null = null;
+    public currentTrack: Track | null = null; 
     public nextTrack: Track | null = null;
 
     constructor(
@@ -32,17 +55,12 @@ export default class PlayerService {
         this.player = this.createPlayer();
     }
 
+    // Публичные методы управления воспроизведением
     public async playOrQueueTrack(track: Track): Promise<void> {
         try {
-            if (!this.isPlaying) {
-                await this.playTrack(track);
-            } else {
-                await this.queueTrack(track);
-            }
-
-            if (!this.nextTrack) {
-                await this.loadNextTrack();
-            }
+            const action = this.isPlaying ? this.queueTrack : this.playTrack;
+            await action.call(this, track);
+            if (!this.nextTrack) await this.loadNextTrack();
         } catch (error) {
             this.handleError(error as Error, "Failed to play or queue track");
         }
@@ -50,44 +68,94 @@ export default class PlayerService {
 
     public async skip(interaction: CommandInteraction): Promise<void> {
         if (!this.ensureConnected(interaction)) return;
+
+        // Затухание громкости на 3 секунды
+        if (this.player.state.status === AudioPlayerStatus.Playing) {
+            this.smoothVolumeChange(0, 1000, false);
+        }
+
+        // Скип трека через 2 секунды
+        await new Promise(resolve => setTimeout(resolve, 1000));
         await this.playNextTrack();
-        await this.commandService.send(interaction, `Skipped to next track: ${this.currentTrack?.info || "No track"}`);
+        await this.commandService.send(
+            interaction,
+            `Skipped to next track: ${this.currentTrack?.info || "No track"}`
+        );
     }
 
     public async togglePause(interaction: CommandInteraction): Promise<void> {
         if (!this.ensureConnected(interaction)) return;
 
-        if (this.player.state.status === AudioPlayerStatus.Playing) {
-            this.player.pause();
-            this.isPlaying = false;
-            await this.commandService.send(interaction, "Playback paused.");
-        } else if (this.player.state.status === AudioPlayerStatus.Paused) {
-            this.player.unpause();
-            this.isPlaying = true;
-            await this.commandService.send(interaction, "Playback resumed.");
+        const status = this.player.state.status;
+        const toggleActions: { [key: string]: () => void } = {
+            [AudioPlayerStatus.Playing]: () => {
+                this.player.pause();
+                this.isPlaying = false;
+                this.commandService.send(interaction, "Playback paused.");
+            },
+            [AudioPlayerStatus.Paused]: () => {
+                this.player.unpause();
+                this.isPlaying = true;
+                this.commandService.send(interaction, "Playback resumed.");
+            },
+        };
+
+        const action = toggleActions[status];
+        if (action) {
+            action();
         } else {
-            await this.commandService.send(interaction, "No track is currently playing.");
+            this.commandService.send(interaction, "No track is currently playing.");
         }
+    }
+
+    // Методы управления длительностью и громкостью
+    private async getTrackDuration(url: string): Promise<number> {
+        return new Promise((resolve, reject) => {
+            const worker = new Worker('./src/workers/trackDurationWorker.js');
+            worker.postMessage(url);
+    
+            worker.on('message', (message) => {
+                if (typeof message === 'number') {
+                    resolve(message);
+                } else if (message.error) {
+                    reject(new Error(message.error));
+                }
+            });
+    
+            worker.on('error', (error) => {
+                reject(error);
+            });
+    
+            worker.on('exit', (code) => {
+                if (code !== 0) {
+                    reject(new Error(`Worker stopped with exit code ${code}`));
+                }
+            });
+        });
     }
 
     public setVolume(volume: number): void {
-        this.volume = Math.max(0, Math.min(100, volume));
         if (this.player.state.status === AudioPlayerStatus.Playing) {
-            (this.player.state.resource as AudioResource).volume?.setVolumeLogarithmic(this.volume / 100);
+            this.smoothVolumeChange(volume / 100, 2000);
         }
     }
 
+    // Методы управления подключением
     public async joinChannel(interaction: CommandInteraction): Promise<void> {
         const member = interaction.member as GuildMember;
         const voiceChannelId = member.voice.channel?.id;
 
         if (!this.hasVoiceChannelAccess(member) || !voiceChannelId) {
-            await this.commandService.send(interaction, "No access to voice channel or invalid channel ID.");
+            await this.commandService.send(
+                interaction,
+                "No access to voice channel or invalid channel ID."
+            );
             return;
         }
 
         this.channelId = voiceChannelId;
-        this.connection = getVoiceConnection(this.guildId) || await this.connectToChannel(voiceChannelId, interaction);
+        this.connection = getVoiceConnection(this.guildId) || 
+            (await this.connectToChannel(voiceChannelId, interaction));
 
         const track = await this.queueService.getTrack(voiceChannelId);
         if (track) await this.playOrQueueTrack(track);
@@ -110,33 +178,126 @@ export default class PlayerService {
         this.leaveChannel();
     }
 
-    private async playTrack(track: Track): Promise<void> {
-        this.currentTrack = track;
-        const resource = createAudioResource(track.url, { inputType: StreamType.Arbitrary, inlineVolume: true });
-        resource.volume?.setVolumeLogarithmic(this.volume / 100);
-        this.player.play(resource);
-        this.isPlaying = true;
-        logger.debug(`Playing track: ${track.info}`);
-        await bot.client.user?.setActivity(track.info, { type: 3 });
+    // Методы управления громкостью
+    public smoothVolumeChange(
+        targetVolume: number,
+        duration: number,
+        memorize: boolean = true,
+        zero: boolean = false,
+    ): Promise<void> {
+        return new Promise((resolve) => {
+            var startVolume = 0;
+            if (zero) {
+                startVolume = 0;
+            } else {
+                startVolume = this.volume / 100 || 0;
+            }
+            
+            logger.info(`start: ${startVolume} target: ${targetVolume} volume: ${this.volume / 100}`)
+
+            const volumeDiff = targetVolume - startVolume;
+            const steps = 20;
+            const stepDuration = duration / steps;
+            const volumeStep = volumeDiff / steps;
+
+            if (memorize) {
+                this.volume = targetVolume * 100;
+            }
+            let currentStep = 0;
+
+            const changeStep = () => {
+                currentStep++;
+                const newVolume = startVolume + volumeStep * currentStep;
+
+                this.resource?.volume?.setVolumeLogarithmic(
+                    Math.max(0, Math.min(1, newVolume))
+                );
+
+                if (currentStep < steps) {
+                    setTimeout(changeStep, stepDuration);
+                } else {
+                    resolve();
+                }
+            };
+
+            changeStep();
+        });
     }
 
-    private async queueTrack(track: Track): Promise<void> {
-        if (this.channelId !== null && this.channelId !== undefined) {
-            await this.queueService.setTrack(this.channelId, this.guildId, track);
-        } else {
-            logger.warn('Channel ID is null or undefined. Skipping track addition.');
+    // Методы управления треками
+    private async playTrack(track: Track): Promise<void> {
+        try {
+            this.currentTrack = track;
+    
+            const trackUrl = track.url;
+            if (!trackUrl) {
+                throw new Error("Track URL is undefined");
+            }
+    
+            const resource = createAudioResource(trackUrl, {
+                inputType: StreamType.Arbitrary,
+                inlineVolume: true,
+            });
+    
+            this.resource = resource;
+
+            resource.volume?.setVolumeLogarithmic(0);
+
+            // Очистка предыдущего таймера
+            if (this.fadeOutTimeout) {
+                clearTimeout(this.fadeOutTimeout);
+                this.fadeOutTimeout = null;
+            }
+
+            this.smoothVolumeChange(this.volume / 100, 3000, true, true);
+
+            this.player.play(resource);
+
+            this.isPlaying = true;
+            logger.debug(`Playing track: ${track.info}`);
+            bot.client.user?.setActivity(track.info, { type: 3 });
+
+            const trackDuration = await this.getTrackDuration(trackUrl);
+    
+            const fadeOutStartTime = trackDuration - 8000;
+            this.fadeOutTimeout = setTimeout(() => {
+                this.smoothVolumeChange(0, 6000, false);
+            }, fadeOutStartTime);
+    
+        } catch (error) {
+            this.handleError(error as Error, "Failed to play track");
         }
-        logger.debug(`Track added to queue: ${track.info}`);
+    }    
+
+    private async queueTrack(track: Track): Promise<void> {
+        if (!this.channelId) {
+            logger.warn("Channel ID is null or undefined. Skipping track addition.");
+            return;
+        }
+
+        try {
+            await this.queueService.setTrack(this.channelId, this.guildId, track);
+            logger.debug(`Track added to queue: ${track.info}`);
+        } catch (error) {
+            this.handleError(error as Error, "Failed to queue track");
+        }
     }
 
     private async loadNextTrack(): Promise<void> {
         try {
-            if (this.channelId !== null && this.channelId !== undefined) {
+            if (this.channelId) {
                 this.nextTrack = await this.queueService.getTrack(this.channelId);
             } else {
-                logger.warn('Channel ID is null or undefined. Skipping track addition.');
+                logger.warn(
+                    "Channel ID is null or undefined. Skipping track addition."
+                );
             }
-            logger.verbose(this.nextTrack ? `Loaded next track: ${this.nextTrack.info}` : "No next track to load");
+
+            logger.verbose(
+                this.nextTrack
+                    ? `Loaded next track: ${this.nextTrack.info}`
+                    : "No next track to load"
+            );
         } catch (error) {
             this.handleError(error as Error, "Failed to load next track");
         }
@@ -149,16 +310,21 @@ export default class PlayerService {
             await this.loadNextTrack();
         } else {
             this.resetState();
-            await bot.client.user?.setActivity();
+            bot.client.user?.setActivity();
             logger.debug("Queue is empty, playback stopped.");
         }
     }
 
-    private async connectToChannel(channelId: string, interaction: CommandInteraction): Promise<VoiceConnection> {
+    // Вспомогательные методы подключения
+    private async connectToChannel(
+        channelId: string,
+        interaction: CommandInteraction
+    ): Promise<VoiceConnection> {
         const connection = joinVoiceChannel({
             channelId,
             guildId: this.guildId,
-            adapterCreator: interaction.guild?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+            adapterCreator: interaction.guild
+                ?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
             selfDeaf: false,
         });
 
@@ -176,8 +342,16 @@ export default class PlayerService {
         this.connection?.on(VoiceConnectionStatus.Disconnected, async () => {
             try {
                 await Promise.race([
-                    entersState(this.connection!, VoiceConnectionStatus.Signalling, RECONNECTION_TIMEOUT),
-                    entersState(this.connection!, VoiceConnectionStatus.Connecting, RECONNECTION_TIMEOUT),
+                    entersState(
+                        this.connection!,
+                        VoiceConnectionStatus.Signalling,
+                        RECONNECTION_TIMEOUT
+                    ),
+                    entersState(
+                        this.connection!,
+                        VoiceConnectionStatus.Connecting,
+                        RECONNECTION_TIMEOUT
+                    ),
                 ]);
                 logger.debug("Connection restored.");
             } catch (error) {
@@ -185,7 +359,7 @@ export default class PlayerService {
                 logger.error("Connection terminated", error);
             }
         });
-    }
+    }   
 
     private handleDisconnectionError(): void {
         if (this.connection) {
@@ -197,9 +371,13 @@ export default class PlayerService {
         logger.debug("Connection terminated.");
     }
 
+    // Методы проверки пустого канала
     private startEmptyChannelCheck(): void {
         this.stopEmptyChannelCheck();
-        this.emptyChannelCheckInterval = setInterval(() => this.checkEmptyChannel(), EMPTY_CHANNEL_CHECK_INTERVAL);
+        this.emptyChannelCheckInterval = setInterval(
+            () => this.checkEmptyChannel(),
+            EMPTY_CHANNEL_CHECK_INTERVAL
+        );
     }
 
     private stopEmptyChannelCheck(): void {
@@ -214,9 +392,15 @@ export default class PlayerService {
 
         try {
             const guild = await bot.client.guilds.fetch(this.guildId);
-            const channel = (await guild.channels.fetch(this.channelId)) as VoiceChannel;
+            const channel = (await guild.channels.fetch(
+                this.channelId
+            )) as VoiceChannel;
 
-            if (channel.members.size === 0) {
+            const nonBotMembers = channel.members.filter(
+                (member) => !member.user.bot
+            );
+
+            if (nonBotMembers.size === 0) {
                 logger.debug("No members in voice channel, disconnecting.");
                 this.leaveChannel();
             }
@@ -225,17 +409,24 @@ export default class PlayerService {
         }
     }
 
+    // Вспомогательные методы
     private ensureConnected(interaction: CommandInteraction): boolean {
         if (!this.connection) {
-            this.commandService.send(interaction, "Not connected to a voice channel.");
+            this.commandService.send(
+                interaction,
+                "Not connected to a voice channel."
+            );
             return false;
         }
         return true;
     }
 
     private hasVoiceChannelAccess(member: GuildMember): boolean {
-        const channel = member.voice.channel;
-        return channel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) ?? false;
+        return (
+            member.voice.channel
+                ?.permissionsFor(member)
+                ?.has(PermissionFlagsBits.Connect) ?? false
+        );
     }
 
     private createPlayer(): AudioPlayer {
@@ -262,6 +453,7 @@ export default class PlayerService {
 
     private handleError(error: Error, message: string): void {
         logger.error(`${message}: ${error.message}`);
+        logger.debug(`Stack trace: ${error.stack}`);
     }
 
     private resetState(): void {

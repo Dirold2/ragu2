@@ -44,23 +44,29 @@ export class PlayCommand {
 
         if (interaction.isAutocomplete()) {
             await this.handleAutocomplete(interaction, query);
-            } else if (interaction.isChatInputCommand()) {
+        } else if (interaction.isChatInputCommand()) {
             await this.handlePlay(interaction, query);
         }
     }
 
     private async handleAutocomplete(
-            interaction: AutocompleteInteraction, 
-            query: string
+        interaction: AutocompleteInteraction, 
+        query: string
     ): Promise<void> {
         try {
             const results = await bot.nameService.searchName(query);
             const choices = results
                 .slice(0, PlayCommand.MAX_RESULTS)
-                .map(track => ({
-                name: this.formatTrackName(track),
-                value: this.formatTrackName(track)
-                }));
+                .map(track => {
+                    const formattedName = this.formatTrackName(track);
+                    const validName = formattedName.length > 100 
+                        ? formattedName.slice(0, 97) + '...' 
+                        : formattedName;
+                    return {
+                        name: validName,
+                        value: validName
+                    };
+                });
 
             await interaction.respond(choices);
         } catch (error) {
@@ -79,10 +85,6 @@ export class PlayCommand {
             if (!results.length) {
                 return this.reply(interaction, `No tracks found for "${query}"`);
             }
-
-            // if (!(interaction.channel instanceof TextChannel)) {
-            //     return this.reply(interaction, "This command only works in text channels");
-            // }
 
             await bot.nameService.processTrackSelection(results[0], interaction);
         } catch (error) {
