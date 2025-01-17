@@ -2,8 +2,8 @@ import {
     AutocompleteInteraction, CacheType, CommandInteraction, DiscordAPIError, InteractionResponse,
     Message
 } from 'discord.js';
-
 import logger from '../utils/logger.js';
+import { MESSAGES } from '../messages.js';
 
 export default class CommandService {
     public async send(
@@ -31,16 +31,31 @@ export default class CommandService {
 
     public async delete(message: Message): Promise<void> {
         if (!message.deletable) {
-            logger.debug(`Message with ID: ${message.id} cannot be deleted or does not exist.`);
+            logger.debug(MESSAGES.MESSAGE_CANNOT_BE_DELETED(message.id));
             return;
         }
 
         try {
             logger.debug(`Attempting to delete message with ID: ${message.id}`);
             await message.delete();
-            logger.debug(`Message with ID: ${message.id} successfully deleted.`);
+            logger.debug(MESSAGES.MESSAGE_DELETED(message.id));
         } catch (error) {
             this.handleMessageError(error, message);
+        }
+    }
+
+    public async reply(
+        interaction: CommandInteraction, 
+        content: string
+    ): Promise<void> {
+        try {
+            if (interaction.deferred) {
+                await interaction.editReply({ content });
+            } else {
+                await interaction.reply({ content, ephemeral: true });
+            }
+        } catch (error) {
+            logger.error('Reply error:', error);
         }
     }
 
@@ -48,7 +63,7 @@ export default class CommandService {
         if (error instanceof DiscordAPIError) {
             this.handleDiscordAPIError(error, `interaction with ID: ${interaction.id}`);
         } else {
-            logger.error(`Unknown error during interaction with ID: ${interaction.id}:`, error);
+            logger.error(MESSAGES.UNKNOWN_ERROR_INTERACTION(interaction.id), error);
         }
     }
 
@@ -56,7 +71,7 @@ export default class CommandService {
         if (error instanceof DiscordAPIError) {
             this.handleDiscordAPIError(error, `message with ID: ${message.id}`);
         } else {
-            logger.error(`Unknown error while deleting message with ID: ${message.id}:`, error);
+            logger.error(MESSAGES.UNKNOWN_ERROR_DELETING_MESSAGE(message.id), error);
         }
     }
 
@@ -64,10 +79,10 @@ export default class CommandService {
         switch (error.code) {
             case 10008:
             case 10062:
-                logger.debug(`${context} no longer exists (Unknown ${error.code === 10008 ? 'Message' : 'Interaction'}).`);
+                logger.debug(MESSAGES.INTERACTION_NO_LONGER_EXISTS(context));
                 break;
             default:
-                logger.error(`Discord API Error (${error.code}) for ${context}: ${error.message}`);
+                logger.error(MESSAGES.DISCORD_API_ERROR(Number(error.code), context, error.message));
         }
     }
 }

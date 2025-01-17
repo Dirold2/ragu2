@@ -34,6 +34,7 @@ export const TrackSchema = z.object({
     url: z.string().url(),
     source: z.string(),
     waveStatus: z.boolean().optional(),
+    requestedBy: z.string().optional(),
 });
 
 // Type definition inferred from the TrackSchema
@@ -58,4 +59,8 @@ export interface ResourceData {
     url: string;
     volume: number;
     inputType: StreamType;
+}
+
+export interface Messages {
+    [key: string]: string;
 }

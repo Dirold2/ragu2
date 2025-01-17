@@ -16,8 +16,6 @@ interface Track {
 export class QueueCommand {
     @Slash({ description: "View the current queue", name: "queue" })
     public async queue(interaction: CommandInteraction): Promise<void> {
-        await interaction.deferReply({ ephemeral: true });
-
         try {
             await this.handleQueueCommand(interaction);
         } catch (error) {
@@ -28,18 +26,18 @@ export class QueueCommand {
     private async handleQueueCommand(interaction: CommandInteraction): Promise<void> {
         const channelId = this.getVoiceChannelId(interaction);
         if (!channelId) {
-            await bot.commandService.send(interaction, "You must be in a voice channel to use this command.");
+            await bot.commandService.reply(interaction, "You must be in a voice channel to use this command.");
             return;
         }
 
         const queue = await bot.queueService.getQueue(channelId);
         if (queue.tracks.length === 0) {
-            await bot.commandService.send(interaction, "The queue is empty.");
+            await bot.commandService.reply(interaction, "The queue is empty.");
             return;
         }
 
         const queueString = this.formatQueueString(queue.tracks);
-        await bot.commandService.send(interaction, `Current queue:\n${queueString}`);
+        await bot.commandService.reply(interaction, `Current queue:\n${queueString}`);
     }
 
     private getVoiceChannelId(interaction: CommandInteraction): string | null {
@@ -63,6 +61,6 @@ export class QueueCommand {
             : "An unexpected error occurred while fetching the queue.";
 
         logger.error("Queue command error:", error);
-        await bot.commandService.send(interaction, errorMsg);
+        await bot.commandService.reply(interaction, errorMsg);
     }
 }

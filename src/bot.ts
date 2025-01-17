@@ -51,7 +51,6 @@ class Bot {
     private registerPlugins(pluginManager: PluginManager): void {
         const pluginsDir = path.resolve(__dirname, 'plugins');
         fs.readdirSync(pluginsDir).forEach(async (file) => {
-            // Проверяем, является ли файл плагином
             if (file.endsWith('.ts') || file.endsWith('.js')) {
                 const pluginPath = String(pathToFileURL(path.join(pluginsDir, file)));
                 const { default: Plugin } = await import(pluginPath);

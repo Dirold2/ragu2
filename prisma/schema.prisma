@@ -15,6 +15,7 @@ model Queue {
   priority    Boolean
   lastTrackId String?
   waveStatus  Boolean?
+  loop        Boolean? @default(false)
   volume      Int?
   tracks      Tracks[]
   Playlist    Playlist[]
@@ -30,6 +31,7 @@ model Tracks {
   info      String
   url       String
   source    String
+  requestedBy String?
   queueId   Int
   Queue     Queue     @relation(fields: [queueId], references: [id])
 
@@ -44,6 +46,28 @@ model Playlist {
   info      String
   url       String
   source    String
+  requestedBy String?
   queueId   Int
   Queue     Queue     @relation(fields: [queueId], references: [id])
+}
+
+model GlobalHistory {
+  id        Int      @id @default(autoincrement())
+  trackId   String
+  info      String
+  playedAt  DateTime @default(now())
+  playCount Int      @default(1)
+
+  @@index([trackId])
+}
+
+model UserHistory {
+  id        Int      @id @default(autoincrement())
+  requestedBy String
+  trackId   String
+  info      String
+  playedAt  DateTime @default(now())
+  playCount Int      @default(1)
+
+  @@index([requestedBy, trackId])
 }

@@ -16,6 +16,7 @@ export interface Track {
     trackId: string;
     addedAt?: bigint;
     waveStatus?: boolean;
+    requestedBy?: string;
 }
 
 export interface TrackYandex {
@@ -39,4 +40,5 @@ export interface TrackInfo {
     info: string;
     url: string;
     source: string;
+    requestedBy?: string;
 }

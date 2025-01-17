@@ -8,13 +8,11 @@ import logger from '../utils/logger.js';
 export class SkipCommand {
     @Slash({ description: "Пропустить текущую песню", name: "skip" })
     async skip(interaction: CommandInteraction): Promise<void> {
-        await interaction.deferReply({ ephemeral: true });
-
         try {
             await bot.playerManager.skip(interaction);
         } catch (error) {
             logger.error('Error skipping track:', error);
-            await bot.commandService.send(interaction, "Произошла ошибка при попытке пропустить трек.");
+            await bot.commandService.reply(interaction, "Произошла ошибка при попытке пропустить трек.");
         }
     }
 }

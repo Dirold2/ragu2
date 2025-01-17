@@ -37,7 +37,7 @@ export class PlayCommand {
 
         if (!query) {
             if (interaction.isChatInputCommand()) {
-                await this.reply(interaction, "Please provide a track name or URL");
+                await bot.commandService.reply(interaction, "Please provide a track name or URL");
             }
             return;
         }
@@ -83,13 +83,13 @@ export class PlayCommand {
 
             const results = await bot.nameService.searchName(query);
             if (!results.length) {
-                return this.reply(interaction, `No tracks found for "${query}"`);
+                return bot.commandService.reply(interaction, `No tracks found for "${query}"`);
             }
 
             await bot.nameService.processTrackSelection(results[0], interaction);
         } catch (error) {
             logger.error('Play command error:', error);
-            await this.reply(interaction, "Failed to play track. Please try again");
+            await bot.commandService.reply(interaction, "Failed to play track. Please try again");
         }
     }
 
@@ -100,20 +100,5 @@ export class PlayCommand {
             : track.title;
 
         return `${artists} - ${title}`;
-    }
-
-    private async reply(
-        interaction: CommandInteraction, 
-        content: string
-    ): Promise<void> {
-        try {
-            if (interaction.deferred) {
-                await interaction.editReply({ content });
-            } else {
-                await interaction.reply({ content, ephemeral: true });
-            }
-        } catch (error) {
-            logger.error('Reply error:', error);
-        }
     }
 }  

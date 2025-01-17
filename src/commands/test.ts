@@ -27,7 +27,7 @@ export class TestCommand {
         const member = interaction.member as GuildMember;
 
         if (!member.voice.channel) {
-            await this.safeReply(interaction, "Вы должны находиться в голосовом канале!");
+            await bot.commandService.reply(interaction, "Вы должны находиться в голосовом канале!");
             return;
         }
 
@@ -36,31 +36,19 @@ export class TestCommand {
         const playlistTracks = await bot.nameService.searchName(playlist);
 
         if (!playlistTracks) {
-            return this.safeReply(interaction, "Не удалось получить информацию о плейлисте. Проверьте ссылку.");
+            return bot.commandService.reply(interaction, "Не удалось получить информацию о плейлисте. Проверьте ссылку.");
         }
 
         try {
             const playlistInfo = await this.yandexMusicPlugin.getPlaylistURL(playlist);
             if (playlistInfo) {
-                await this.safeReply(interaction, "Информация о плейлисте получена успешно!");
+                await bot.commandService.reply(interaction, "Информация о плейлисте получена успешно!");
             } else {
-                await this.safeReply(interaction, "Не удалось получить информацию о плейлисте.");
+                await bot.commandService.reply(interaction, "Не удалось получить информацию о плейлисте.");
             }
         } catch (error) {
             logger.error('Error in test command:', error);
-            await this.safeReply(interaction, "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте снова позже.");
-        }
-    }
-
-    private async safeReply(interaction: CommandInteraction, content: string) {
-        try {
-            if (interaction.deferred || interaction.replied) {
-                await interaction.editReply(content);
-            } else {
-                await interaction.reply({ content, ephemeral: true });
-            }
-        } catch (error) {
-            logger.error('Error responding to interaction:', error);
+            await bot.commandService.reply(interaction, "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте снова позже.");
         }
     }
 }

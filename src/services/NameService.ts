@@ -38,7 +38,7 @@ export default class NameService {
             const { channel, guildId } = this.getVoiceChannelInfo(interaction);
             const plugin = this.getPluginForTrack(selectedTrack);
             const trackUrl = await this.getTrackUrl(plugin, selectedTrack);
-            const track = this.createTrackInfo(selectedTrack, trackUrl);
+            const track = this.createTrackInfo(selectedTrack, trackUrl, interaction);
 
             await this.addTrackToQueue(track, channel.id, guildId, interaction);
             trackPlayCounter.inc({ status: "success" });
@@ -112,9 +112,9 @@ export default class NameService {
         return TrackUrlSchema.parse(trackUrl);
     }
 
-    private createTrackInfo(track: SearchTrackResult, url: string): TrackInfo {
+    private createTrackInfo(track: SearchTrackResult, url: string, interaction: CommandInteraction): TrackInfo {
         const trackInfo = `${track.artists.map(a => a.name).join(", ")} - ${track.title}`;
-        return { trackId: track.id, info: trackInfo, url, source: track.source };
+        return { trackId: track.id, info: trackInfo, url, source: track.source, requestedBy: interaction.user.id };
     }
 
     private async addTrackToQueue(track: TrackInfo, channelId: string, guildId: string, interaction: CommandInteraction): Promise<void> {
