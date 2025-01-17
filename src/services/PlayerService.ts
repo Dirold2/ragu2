@@ -193,7 +193,7 @@ export default class PlayerService {
                 startVolume = this.volume / 100 || 0;
             }
             
-            logger.info(`start: ${startVolume} target: ${targetVolume} volume: ${this.volume / 100}`)
+            logger.debug(`start: ${startVolume * 100} target: ${targetVolume * 100} volume: ${this.volume}`)
 
             const volumeDiff = targetVolume - startVolume;
             const steps = 20;
@@ -325,7 +325,7 @@ export default class PlayerService {
             guildId: this.guildId,
             adapterCreator: interaction.guild
                 ?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
-            selfDeaf: false, 
+            selfDeaf: false,
         });
 
         try {
