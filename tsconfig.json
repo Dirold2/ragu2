@@ -1,17 +1,17 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2022",
-    "lib": [
-      "ES2022"
-    ],
-    "moduleResolution": "node",
+    "module": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "moduleResolution": "NodeNext",
     "rootDir": "./src",
     "outDir": "build",
     "allowSyntheticDefaultImports": true,
     "importHelpers": true,
-    "alwaysStrict": true,
+    "strict": true,
     "sourceMap": true,
+    "declaration": false,
+    "declarationMap": false,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
@@ -26,20 +26,15 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "*": [
-        "node_modules/*",
-        "src/types/*"
-      ],
-      "@utils/*": [
-        "src/utils/*"
-      ],
-      "@api/*": [
-        "src/api/*"
-      ],
-      "@service/*": [
-        "src/services/*"
-      ]
-    }
+      "*": ["node_modules/*", "src/types/*"],
+      "@utils/*": ["src/utils/*"],
+      "@api/*": ["src/api/*"], 
+      "@service/*": ["src/services/*"],
+      "@commands/*": ["src/commands/*"],
+      "@plugins/*": ["src/plugins/*"]
+    },
+    "resolveJsonModule": true,
+    "isolatedModules": true
   },
   "include": [
     "src/**/*",
@@ -47,6 +42,11 @@
   ],
   "exclude": [
     "node_modules",
-    "build"
-  ]
+    "build",
+    "**/*.spec.ts"
+  ],
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  }
 }

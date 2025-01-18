@@ -54,24 +54,47 @@ export class PlayCommand {
         query: string
     ): Promise<void> {
         try {
+            if (query.length < 2) {
+                await interaction.respond([]);
+                return;
+            }
+
             const results = await bot.nameService.searchName(query);
             const choices = results
                 .slice(0, PlayCommand.MAX_RESULTS)
                 .map(track => {
                     const formattedName = this.formatTrackName(track);
-                    const validName = formattedName.length > 100 
-                        ? formattedName.slice(0, 97) + '...' 
-                        : formattedName;
+                    const validName = this.truncateString(formattedName, 100);
                     return {
                         name: validName,
-                        value: validName
+                        value: validName,
+                        artistMatch: track.artists.some(artist => 
+                            artist.name.toLowerCase().includes(query.toLowerCase())
+                        ),
+                        titleMatch: track.title.toLowerCase().includes(query.toLowerCase())
                     };
-                });
+                })
+                .filter(choice => 
+                    choice.artistMatch || choice.titleMatch
+                )
+                .sort((a, b) => {
+                    if (a.artistMatch && !b.artistMatch) return -1;
+                    if (!a.artistMatch && b.artistMatch) return 1;
+                    if (a.titleMatch && !b.titleMatch) return -1;
+                    if (!a.titleMatch && b.titleMatch) return 1;
+                    return 0;
+                })
+                .map(({ name, value }) => ({ name, value }));
 
             await interaction.respond(choices);
         } catch (error) {
-            logger.error('Autocomplete error:', error);
+            logger.error('Ошибка автодополнения:', error);
+            await interaction.respond([]);
         }
+    }
+
+    private truncateString(str: string, maxLength: number): string {
+        return str.length > maxLength ? `${str.slice(0, maxLength - 3)}...` : str;
     }
 
     private async handlePlay(

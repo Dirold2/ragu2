@@ -18,7 +18,7 @@ export default class PlayerManager {
         this.commandService = commandService;
     }
 
-    private async handleServerOnlyCommand(interaction: CommandInteraction): Promise<string | null> {
+    public async handleServerOnlyCommand(interaction: CommandInteraction): Promise<string | null> {
         const guildId = interaction.guildId;
         if (!guildId) {
             await this.commandService.send(interaction, MESSAGES.SERVER_ONLY_ERROR);
@@ -69,8 +69,7 @@ export default class PlayerManager {
         await player.togglePause(interaction);
     }
 
-    public async setVolume(interaction: CommandInteraction, volume: number): Promise<void> {
-        const guildId = await this.handleServerOnlyCommand(interaction);
+    public async setVolume(guildId: string, volume: number): Promise<void> {
         if (!guildId) return;
 
         const player = this.getPlayer(guildId);

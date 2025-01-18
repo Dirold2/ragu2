@@ -42,3 +42,13 @@ export interface TrackInfo {
     source: string;
     requestedBy?: string;
 }
+
+export interface PlaylistTrack {
+    id: number;
+    track: {
+        title: string;
+        artists: Array<{ name: string }>;
+        albums: Array<{ title: string }>;
+        durationMs: number;
+    };
+}

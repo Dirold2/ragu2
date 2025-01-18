@@ -21,7 +21,7 @@ export default class QueueService {
     public async setTrack(channelId: string, guildId: string, track: Omit<Track, 'id'>, priority: boolean = false): Promise<void> {
         try {
             const validatedTrack = TrackSchema.parse(track);
-            await this.prisma.$transaction(async (txPrisma: PrismaClient) => {
+            await this.prisma.$transaction(async (txPrisma) => {
                 if (await this.isTrackInQueue(txPrisma, track.trackId, channelId)) {
                     return;
                 }
@@ -292,7 +292,7 @@ export default class QueueService {
         }
     }
 
-    private async isTrackInQueue(prisma: PrismaClient, trackId: string, channelId: string): Promise<boolean> {
+    private async isTrackInQueue(prisma: Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">, trackId: string, channelId: string): Promise<boolean> {
         const existingTrack = await prisma.tracks.findFirst({
             where: { 
                 trackId,

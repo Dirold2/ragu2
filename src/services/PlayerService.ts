@@ -30,6 +30,10 @@ import {
 } from "../config.js";
 import logger from "../utils/logger.js";
 import { CommandService, QueueService, Track } from "./index.js";
+import path from "path";
+import { dirname } from "dirname-filename-esm";
+
+const __dirname = dirname(import.meta);
 
 @Discord()
 export default class PlayerService {
@@ -81,7 +85,7 @@ export default class PlayerService {
 
     public async skip(interaction: CommandInteraction): Promise<void> {
         if (!this.connection) {
-            await this.commandService.send(interaction, "Not connected to voice");
+            await this.commandService.reply(interaction, "Not connected to voice");
             return;
         }
 
@@ -92,7 +96,7 @@ export default class PlayerService {
         this.lastTrack = this.currentTrack;
         await new Promise(r => setTimeout(r, 1000));
         await this.playNextTrack();
-        await this.commandService.send(interaction, 
+        await this.commandService.reply(interaction, 
             `Skipped to: ${this.currentTrack?.info || "No track"}`);
     }
 
@@ -103,11 +107,11 @@ export default class PlayerService {
         if (status === AudioPlayerStatus.Playing) {
             this.player.pause();
             this.isPlaying = false;
-            await this.commandService.send(interaction, "Paused");
+            await this.commandService.reply(interaction, "Paused");
         } else if (status === AudioPlayerStatus.Paused) {
             this.player.unpause();
             this.isPlaying = true;
-            await this.commandService.send(interaction, "Resumed");
+            await this.commandService.reply(interaction, "Resumed");
         }
     }
 
@@ -122,7 +126,7 @@ export default class PlayerService {
         const voiceChannelId = member.voice.channel?.id;
 
         if (!member.voice.channel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) || !voiceChannelId) {
-            await this.commandService.send(interaction, "No voice access");
+            await this.commandService.reply(interaction, "No voice access");
             return;
         }
 
@@ -182,7 +186,7 @@ export default class PlayerService {
 
     private async getDuration(url: string): Promise<number> {
         return new Promise((resolve, reject) => {
-            const worker = new Worker('./src/workers/trackDurationWorker.js');
+            const worker = new Worker(path.resolve(__dirname, '../workers/trackDurationWorker.js'));
             worker.postMessage(url);
             worker.on('message', msg => {
                 if (typeof msg === 'number') {

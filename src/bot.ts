@@ -6,9 +6,10 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 
 import {
-    CommandService, NameService, PlayerManager, PluginManager, QueueService
+    CommandService, NameService, PlayerManager, PluginManager, QueueService, ProxyService
 } from './services/index.js';
 import logger from './utils/logger.js';
+import { startServer } from './server.js';
 
 const __dirname = dirname(import.meta);
 
@@ -18,6 +19,7 @@ class Bot {
     public queueService!: QueueService;
     public playerManager!: PlayerManager;
     public commandService!: CommandService;
+    public proxyService!: ProxyService;
 
     constructor() {
         this.client = new Client({
@@ -40,6 +42,7 @@ class Bot {
     }
 
     private initializeServices(): void {
+        this.proxyService = new ProxyService();
         this.commandService = new CommandService();
         this.queueService = new QueueService();
         this.playerManager = new PlayerManager(this.queueService, this.commandService);
@@ -62,9 +65,17 @@ class Bot {
     }
 
     private setupEventListeners(): void {
-        this.client.once("ready", () => {
+        this.client.once("ready", async () => {
             void this.client.initApplicationCommands();
             logger.info("Bot initialized");
+
+            // Запускаем Fastify сервер после инициализации бота
+            try {
+                await startServer();
+                logger.info("API server started successfully");
+            } catch (error) {
+                logger.error("Failed to start API server:", error);
+            }
         });
 
         this.client.on("interactionCreate", (interaction: Interaction) => {

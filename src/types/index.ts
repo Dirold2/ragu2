@@ -1,4 +1,4 @@
-import { StreamType } from '@discordjs/voice/dist';
+import { StreamType } from '@discordjs/voice';
 import { z } from 'zod';
 
 // Define schema for individual track search result

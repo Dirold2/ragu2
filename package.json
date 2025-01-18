@@ -1,10 +1,13 @@
 {
   "name": "ragu2",
-  "version": "0.0.9.6",
+  "version": "0.0.9.7",
   "private": true,
   "license": "MIT",
   "type": "module",
   "main": "build/main.js",
+  "imports": {
+    "#*": "./build/*"
+  },
   "scripts": {
     "build:win": "tsc",
     "build": "tsc",
@@ -14,20 +17,23 @@
     "lint:fix": "eslint . .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "echo \"No tests specified\" && exit 0",
-    "pm2:start": "pm2 start build/main.js --name ragu2",
+    "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:restart": "pm2 restart ragu2",
     "pm2:stop": "pm2 stop ragu2",
     "pm2:delete": "pm2 delete ragu2",
     "pm2:list": "pm2 list"
   },
   "dependencies": {
-    "@types/async-retry": "^1.4.9",
+    "@discordjs/voice": "^0.18.0",
+    "@fastify/cors": "^10.0.2",
     "async-retry": "^1.3.3",
     "date-fns": "^4.1.0",
     "dirname-filename-esm": "^1.1.2",
     "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
     "ffmpeg-ffprobe-static": "6.1.2-rc.1",
     "get-audio-duration": "^4.0.1",
+    "https-proxy-agent": "^7.0.6",
     "i18next": "^24.2.1",
     "i18next-fs-backend": "^2.6.0",
     "mediaplex": "^1.0.0",
@@ -40,10 +46,10 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@discordjs/voice": "^0.18.0",
     "@discordx/importer": "^1.3.1",
     "@eslint/js": "^9.18.0",
     "@prisma/client": "^6.2.1",
+    "@types/async-retry": "^1.4.9",
     "@types/node": "^22.10.7",
     "chokidar": "^4.0.3",
     "discord.js": "^14.17.3",
@@ -60,5 +66,6 @@
     "node": ">=18.0.0",
     "npm": ">=7.0.0"
   },
-  "packageManager": "pnpm@9.14.2+sha512.6e2baf77d06b9362294152c851c4f278ede37ab1eba3a55fda317a4a17b209f4dbb973fb250a77abc463a341fcb1f17f17cfa24091c4eb319cda0d9b84278387"
+  "packageManager": "pnpm@9.14.2+sha512.6e2baf77d06b9362294152c851c4f278ede37ab1eba3a55fda317a4a17b209f4dbb973fb250a77abc463a341fcb1f17f17cfa24091c4eb319cda0d9b84278387",
+  "https-proxy-agent": "^7.0.2"
 }

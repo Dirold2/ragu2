@@ -24,7 +24,10 @@ export class VolumeCommand {
 
         try {
             // Set volume through playerManager
-            await bot.playerManager.setVolume(interaction, volume);
+            const guildId = await bot.playerManager.handleServerOnlyCommand(interaction);
+            if (!guildId) return;
+
+            await bot.playerManager.setVolume(guildId, volume);
             await bot.commandService.reply(interaction, `Volume successfully set to ${volume}%.`);
         } catch (error) {
             logger.error("Error changing volume:", error);
