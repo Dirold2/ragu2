@@ -1,190 +1,421 @@
-import retry from 'async-retry';
-import { Discord } from 'discordx';
-import NodeCache from 'node-cache';
-import { URL } from 'url';
-import { Types, WrappedYMApi, YMApi } from 'ym-api-meowed';
+import retry from "async-retry";
+import { Discord } from "discordx";
+import NodeCache from "node-cache";
+import { URL } from "url";
+import { Types, WrappedYMApi, YMApi } from "ym-api-meowed";
 
-import { MusicServicePlugin, PlaylistTrack, TrackYandex } from '../interfaces/index.js';
-import { Config, ConfigSchema, SearchTrackResult, TrackResultSchema } from '../types/index.js';
-import { logger } from '../utils/index.js';
+import type {
+	MusicServicePlugin,
+	PlaylistTrack,
+	TrackYandex,
+} from "../interfaces/index.js";
+import {
+	type Config,
+	ConfigSchema,
+	type SearchTrackResult,
+	TrackResultSchema,
+} from "../types/index.js";
+import { logger } from "../utils/index.js";
+import { bot } from "../bot.js";
+
+const CACHE_TTL = 600; // 10 minutes
+const CACHE_CHECK_PERIOD = 120; // 2 minutes
+const MAX_RETRIES = 3;
+const MIN_TIMEOUT = 1000;
+const MAX_TIMEOUT = 5000;
 
 @Discord()
 export default class YandexMusicPlugin implements MusicServicePlugin {
-    name = 'yandex';
-    urlPatterns = [/music\.yandex\.ru/];
+	name = "yandex";
+	urlPatterns = [/music\.yandex\.ru/];
+	private urlTrackPattern = /\/album\/\d+\/track\/(\d+)/;
+	private urlPlaylistPattern = /\/users\/([^/]+)\/playlists\/(\d+)/;
+	private urlAlbumPattern = /\/album\/(\d+)(\?.*)?$/;
 
-    private results: SearchTrackResult[] = [];
-    private wrapper: WrappedYMApi = new WrappedYMApi();
-    private api: YMApi = new YMApi();
-    private cache: NodeCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
-    private initialized = false;
-    
-    hasAvailableResults(): boolean {
-        return this.results.length > 0;
-    }
+	private results: SearchTrackResult[] = [];
+	private wrapper = new WrappedYMApi();
+	private api = new YMApi();
+	private cache = new NodeCache({
+		stdTTL: CACHE_TTL,
+		checkperiod: CACHE_CHECK_PERIOD,
+	});
+	private initialized = false;
 
-    async searchName(trackName: string): Promise<SearchTrackResult[]> {
-        await this.ensureInitialized();
-        const cacheKey = `search_${trackName}`;
-        const cachedResult = this.cache.get<SearchTrackResult[]>(cacheKey);
-        if (cachedResult) {
-            return cachedResult;
-        }
-        return await this.updateCacheInBackground(trackName, cacheKey);
-    }
+	hasAvailableResults = (): boolean => this.results.length > 0;
 
-    async searchURL(url: string): Promise<SearchTrackResult | null> {
-        await this.ensureInitialized();
-        try {
-            const parsedUrl = new URL(url);
-            if (!parsedUrl.hostname.includes('music.yandex.ru')) return null;
+	/**
+	 * Checks if a URL includes a playlist or album
+	 * @param {string} url - URL to check
+	 * @returns {Promise<boolean>} True if the URL includes a playlist or album, false otherwise
+	 */
+	async includesUrl(url: string): Promise<boolean> {
+		return this.urlPlaylistPattern.test(url) || this.urlAlbumPattern.test(url);
+	}
 
-            const trackId = this.extractTrackId(parsedUrl);
-            if (!trackId) return null;
+	/**
+	 * Searches for a track or URL
+	 * @param {string} trackName - Track name or URL
+	 * @returns {Promise<SearchTrackResult[]>} Array of search results
+	 */
+	async searchName(trackName: string): Promise<SearchTrackResult[]> {
+		await this.ensureInitialized();
+		const cacheKey = `search_${trackName}`;
+		return (
+			this.cache.get<SearchTrackResult[]>(cacheKey) ??
+			(await this.updateCacheInBackground(trackName, cacheKey))
+		);
+	}
 
-            const trackInfo = await this.api.getTrack(Number(trackId));
-            return trackInfo ? this.validateTrackResult(this.formatTrackInfo(trackInfo[0])) : null;
-        } catch (error) {
-            logger.error(`Ошибка обработки URL: ${error instanceof Error ? error.message : String(error)}`);
-            return null;
-        }
-    }
+	/**
+	 * Searches for a track or URL
+	 * @param {string} url - URL to search
+	 * @returns {Promise<SearchTrackResult[]>} Array of search results
+	 */
+	async searchURL(url: string): Promise<SearchTrackResult[]> {
+		await this.ensureInitialized();
+		try {
+			const parsedUrl = new URL(url);
+			if (!parsedUrl.hostname.includes("music.yandex.ru")) return [];
 
-    async getTrackUrl(trackId: string): Promise<string> {
-        await this.ensureInitialized();
-        if (!trackId) return '';
+			if (this.urlAlbumPattern.test(parsedUrl.pathname)) {
+				const albumId = this.extractId(parsedUrl, this.urlAlbumPattern);
+				return albumId ? await this.getAlbumTracks(albumId) : [];
+			}
 
-        try {
-            return await retry(
-                () => this.wrapper.getMp3DownloadUrl(Number(trackId), false, Types.DownloadTrackQuality.High),
-                { retries: 3, factor: 2, minTimeout: 1000, maxTimeout: 5000 }
-            ) || '';
-        } catch (error) {
-            logger.error(`Ошибка получения URL трека для ID ${trackId}: ${error instanceof Error ? error.message : String(error)}`);
-            return '';
-        }
-    }
+			if (this.urlPlaylistPattern.test(parsedUrl.pathname)) {
+				const { playlistId, playlistName } =
+					this.extractPlaylistInfo(parsedUrl);
+				return playlistId && playlistName
+					? await this.getPlaylistTracks(playlistId, playlistName)
+					: [];
+			}
 
-    async getPlaylistURL(url: string): Promise<SearchTrackResult[] | null> {
-        await this.ensureInitialized();
-        try {
-            const parsedUrl = new URL(url);
-            if (!parsedUrl.hostname.includes('music.yandex.ru')) return null;
+			// если в ссылке есть трек, то мы его ищем и возвращаем
 
-            const playlistId = this.extractPlaylistId(parsedUrl);
-            if (!playlistId.playlistId || !playlistId.playlistName) {
-                logger.warn(`Не удалось извлечь данные плейлиста из URL: ${url}`);
-                return null;
-            }
+			const trackId = this.extractId(parsedUrl, this.urlTrackPattern);
+			if (trackId) {
+				const [trackInfo] = await this.api.getTrack(Number(trackId));
+				return trackInfo
+					? [this.validateTrackResult(this.formatTrackInfo(trackInfo))].filter(
+							(result): result is SearchTrackResult => result !== null,
+						)
+					: [];
+			}
 
-            const playlistInfo = await this.api.getPlaylist(Number(playlistId.playlistId), playlistId.playlistName);
-            if (!playlistInfo || !playlistInfo.tracks) {
-                logger.warn(`Плейлист с ID ${playlistId.playlistId} не найден.`);
-                return null;
-            }
+			return [];
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_PROCESSING_URL(url)}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return [];
+		}
+	}
 
-            logger.info(`Получено ${playlistInfo.tracks.length} треков из плейлиста.`);
+	/**
+	 * Retrieves the URL for a track
+	 * @param {string} trackId - Track ID
+	 * @returns {Promise<string>} Track URL
+	 */
+	async getTrackUrl(trackId: string): Promise<string> {
+		await this.ensureInitialized();
+		if (!trackId) return "";
 
-            const playlistTracks = playlistInfo.tracks as PlaylistTrack[];
-            const tracks: SearchTrackResult[] = playlistTracks.map(track => ({
-                id: track.id.toString(),
-                title: track.track.title,
-                artists: track.track.artists.map((artist: { name: string }) => ({ name: artist.name })),
-                albums: track.track.albums.map((album: { title: string }) => ({ title: album.title })),
-                duration: `${Math.floor(track.track.durationMs / 60000)}:${Math.floor((track.track.durationMs % 60000) / 1000).toString().padStart(2, '0')}`,
-                source: 'yandex',
-            }));
+		try {
+			return (
+				(await retry(
+					() =>
+						this.wrapper.getMp3DownloadUrl(
+							Number(trackId),
+							false,
+							Types.DownloadTrackQuality.High,
+						),
+					{
+						retries: MAX_RETRIES,
+						factor: 2,
+						minTimeout: MIN_TIMEOUT,
+						maxTimeout: MAX_TIMEOUT,
+					},
+				)) || ""
+			);
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_GETTING_TRACK_URL(trackId)}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return "";
+		}
+	}
 
-            return tracks;
-        } catch (error) {
-            logger.error(`Ошибка при получении плейлиста: ${error instanceof Error ? error.message : String(error)}`);
-            return null;
-        }
-    }
+	/**
+	 * Retrieves the tracks from a playlist
+	 * @param {string} playlistId - Playlist ID
+	 * @param {string} playlistName - Playlist name
+	 * @returns {Promise<SearchTrackResult[]>} Array of playlist tracks
+	 */
+	async getPlaylistTracks(
+		playlistId: string,
+		playlistName: string,
+	): Promise<SearchTrackResult[]> {
+		try {
+			const playlistInfo = await this.api.getPlaylist(
+				Number(playlistId),
+				playlistName,
+			);
+			if (!playlistInfo?.tracks) {
+				logger.warn(
+					`${bot.loggerMessages.PLAYLIST_NOT_FOUND_OR_EMPTY(playlistId)}`,
+				);
+				return [];
+			}
 
-    clearCache(): void {
-        this.cache.flushAll();
-        this.results = [];
-    }
+			return (playlistInfo.tracks as PlaylistTrack[])
+				.map((track) => {
+					const trackData = track.track;
+					return this.formatTrackInfo({
+						id: trackData.id,
+						title: trackData.title,
+						artists: trackData.artists,
+						albums: trackData.albums,
+						durationMs: trackData.durationMs,
+						coverUri: trackData.coverUri,
+					});
+				})
+				.map((track) => this.validateTrackResult(track))
+				.filter((track): track is SearchTrackResult => track !== null);
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_FETCHING_PLAYLIST_TRACKS(playlistId)}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return [];
+		}
+	}
 
-    getResults(): SearchTrackResult[] {
-        return [...this.results];
-    }
+	/**
+	 * Retrieves the tracks from an album
+	 * @param {string} albumId - Album ID
+	 * @returns {Promise<SearchTrackResult[]>} Array of album tracks
+	 */
+	async getAlbumTracks(albumId: string): Promise<SearchTrackResult[]> {
+		await this.ensureInitialized();
+		try {
+			const albumInfo = await this.api.getAlbumWithTracks(Number(albumId));
+			return albumInfo.volumes
+				.flat()
+				.map((track) => this.formatTrackInfo(track))
+				.map((track) => this.validateTrackResult(track))
+				.filter((track): track is SearchTrackResult => track !== null);
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_FETCHING_ALBUM_TRACKS(albumId)}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return [];
+		}
+	}
 
-    private extractTrackId(parsedUrl: URL): string | null {
-        const match = parsedUrl.pathname.match(/\/album\/\d+\/track\/(\d+)/);
-        return match ? match[1] : null;
-    }
+	/**
+	 * Retrieves similar tracks for a given track
+	 * @param {string} trackId - Track ID
+	 * @returns {Promise<SearchTrackResult[]>} Array of similar tracks
+	 */
+	async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
+		await this.ensureInitialized();
+		try {
+			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
+			if (!similarTracks?.similarTracks) {
+				logger.warn(`${bot.loggerMessages.NO_SIMILAR_TRACKS_FOUND(trackId)}`);
+				return [];
+			}
 
-    private extractPlaylistId(parsedUrl: URL): { playlistName: string | null, playlistId: string | null } {
-        const match = parsedUrl.pathname.match(/\/users\/([^/]+)\/playlists\/(\d+)/);
-        return {
-            playlistName: match ? match[1] : null,
-            playlistId: match ? match[2] : null
-        };
-    }
+			return similarTracks.similarTracks
+				.map((track) => this.formatTrackInfo(track))
+				.map((track) => this.validateTrackResult(track))
+				.filter((track): track is SearchTrackResult => track !== null);
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_FETCHING_SIMILAR_TRACKS(trackId)}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return [];
+		}
+	}
 
-    private formatTrackInfo(trackInfo: TrackYandex): SearchTrackResult {
-        const durationMinutes = Math.floor((trackInfo.durationMs || 0) / 60000);
-        const durationSeconds = Math.floor(((trackInfo.durationMs || 0) % 60000) / 1000).toString().padStart(2, '0');
-        return {
-            id: trackInfo.id.toString(),
-            title: trackInfo.title,
-            artists: trackInfo.artists.map(artist => ({ name: artist.name })),
-            albums: trackInfo.albums.map(album => ({ title: album.title })),
-            duration: `${durationMinutes}:${durationSeconds}`,
-            cover: trackInfo.coverUri || '',
-            source: 'yandex',
-        };
-    }
+	/**
+	 * Clears the cache
+	 */
+	clearCache(): void {
+		this.cache.flushAll();
+		this.results = [];
+	}
 
-    private validateTrackResult(searchResult: SearchTrackResult): SearchTrackResult | null {
-        const validation = TrackResultSchema.safeParse(searchResult);
-        if (!validation.success) logger.warn(`Неверные данные трека: ${JSON.stringify(validation.error)}`);
-        return validation.success ? validation.data : null;
-    }
+	/**
+	 * Retrieves the results from the cache
+	 * @returns {SearchTrackResult[]} Array of search results
+	 */
+	getResults = (): SearchTrackResult[] => [...this.results];
 
-    private loadConfig(): Config {
-        const access_token = process.env.YM_API_KEY;
-        const uid = Number(process.env.YM_USER_ID);
-        if (!access_token || isNaN(uid)) throw new Error("YM_API_KEY и YM_USER_ID должны быть определены.");
+	/**
+	 * Extracts an ID from a URL
+	 * @param {URL} parsedUrl - Parsed URL
+	 * @param {RegExp} pattern - Pattern to match
+	 * @returns {string | null} Extracted ID or null if no match is found
+	 */
+	private extractId(parsedUrl: URL, pattern: RegExp): string | null {
+		const match = parsedUrl.pathname.match(pattern);
+		return match?.[1] ?? null;
+	}
 
-        const config = { access_token, uid };
-        const validation = ConfigSchema.safeParse(config);
-        if (!validation.success) throw new Error(`Неверная конфигурация: ${validation.error.errors.map(err => err.message).join(', ')}`);
-        return validation.data;
-    }
+	/**
+	 * Extracts playlist information from a URL
+	 * @param {URL} parsedUrl - Parsed URL
+	 * @returns {Object} Playlist information
+	 */
+	private extractPlaylistInfo(parsedUrl: URL): {
+		playlistName: string | null;
+		playlistId: string | null;
+	} {
+		const match = parsedUrl.pathname.match(this.urlPlaylistPattern);
+		return {
+			playlistName: match?.[1] ?? null,
+			playlistId: match?.[2] ?? null,
+		};
+	}
 
-    private async ensureInitialized(): Promise<void> {
-        if (!this.initialized) {
-            try {
-                const config = this.loadConfig();
-                await Promise.all([this.wrapper.init(config), this.api.init(config)]);
-                this.initialized = true;
-            } catch (error) {
-                logger.error(`Ошибка инициализации API: ${error instanceof Error ? error.message : String(error)}`);
-                throw new Error("Не удалось инициализировать YandexService");
-            }
-        }
-    }
+	/**
+	 * Formats track information
+	 * @param {TrackYandex} trackInfo - Track information
+	 * @returns {SearchTrackResult} Formatted track information
+	 */
+	private formatTrackInfo(trackInfo: TrackYandex): SearchTrackResult {
+		return {
+			id: trackInfo.id.toString(),
+			title: trackInfo.title,
+			artists: trackInfo.artists.map((artist) => ({ name: artist.name })),
+			albums: trackInfo.albums.map((album) => ({ title: album.title })),
+			duration: this.formatDuration(trackInfo.durationMs || 0),
+			cover: trackInfo.coverUri || "",
+			source: "yandex",
+		};
+	}
 
-    private async updateCacheInBackground(trackName: string, cacheKey: string): Promise<SearchTrackResult[]> {
-        try {
-            const result = await retry(() => this.api.searchTracks(trackName), { retries: 3 });
-            if (!result?.tracks?.results) {
-                return [];
-            }
+	/**
+	 * Validates a track result
+	 * @param {SearchTrackResult} searchResult - Track result
+	 * @returns {SearchTrackResult | null} Validated track result or null if invalid
+	 */
+	private validateTrackResult(
+		searchResult: SearchTrackResult,
+	): SearchTrackResult | null {
+		const validation = TrackResultSchema.safeParse(searchResult);
+		if (!validation.success) {
+			logger.warn(
+				`${bot.loggerMessages.INVALID_TRACK_DATA(JSON.stringify(validation.error))}`,
+			);
+			return null;
+		}
+		return validation.data;
+	}
 
-            const validatedTracks = result.tracks.results
-                .map((track: TrackYandex) => this.formatTrackInfo(track))
-                .filter((track: SearchTrackResult) => TrackResultSchema.safeParse(track).success);
+	/**
+	 * Loads the configuration
+	 * @returns {Config} Configuration
+	 */
+	private loadConfig(): Config {
+		const access_token = process.env.YM_API_KEY;
+		const uid = Number(process.env.YM_USER_ID);
 
-            this.cache.set(cacheKey, validatedTracks);
-            this.results = validatedTracks;
-            return validatedTracks;
-        } catch (error) {
-            logger.error(`Ошибка поиска трека: ${error instanceof Error ? error.message : String(error)}`);
-            return [];
-        }
-    }
+		if (!access_token || isNaN(uid)) {
+			throw new Error(bot.loggerMessages.MISSING_REQUIRED_PARAMETERS);
+		}
+
+		const config = { access_token, uid };
+		const validation = ConfigSchema.safeParse(config);
+
+		if (!validation.success) {
+			throw new Error(
+				bot.loggerMessages.INVALID_CONFIGURATION(
+					validation.error.errors.map((err) => err.message).join(", "),
+				),
+			);
+		}
+
+		return validation.data;
+	}
+
+	/**
+	 * Ensures the API is initialized
+	 * @returns {Promise<void>}
+	 */
+	private async ensureInitialized(): Promise<void> {
+		if (this.initialized) return;
+
+		try {
+			const config = this.loadConfig();
+			await Promise.all([this.wrapper.init(config), this.api.init(config)]);
+			this.initialized = true;
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_INITIALIZING_YANDEX_SERVICE}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			throw new Error(bot.loggerMessages.FAILED_TO_INITIALIZE_YANDEX_SERVICE);
+		}
+	}
+
+	/**
+	 * Updates the cache in the background
+	 * @param {string} trackName - Track name
+	 * @param {string} cacheKey - Cache key
+	 * @returns {Promise<SearchTrackResult[]>} Array of search results
+	 */
+	private async updateCacheInBackground(
+		trackName: string,
+		cacheKey: string,
+	): Promise<SearchTrackResult[]> {
+		try {
+			const result = await retry(() => this.api.searchTracks(trackName), {
+				retries: MAX_RETRIES,
+				onRetry: (error: Error) =>
+					logger.warn(
+						`${bot.loggerMessages.RETRYING_SEARCH_FOR_TRACK(trackName)}: ${error.message}`,
+					),
+			});
+
+			if (!result?.tracks?.results) {
+				return [];
+			}
+
+			const validatedTracks = result.tracks.results
+				.map((track: TrackYandex) => this.formatTrackInfo(track))
+				.map((track: SearchTrackResult) => this.validateTrackResult(track))
+				.filter(
+					(track: SearchTrackResult): track is SearchTrackResult =>
+						track !== null,
+				);
+
+			if (validatedTracks.length > 0) {
+				this.cache.set(cacheKey, validatedTracks);
+				this.results = validatedTracks;
+			}
+
+			return validatedTracks;
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_TRACK_SEARCH(trackName)}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return [];
+		}
+	}
+
+	/**
+	 * Formats a duration in milliseconds to a string
+	 * @param {number} durationMs - Duration in milliseconds
+	 * @returns {string} Formatted duration
+	 */
+	private formatDuration(durationMs: number): string {
+		if (typeof durationMs !== "number") {
+			return "0:00";
+		}
+		const minutes = Math.floor(durationMs / 60000);
+		const seconds = Math.floor((durationMs % 60000) / 1000)
+			.toString()
+			.padStart(2, "0");
+		return `${minutes}:${seconds}`;
+	}
 }

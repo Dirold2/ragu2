@@ -1,75 +1,135 @@
-import chokidar from 'chokidar';
-import { dirname } from 'dirname-filename-esm';
-import { DIService, MetadataStorage } from 'discordx';
-import dotenv from 'dotenv';
-import { resolve } from '@discordx/importer';
-import { bot } from './bot.js';
-import logger from './utils/logger.js';
-import { MESSAGES } from './messages.js';
+import chokidar from "chokidar";
+import { dirname } from "dirname-filename-esm";
+import { DIService, MetadataStorage } from "discordx";
+import dotenv from "dotenv";
+import { resolve } from "@discordx/importer";
+import { bot } from "./bot.js";
+import logger from "./utils/logger.js";
 
 const __dirname = dirname(import.meta);
 dotenv.config();
 
+/** Timeout constants */
+const CONSTANTS = {
+	RELOAD_DEBOUNCE: 500,
+	WRITE_STABILITY: 300,
+	POLL_INTERVAL: 100,
+} as const;
+
+/** File patterns for different components */
 const patterns = {
-    commands: `${__dirname}/commands/**/*.{ts,js}`,
-    events: `${__dirname}/events/**/*.{ts,js}`
+	commands: `${__dirname}/commands/**/*.ts`,
+	events: `${__dirname}/events/**/*.ts`,
+	services: `${__dirname}/services/**/*.ts`,
+	plugins: `${__dirname}/plugins/**/*.ts`,
+} as const;
+
+/**
+ * Clears Node.js require cache for project files
+ */
+const clearNodeCache = (): void => {
+	Object.keys(require.cache)
+		.filter((key) => key.includes(__dirname))
+		.forEach((key) => delete require.cache[key]);
 };
 
+/**
+ * Loads and imports files from specified source
+ * @param src - Source path pattern to load files from
+ */
 async function loadFiles(src: string): Promise<void> {
-    try {
-        const files = await resolve(src);
-        await Promise.all(files.map(file => import(`${file}?version=${Date.now()}`)));
-    } catch (error) {
-        logger.error(`Failed to load files from ${src}:`, error);
-        throw error;
-    }
-}
-async function reload() {
-    logger.info(`${MESSAGES.RELOADING}`);
-    try {
-        bot.removeEvents();
-        MetadataStorage.clear();
-        DIService.engine.clearAllServices();
+	try {
+		// Clear existing command metadata before loading
+		if (src === patterns.commands) {
+			MetadataStorage.clear();
+		}
 
-        await loadFiles(patterns.commands);
-        await loadFiles(patterns.events);
-
-        await MetadataStorage.instance.build();
-        await bot.client.initApplicationCommands();
-        bot.initEvents();
-
-        logger.info(MESSAGES.RELOAD_SUCCESS);
-    } catch (error) {
-        logger.error(MESSAGES.RELOAD_ERROR, error);
-    }
+		const files = await resolve(src);
+		await Promise.all(
+			files.map((file) =>
+				import(file).catch((error) =>
+					logger.error(
+						`${bot.loggerMessages.DEV_FAILDE_TO_IMPORT_FILE(file)}`,
+						error,
+					),
+				),
+			),
+		);
+	} catch (error) {
+		logger.error(
+			`${bot.loggerMessages.DEV_FAILDE_TO_LOAD_FILE_FROM(src)}`,
+			error,
+		);
+	}
 }
 
-async function run() {
-    const watcher = chokidar.watch([patterns.commands, patterns.events], {
-        persistent: true,
-        ignoreInitial: true
-    });
+/**
+ * Reloads all components
+ */
+async function reload(): Promise<void> {
+	try {
+		clearNodeCache();
+		DIService.engine.clearAllServices();
 
-    try {
-        await loadFiles(patterns.commands);
-        await loadFiles(patterns.events);
+		await Promise.all([
+			loadFiles(patterns.commands),
+			loadFiles(patterns.events),
+			loadFiles(patterns.services),
+			loadFiles(patterns.plugins),
+		]);
 
-        const botToken = process.env.BOT_TOKEN;
-        if (!botToken) {
-            throw new Error(MESSAGES.BOT_TOKEN_ERROR);
-        }
+		bot.removeEvents();
+		bot.initEvents();
 
-        await bot.start(botToken);
+		logger.info(`${bot.loggerMessages.RELOAD_SUCCESS}`);
+	} catch (error) {
+		logger.error(`${bot.loggerMessages.RELOAD_ERROR}`, error);
+	}
+}
 
-        if (process.env.NODE_ENV !== "production") {
-            logger.info("> Hot-Module-Reload enabled in development. Commands and events will automatically reload.");
-            watcher.on("add", reload);
-            watcher.on("change", reload);
-            watcher.on("unlink", reload);
-        }
-    } catch (error) {
-        logger.error(MESSAGES.START_ERROR, error);
-    }
+/**
+ * Main run function
+ */
+async function run(): Promise<void> {
+	try {
+		await Promise.all([
+			loadFiles(patterns.commands),
+			loadFiles(patterns.events),
+			loadFiles(patterns.services),
+			loadFiles(patterns.plugins),
+		]);
+
+		const token = process.env.DISCORD_TOKEN;
+		if (!token) {
+			throw new Error(bot.messages.BOT_TOKEN_ERROR);
+		}
+
+		await bot.start(token);
+
+		if (process.env.NODE_ENV === "development") {
+			const debouncedReload = () => {
+				let timeoutId: NodeJS.Timeout;
+				return () => {
+					clearTimeout(timeoutId);
+					timeoutId = setTimeout(reload, CONSTANTS.RELOAD_DEBOUNCE);
+				};
+			};
+
+			const watcher = chokidar.watch(__dirname, {
+				ignored: ["**/node_modules/**", "**/.git/**"],
+				persistent: true,
+				ignoreInitial: true,
+			});
+
+			watcher
+				.on("add", debouncedReload())
+				.on("change", debouncedReload())
+				.on("unlink", debouncedReload());
+		}
+	} catch (error) {
+		logger.error(`${bot.loggerMessages.BOT_START_ERROR}`, error);
+		process.exit(1);
+	}
 }
 
 run();

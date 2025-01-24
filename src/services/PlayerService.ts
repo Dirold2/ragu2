@@ -1,336 +1,655 @@
 import {
-    CommandInteraction,
-    GuildMember, 
-    PermissionFlagsBits,
-    VoiceChannel
+	type CommandInteraction,
+	type GuildMember,
+	PermissionFlagsBits,
+	type VoiceChannel,
 } from "discord.js";
 import { Discord } from "discordx";
 import {
-    AudioPlayer,
-    AudioPlayerStatus,
-    AudioResource,
-    createAudioPlayer,
-    createAudioResource,
-    DiscordGatewayAdapterCreator,
-    entersState,
-    getVoiceConnection,
-    joinVoiceChannel,
-    NoSubscriberBehavior,
-    StreamType,
-    VoiceConnection,
-    VoiceConnectionStatus
+	type AudioPlayer,
+	AudioPlayerStatus,
+	type AudioResource,
+	createAudioPlayer,
+	createAudioResource,
+	type DiscordGatewayAdapterCreator,
+	entersState,
+	getVoiceConnection,
+	joinVoiceChannel,
+	NoSubscriberBehavior,
+	StreamType,
+	type VoiceConnection,
+	VoiceConnectionStatus,
 } from "@discordjs/voice";
-import { Worker } from 'worker_threads';
 
 import { bot } from "../bot.js";
 import {
-    DEFAULT_VOLUME,
-    EMPTY_CHANNEL_CHECK_INTERVAL,
-    RECONNECTION_TIMEOUT
+	DEFAULT_VOLUME,
+	EMPTY_CHANNEL_CHECK_INTERVAL,
+	RECONNECTION_TIMEOUT,
 } from "../config.js";
 import logger from "../utils/logger.js";
-import { CommandService, QueueService, Track } from "./index.js";
-import path from "path";
-import { dirname } from "dirname-filename-esm";
+import type { CommandService, QueueService, Track } from "./index.js";
 
-const __dirname = dirname(import.meta);
+import { getAudioDurationInSeconds } from "get-audio-duration";
+import pathToFfmpeg from "ffmpeg-ffprobe-static";
+import type { PlayerState } from "../types/index.js";
 
 @Discord()
 export default class PlayerService {
-    private player: AudioPlayer;
-    private connection: VoiceConnection | null = null;
-    private isPlaying = false;
-    private emptyChannelCheckInterval: NodeJS.Timeout | null = null;
-    private resource: AudioResource | null = null;
-    private fadeOutTimeout: NodeJS.Timeout | null = null;
+	private readonly player: AudioPlayer;
+	public state: PlayerState;
+	private timers: Record<string, NodeJS.Timeout | null> = {};
 
-    public channelId: string | null = null;
-    public volume = DEFAULT_VOLUME;
-    public currentTrack: Track | null = null;
-    public nextTrack: Track | null = null;
-    public lastTrack: Track | null = null;
-    public loop = false;
+	constructor(
+		private readonly queueService: QueueService,
+		private readonly commandService: CommandService,
+		public readonly guildId: string,
+	) {
+		this.player = createAudioPlayer({
+			behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
+		});
+		this.state = this.getInitialState();
+		this.setupPlayerEvents();
+	}
 
-    constructor(
-        private queueService: QueueService,
-        private commandService: CommandService,
-        public guildId: string
-    ) {
-        this.player = createAudioPlayer({
-            behaviors: { noSubscriber: NoSubscriberBehavior.Pause }
-        });
-        this.setupPlayerEvents();
-    }
+	/**
+	 * Gets the initial state of the player
+	 * @returns {PlayerState} Initial state
+	 */
+	private getInitialState(): PlayerState {
+		return {
+			connection: null,
+			isPlaying: false,
+			resource: null,
+			channelId: null,
+			volume: DEFAULT_VOLUME,
+			currentTrack: null,
+			nextTrack: null,
+			lastTrack: null,
+			loop: false,
+			wave: false,
+		};
+	}
 
-    private setupPlayerEvents() {
-        this.player.on("error", (error) => {
-            logger.error(`Player error: ${error.message}`);
-            this.handleTrackEnd();
-        });
-        this.player.on(AudioPlayerStatus.Idle, this.handleTrackEnd);
-    }
+	/**
+	 * Sets up player events
+	 */
+	private setupPlayerEvents(): void {
+		this.player.on("error", (error) => {
+			logger.error(`${bot.loggerMessages.PLAYER_ERROR}: ${error.message}`);
+			this.handleTrackEnd();
+		});
+		this.player.on(AudioPlayerStatus.Idle, () => this.handleTrackEnd());
+	}
 
-    public async initializeLoop(): Promise<void> {
-        this.loop = await this.queueService.getLoop(this.guildId);
-    }
+	/**
+	 * Initializes player properties
+	 * @param {keyof Pick<PlayerState, "loop" | "wave" | "volume" | "currentTrack">} property - Property to initialize
+	 */
+	public async initialize(
+		property: keyof Pick<
+			PlayerState,
+			"loop" | "wave" | "volume" | "currentTrack"
+		>,
+	): Promise<void> {
+		const getters = {
+			loop: () => this.queueService.getLoop(this.guildId),
+			wave: () => this.queueService.getWaveStatus(this.guildId),
+			volume: () => this.queueService.getVolume(this.guildId),
+			currentTrack: () => this.queueService.getTrack(this.guildId),
+		};
 
-    public async playOrQueueTrack(track: Track): Promise<void> {
-        try {
-            this.isPlaying ? await this.queueTrack(track) : await this.playTrack(track);
-            if (!this.nextTrack) await this.loadNextTrack();
-        } catch (error) {
-            logger.error(`Failed to play/queue track: ${error}`);
-        }
-    }
+		const value =
+			(await getters[property]()) ??
+			(property === "volume"
+				? DEFAULT_VOLUME
+				: this.queueService.getVolume(this.guildId));
 
-    public async skip(interaction: CommandInteraction): Promise<void> {
-        if (!this.connection) {
-            await this.commandService.reply(interaction, "Not connected to voice");
-            return;
-        }
+		if (property === "volume") {
+			this.state[property] = value as number;
+			await this.queueService.setVolume(this.guildId, value as number);
+		} else if (property === "currentTrack") {
+			this.state[property] = value as Track;
+		} else {
+			this.state[property] = value as boolean;
+		}
+	}
 
-        if (this.player.state.status === AudioPlayerStatus.Playing) {
-            await this.smoothVolumeChange(0, 1000, false);
-        }
+	/**
+	 * Plays or queues a track
+	 * @param {Track} track - Track to play or queue
+	 */
+	public async playOrQueueTrack(track: Track): Promise<void> {
+		try {
+			await (this.state.isPlaying
+				? this.queueTrack(track)
+				: this.playTrack(track));
+			if (!this.state.nextTrack) await this.loadNextTrack();
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.FAILED_TO_PLAY_QUEUE_TRACK}: ${error}`,
+			);
+		}
+	}
 
-        this.lastTrack = this.currentTrack;
-        await new Promise(r => setTimeout(r, 1000));
-        await this.playNextTrack();
-        await this.commandService.reply(interaction, 
-            `Skipped to: ${this.currentTrack?.info || "No track"}`);
-    }
+	/**
+	 * Skips the current track
+	 * @param {CommandInteraction} interaction - Discord command interaction
+	 */
+	public async skip(interaction: CommandInteraction): Promise<void> {
+		if (!this.state.connection) {
+			await this.commandService.reply(
+				interaction,
+				bot.messages.NOT_CONNECTED_TO_VOICE,
+			);
+			return;
+		}
 
-    public async togglePause(interaction: CommandInteraction): Promise<void> {
-        if (!this.connection) return;
+		if (this.player.state.status === AudioPlayerStatus.Playing) {
+			await this.smoothVolumeChange(0, 1000, false);
+		}
 
-        const status = this.player.state.status;
-        if (status === AudioPlayerStatus.Playing) {
-            this.player.pause();
-            this.isPlaying = false;
-            await this.commandService.reply(interaction, "Paused");
-        } else if (status === AudioPlayerStatus.Paused) {
-            this.player.unpause();
-            this.isPlaying = true;
-            await this.commandService.reply(interaction, "Resumed");
-        }
-    }
+		this.state.lastTrack = this.state.currentTrack;
+		await this.commandService.reply(
+			interaction,
+			`${bot.messages.SKIP_TRACK}: ${this.state.nextTrack?.info || bot.messages.SKIP_NO_TRACK}`,
+		);
+		this.state.loop = false;
+		await this.queueService.setLoop(this.guildId, false);
+		await new Promise((r) => setTimeout(r, 1000));
+		await this.playNextTrack();
+	}
 
-    public setVolume(volume: number): void {
-        if (this.player.state.status === AudioPlayerStatus.Playing) {
-            this.smoothVolumeChange(volume / 100, 2000);
-        }
-    }
+	/**
+	 * Toggles the pause state of the player
+	 * @param {CommandInteraction} interaction - Discord command interaction
+	 */
+	public async togglePause(interaction: CommandInteraction): Promise<void> {
+		if (!this.state.connection) return;
 
-    public async joinChannel(interaction: CommandInteraction): Promise<void> {
-        const member = interaction.member as GuildMember;
-        const voiceChannelId = member.voice.channel?.id;
+		const status = this.player.state.status;
+		const actions = {
+			[AudioPlayerStatus.Playing]: {
+				action: () => this.player.pause(),
+				message: bot.messages.PAUSE_TRACK,
+				isPlaying: false,
+			},
+			[AudioPlayerStatus.Paused]: {
+				action: () => this.player.unpause(),
+				message: bot.messages.RESUME_TRACK,
+				isPlaying: true,
+			},
+		} as const;
 
-        if (!member.voice.channel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) || !voiceChannelId) {
-            await this.commandService.reply(interaction, "No voice access");
-            return;
-        }
+		const currentAction = actions[status as keyof typeof actions];
+		if (currentAction) {
+			currentAction.action();
+			this.state.isPlaying = currentAction.isPlaying;
+			await this.commandService.reply(interaction, currentAction.message);
+		}
+	}
 
-        this.channelId = voiceChannelId;
-        this.connection = getVoiceConnection(this.guildId) || 
-            await this.connectToChannel(voiceChannelId, interaction);
+	/**
+	 * Sets the volume of the player
+	 * @param {number} volume - Volume to set
+	 */
+	public async setVolume(volume: number): Promise<void> {
+		if (this.player.state.status === AudioPlayerStatus.Playing) {
+			await this.smoothVolumeChange(volume / 100, 2000);
+			await this.queueService.setVolume(this.guildId, volume);
+		}
+	}
 
-        const track = await this.queueService.getTrack(voiceChannelId);
-        if (track) await this.playOrQueueTrack(track);
+	/**
+	 * Joins a voice channel
+	 * @param {CommandInteraction} interaction - Discord command interaction
+	 */
+	public async joinChannel(interaction: CommandInteraction): Promise<void> {
+		const member = interaction.member as GuildMember;
+		const voiceChannelId = member.voice.channel?.id;
 
-        this.setupDisconnectHandler();
-        this.startEmptyCheck();
-    }
+		if (!voiceChannelId || !this.hasVoiceAccess(member)) {
+			await this.commandService.reply(
+				interaction,
+				!voiceChannelId
+					? bot.messages.NOT_IN_VOICE_CHANNEL
+					: bot.messages.NO_ACCESS_TO_VOICE_CHANNEL,
+			);
+			return;
+		}
 
-    public leaveChannel(): void {
-        if (this.connection) {
-            this.connection.destroy();
-            this.reset();
-            bot.client.user?.setActivity();
-        }
-    }
+		try {
+			this.state.channelId = voiceChannelId;
+			this.state.connection = await this.establishConnection(
+				voiceChannelId,
+				interaction,
+			);
 
-    private async playTrack(track: Track): Promise<void> {
-        try {
-            this.currentTrack = track;
-            this.lastTrack = this.lastTrack || track;
+			const track = await this.queueService.getTrack(this.guildId);
+			if (track) await this.playOrQueueTrack(track);
 
-            const resource = createAudioResource(track.url!, {
-                inputType: StreamType.Arbitrary,
-                inlineVolume: true
-            });
+			await Promise.all([this.initialize("volume"), this.initialize("wave")]);
+			this.setupDisconnectHandler();
+			this.startEmptyCheck();
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_CONNECTING_TO_CHANNEL}: ${error}`,
+			);
+			await this.commandService.reply(
+				interaction,
+				bot.messages.ERROR_OCCURRED_WHILE_CONNECTING_TO_CHANNEL,
+			);
+			this.reset();
+		}
+	}
 
-            resource.volume?.setVolumeLogarithmic(0);
-            this.resource = resource;
-            
-            if (this.fadeOutTimeout) clearTimeout(this.fadeOutTimeout);
+	/**
+	 * Establishes a voice connection
+	 * @param {string} channelId - Discord channel ID
+	 * @param {CommandInteraction} interaction - Discord command interaction
+	 * @returns {Promise<VoiceConnection>} Voice connection
+	 */
+	private async establishConnection(
+		channelId: string,
+		interaction: CommandInteraction,
+	): Promise<VoiceConnection> {
+		const existingConnection = getVoiceConnection(this.guildId);
+		if (existingConnection) return existingConnection;
 
-            setTimeout(() => this.smoothVolumeChange(this.volume / 100, 3000, true, true), 500);
+		if (!interaction.guild) {
+			throw new Error(bot.loggerMessages.GUILD_NOT_FOUND);
+		}
 
-            this.player.play(resource);
-            if (!this.loop) {
-                await this.queueService.logTrackPlay(track.requestedBy!, track.trackId, track.info);
-            }
+		const connection = joinVoiceChannel({
+			channelId,
+			guildId: this.guildId,
+			adapterCreator: interaction.guild
+				.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+			selfDeaf: false,
+			selfMute: false,
+		});
 
-            this.isPlaying = true;
-            bot.client.user?.setActivity(track.info, { type: 3 });
+		try {
+			await entersState(connection, VoiceConnectionStatus.Ready, 30000);
+			connection.subscribe(this.player);
+			return connection;
+		} catch (error) {
+			connection.destroy();
+			throw error;
+		}
+	}
 
-            const duration = await this.getDuration(track.url!);
-            this.fadeOutTimeout = setTimeout(() => {
-                this.smoothVolumeChange(0, 6000, false);
-            }, duration - 8000);
+	/**
+	 * Smoothly changes the volume of the player
+	 * @param {number} target - Target volume
+	 * @param {number} duration - Duration of the volume change
+	 * @param {boolean} memorize - Whether to memorize the volume
+	 * @param {boolean} zero - Whether to start from 0
+	 * @returns {Promise<void>} Promise that resolves when the volume change is complete
+	 */
+	public smoothVolumeChange(
+		target: number,
+		duration: number,
+		memorize: boolean = true,
+		zero: boolean = false,
+	): Promise<void> {
+		return new Promise((resolve) => {
+			if (this.timers.volumeChange) {
+				clearTimeout(this.timers.volumeChange);
+				this.timers.volumeChange = null;
+			}
 
-        } catch (error) {
-            logger.error(`Play error: ${error}`);
-        }
-    }
+			const start = zero ? 0 : this.state.volume / 100 || 0;
+			const diff = target - start;
+			const startTime = Date.now();
 
-    private async getDuration(url: string): Promise<number> {
-        return new Promise((resolve, reject) => {
-            const worker = new Worker(path.resolve(__dirname, '../workers/trackDurationWorker.js'));
-            worker.postMessage(url);
-            worker.on('message', msg => {
-                if (typeof msg === 'number') {
-                    resolve(msg);
-                } else {
-                    reject(logger.error('Invalid message type'));
-                }
-            });
-            worker.on('error', reject);
-        });
-    }
+			if (memorize) this.state.volume = target * 100;
 
-    private async queueTrack(track: Track): Promise<void> {
-        if (this.channelId) {
-            await this.queueService.setTrack(this.channelId, this.guildId, track);
-        }
-    }
+			const animate = () => {
+				const elapsed = Date.now() - startTime;
+				const progress = Math.min(elapsed / duration, 1);
 
-    private async loadNextTrack(): Promise<void> {
-        if (this.channelId) {
-            this.nextTrack = await this.queueService.getTrack(this.channelId);
-        }
-    }
+				const vol = start + diff * progress;
+				this.state.resource?.volume?.setVolumeLogarithmic(
+					Math.max(0, Math.min(1, vol)),
+				);
 
-    private async playNextTrack(): Promise<void> {
-        if (this.nextTrack) {
-            await this.playTrack(this.loop ? this.lastTrack! : this.nextTrack);
-            if (!this.loop) {
-                this.nextTrack = null;
-                await this.loadNextTrack();
-            }
-        } else {
-            this.reset();
-            bot.client.user?.setActivity();
-        }
-    }
+				if (progress < 1) {
+					this.timers.volumeChange = setTimeout(animate, 16);
+				} else {
+					this.timers.volumeChange = null;
+					resolve();
+				}
+			};
 
-    private setupDisconnectHandler(): void {
-        this.connection?.on(VoiceConnectionStatus.Disconnected, async () => {
-            try {
-                await Promise.race([
-                    entersState(this.connection!, VoiceConnectionStatus.Signalling, RECONNECTION_TIMEOUT),
-                    entersState(this.connection!, VoiceConnectionStatus.Connecting, RECONNECTION_TIMEOUT)
-                ]);
-            } catch {
-                this.handleDisconnect();
-            }
-        });
-    }
+			animate();
+		});
+	}
 
-    private handleDisconnect(): void {
-        if (this.connection) {
-            this.connection.removeAllListeners();
-            this.connection.destroy();
-        }
-        this.reset();
-        bot.client.user?.setActivity();
-    }
+	/**
+	 * Checks if a member has voice access
+	 * @param {GuildMember} member - Guild member
+	 * @returns {boolean} Whether the member has voice access
+	 */
+	private hasVoiceAccess(member: GuildMember): boolean {
+		return !!(
+			member.voice.channel
+				?.permissionsFor(member)
+				?.has(PermissionFlagsBits.Connect) && member.voice.channel?.id
+		);
+	}
 
-    private startEmptyCheck(): void {
-        if (this.emptyChannelCheckInterval) clearInterval(this.emptyChannelCheckInterval);
-        this.emptyChannelCheckInterval = setInterval(() => this.checkEmpty(), EMPTY_CHANNEL_CHECK_INTERVAL);
-    }
+	/**
+	 * Leaves the voice channel
+	 */
+	public leaveChannel(): void {
+		if (this.state.connection) {
+			this.state.connection.destroy();
+			this.reset();
+			this.updateActivity();
+		}
+	}
 
-    private async checkEmpty(): Promise<void> {
-        if (!this.connection || !this.channelId) return;
+	/**
+	 * Updates the activity of the bot
+	 * @param {string} activity - Activity to set
+	 */
+	private updateActivity(activity?: string) {
+		if (bot.client.user) {
+			bot.client.user.setActivity(activity || "");
+		}
+	}
 
-        try {
-            const channel = await bot.client.guilds.fetch(this.guildId)
-                .then(g => {
-                    if (!this.channelId) {
-                        logger.error('Channel ID is null');
-                        return null;
-                    }
-                    return g.channels.fetch(this.channelId);
-                })
-                .then(c => c as VoiceChannel);
+	/**
+	 * Plays a track
+	 * @param {Track} track - Track to play
+	 */
+	private async playTrack(track: Track): Promise<void> {
+		try {
+			this.manageFadeOutTimeout();
 
-            if (channel.members.filter(m => !m.user.bot).size === 0) {
-                this.leaveChannel();
-            }
-        } catch (error) {
-            logger.error(`Empty check error: ${error}`);
-        }
-    }
+			this.state.currentTrack = track;
+			if (track.source === "yandex") {
+				this.state.lastTrack = this.state.lastTrack || track;
+				this.queueService.setLastTrackID(this.guildId, track.trackId);
+			}
 
-    private async connectToChannel(channelId: string, interaction: CommandInteraction): Promise<VoiceConnection> {
-        const connection = joinVoiceChannel({
-            channelId,
-            guildId: this.guildId,
-            adapterCreator: interaction.guild?.voiceAdapterCreator as DiscordGatewayAdapterCreator,
-            selfDeaf: false
-        });
+			await Promise.all([this.initialize("volume"), this.initialize("wave")]);
 
-        try {
-            await entersState(connection, VoiceConnectionStatus.Ready, 30000);
-            connection.subscribe(this.player);
-            return connection;
-        } catch (error) {
-            connection.destroy();
-            throw error;
-        }
-    }
+			const trackUrl = await this.getTrackUrl(track.trackId, track.source);
+			if (!trackUrl) {
+				logger.error(
+					`${bot.loggerMessages.FAILED_TO_GET_URL_FOR_TRACK}: ${track.trackId}`,
+				);
+				return;
+			}
 
-    private handleTrackEnd = async (): Promise<void> => {
-        this.lastTrack = this.currentTrack;
-        this.isPlaying = false;
-        this.currentTrack = null;
-        await this.playNextTrack();
-    };
+			const resource = this.createTrackResource({
+				...track,
+				url: trackUrl,
+			});
+			this.setupFadeEffects();
 
-    private reset(): void {
-        this.connection = null;
-        this.currentTrack = this.nextTrack = null;
-        this.isPlaying = false;
-        if (this.emptyChannelCheckInterval) {
-            clearInterval(this.emptyChannelCheckInterval);
-            this.emptyChannelCheckInterval = null;
-        }
-    }
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			this.player.play(resource);
 
-    public smoothVolumeChange(target: number, duration: number, memorize = true, zero = false): Promise<void> {
-        return new Promise(resolve => {
-            const start = zero ? 0 : this.volume / 100 || 0;
-            const diff = target - start;
-            const startTime = Date.now();
-            
-            if (memorize) this.volume = target * 100;
+			if (!this.state.loop) {
+				await this.queueService.logTrackPlay(
+					track.requestedBy!,
+					track.trackId,
+					track.info,
+				);
+			}
 
-            const animate = () => {
-                const elapsed = Date.now() - startTime;
-                const progress = Math.min(elapsed / duration, 1);
-                
-                const vol = start + diff * progress;
-                this.resource?.volume?.setVolumeLogarithmic(Math.max(0, Math.min(1, vol)));
-                
-                if (progress < 1) {
-                    setTimeout(animate, 16); // ~60fps
-                } else {
-                    resolve();
-                }
-            };
+			this.state.isPlaying = true;
 
-            animate();
-        });
-    }
+			this.updateActivity(track.info);
+
+			await this.setupTrackEndFade({ ...track, url: trackUrl });
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.PLAYBACK_ERROR}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
+	/**
+	 * Gets the URL of a track
+	 * @param {string} trackId - Track ID
+	 * @param {string} source - Source of the track
+	 * @returns {Promise<string>} URL of the track
+	 */
+	private async getTrackUrl(trackId: string, source: string): Promise<string> {
+		const plugin = bot.pluginManager.getPlugin(source);
+		return plugin?.getTrackUrl ? await plugin.getTrackUrl(trackId) : "";
+	}
+
+	/**
+	 * Creates a track resource
+	 * @param {Track & { url: string }} track - Track with URL
+	 * @returns {AudioResource} Track resource
+	 */
+	private createTrackResource(track: Track & { url: string }): AudioResource {
+		const resource = createAudioResource(track.url, {
+			inputType: StreamType.Arbitrary,
+			inlineVolume: true,
+			silencePaddingFrames: 5,
+		});
+		resource.volume?.setVolumeLogarithmic(0);
+		this.state.resource = resource;
+		return resource;
+	}
+
+	/**
+	 * Sets up fade effects
+	 */
+	private setupFadeEffects(): void {
+		if (this.timers.fadeOut) clearTimeout(this.timers.fadeOut);
+		setTimeout(
+			() => this.smoothVolumeChange(this.state.volume / 100, 3000, true, true),
+			500,
+		);
+	}
+
+	/**
+	 * Manages the fade out timeout
+	 * @param {number} duration - Duration of the fade out
+	 */
+	private manageFadeOutTimeout(duration?: number): void {
+		if (this.timers.fadeOut) {
+			clearTimeout(this.timers.fadeOut);
+			this.timers.fadeOut = null;
+			logger.info(`${bot.loggerMessages.CLEARED_EXISTING_FADEOUT_TIMEOUT}`);
+		}
+
+		if (duration && duration > 0) {
+			this.timers.fadeOut = setTimeout(() => {
+				this.smoothVolumeChange(0, 6000, false);
+			}, duration);
+			logger.info(
+				`${bot.loggerMessages.SET_NEW_FADEOUT_TIMEOUT_FOR_DURATION(duration)}`,
+			);
+		}
+	}
+
+	/**
+	 * Sets up the track end fade
+	 * @param {Track & { url: string }} track - Track with URL
+	 */
+	private async setupTrackEndFade(
+		track: Track & { url: string },
+	): Promise<void> {
+		const duration = await this.getDuration(track.url);
+		this.manageFadeOutTimeout(duration - 8000);
+	}
+
+	/**
+	 * Gets the duration of a track
+	 * @param {string} url - URL of the track
+	 * @returns {Promise<number>} Duration of the track
+	 */
+	private async getDuration(url: string): Promise<number> {
+		return await getAudioDurationInSeconds(
+			url,
+			pathToFfmpeg.ffprobePath || undefined,
+		);
+	}
+
+	/**
+	 * Queues a track
+	 * @param {Track} track - Track to queue
+	 */
+	private async queueTrack(track: Track): Promise<void> {
+		if (this.guildId) {
+			await this.queueService.setTrack(this.guildId, track);
+		}
+	}
+
+	/**
+	 * Loads the next track
+	 */
+	private async loadNextTrack(): Promise<void> {
+		if (this.guildId) {
+			this.state.nextTrack = await this.queueService.getTrack(this.guildId);
+		}
+	}
+
+	/**
+	 * Plays the next track
+	 */
+	private async playNextTrack(): Promise<void> {
+		if (this.state.loop) {
+			await this.playTrack(this.state.lastTrack!);
+		} else if (this.state.nextTrack) {
+			await this.playTrack(this.state.nextTrack);
+			if (!this.state.loop) {
+				this.state.nextTrack = null;
+				await this.loadNextTrack();
+			}
+		} else {
+			this.reset();
+			this.updateActivity();
+		}
+	}
+
+	/**
+	 * Sets up the disconnect handler
+	 */
+	private setupDisconnectHandler(): void {
+		this.state.connection?.on(VoiceConnectionStatus.Disconnected, async () => {
+			try {
+				await Promise.race([
+					entersState(
+						this.state.connection!,
+						VoiceConnectionStatus.Signalling,
+						RECONNECTION_TIMEOUT,
+					),
+					entersState(
+						this.state.connection!,
+						VoiceConnectionStatus.Connecting,
+						RECONNECTION_TIMEOUT,
+					),
+				]);
+			} catch {
+				this.handleDisconnect();
+			}
+		});
+	}
+
+	/**
+	 * Handles the disconnect event
+	 */
+	private handleDisconnect(): void {
+		if (this.state.connection) {
+			this.state.connection.removeAllListeners();
+			this.state.connection.destroy();
+		}
+		this.reset();
+		this.updateActivity();
+	}
+
+	/**
+	 * Starts the empty channel check
+	 */
+	private startEmptyCheck(): void {
+		if (this.timers.emptyChannelCheck)
+			clearInterval(this.timers.emptyChannelCheck);
+		this.timers.emptyChannelCheck = setInterval(
+			() => this.checkEmpty(),
+			EMPTY_CHANNEL_CHECK_INTERVAL,
+		);
+	}
+
+	/**
+	 * Checks if the voice channel is empty
+	 */
+	private async checkEmpty(): Promise<void> {
+		if (!this.state.connection || !this.state.channelId) return;
+
+		try {
+			const channel = await this.getVoiceChannel();
+
+			if (!channel) {
+				this.handleDisconnect();
+				return;
+			}
+
+			const membersCount = channel.members.filter((m) => !m.user.bot).size;
+
+			if (membersCount === 0) {
+				if (!this.timers.emptyChannel) {
+					this.timers.emptyChannel = setTimeout(() => {
+						this.leaveChannel();
+						this.timers.emptyChannel = null;
+					}, 30000);
+				}
+			} else if (this.timers.emptyChannel) {
+				clearTimeout(this.timers.emptyChannel);
+				this.timers.emptyChannel = null;
+			}
+		} catch (error) {
+			logger.error(`${bot.loggerMessages.EMPTY_CHECK_ERROR}: ${error}`);
+			this.handleDisconnect();
+		}
+	}
+
+	/**
+	 * Gets the voice channel
+	 * @returns {Promise<VoiceChannel | null>} Voice channel or null
+	 */
+	private async getVoiceChannel(): Promise<VoiceChannel | null> {
+		if (!this.state.channelId) {
+			logger.error(`${bot.loggerMessages.CHANNEL_ID_IS_NULL}`);
+			return null;
+		}
+
+		const guild = await bot.client.guilds.fetch(this.guildId);
+		const channel = await guild.channels.fetch(this.state.channelId);
+		return channel as VoiceChannel;
+	}
+
+	/**
+	 * Handles the track end event
+	 */
+	private handleTrackEnd = async (): Promise<void> => {
+		this.state.lastTrack = this.state.currentTrack;
+		this.state.isPlaying = false;
+		this.state.currentTrack = null;
+		await this.playNextTrack();
+	};
+
+	/**
+	 * Resets the player state
+	 */
+	private reset(): void {
+		this.manageFadeOutTimeout();
+		this.state.connection = null;
+		this.state.currentTrack = this.state.nextTrack = null;
+		this.state.isPlaying = false;
+
+		Object.values(this.timers).forEach((timer) => {
+			if (timer) clearTimeout(timer);
+		});
+		this.timers = {};
+	}
 }

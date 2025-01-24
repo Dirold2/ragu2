@@ -1,1 +1,1 @@
-declare module 'async-retry';
+declare module "async-retry";

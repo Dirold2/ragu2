@@ -10,26 +10,23 @@ datasource db {
 
 model Queue {
   id          Int      @id @default(autoincrement())
-  channelId   String
   guildId     String   @default("")
-  priority    Boolean
   lastTrackId String?
-  waveStatus  Boolean?
+  waveStatus  Boolean? @default(false)
   loop        Boolean? @default(false)
   volume      Int?
   tracks      Tracks[]
-  Playlist    Playlist[]
 
-  @@unique([channelId, priority])
-  @@index([channelId])
+  @@unique([guildId])
+  @@index([guildId])
 }
 
 model Tracks {
   id        Int       @id @default(autoincrement())
   trackId   String
   addedAt   BigInt
+  priority  Boolean   @default(false)
   info      String
-  url       String
   source    String
   requestedBy String?
   queueId   Int
@@ -37,18 +34,6 @@ model Tracks {
 
   @@index([trackId])
   @@index([queueId])
-}
-
-model Playlist {
-  id        Int       @id @default(autoincrement())
-  trackId   String
-  addedAt   BigInt
-  info      String
-  url       String
-  source    String
-  requestedBy String?
-  queueId   Int
-  Queue     Queue     @relation(fields: [queueId], references: [id])
 }
 
 model GlobalHistory {

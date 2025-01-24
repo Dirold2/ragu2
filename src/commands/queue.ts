@@ -1,66 +1,199 @@
-import { CommandInteraction, GuildMember } from 'discord.js';
-import { Discord, Slash } from 'discordx';
+import {
+	CommandInteraction,
+	GuildMember,
+	Message,
+	PermissionsBitField,
+} from "discord.js";
+import { Discord, Slash } from "discordx";
 
-import { bot } from '../bot.js';
-import logger from '../utils/logger.js';
+import { bot } from "../bot.js";
+import logger from "../utils/logger.js";
 
 interface Track {
-    url: string;
-    info: string;
-    source: string;
-    trackId?: string | undefined;
-    addedAt?: bigint | undefined;
+	url: string;
+	info: string;
+	source: string;
+	trackId?: string;
+	addedAt?: bigint;
 }
+
+const MAX_PAGE_LENGTH = 1900;
+const REACTIONS = {
+	PREV: "⬅️",
+	NEXT: "➡️",
+	CLOSE: "❌",
+} as const;
+
+type ReactionEmoji = (typeof REACTIONS)[keyof typeof REACTIONS];
 
 @Discord()
 export class QueueCommand {
-    @Slash({ description: "View the current queue", name: "queue" })
-    public async queue(interaction: CommandInteraction): Promise<void> {
-        try {
-            await this.handleQueueCommand(interaction);
-        } catch (error) {
-            await this.handleError(interaction, error);
-        }
-    }
+	private currentPage = 0;
+	private pages: string[] = [];
+	private message: Message | null = null;
 
-    private async handleQueueCommand(interaction: CommandInteraction): Promise<void> {
-        const channelId = this.getVoiceChannelId(interaction);
-        if (!channelId) {
-            await bot.commandService.reply(interaction, "You must be in a voice channel to use this command.");
-            return;
-        }
+	@Slash({ description: `View queue`, name: "queue" })
+	async queue(interaction: CommandInteraction): Promise<void> {
+		try {
+			await this.handleQueueCommand(interaction);
+		} catch (error) {
+			logger.error(`Error retrieving queue:`, error);
+			await bot.commandService.reply(
+				interaction,
+				error instanceof Error
+					? `${bot.loggerMessages.ERROR_RETRIEVING_QUEUE}: ${error.message}`
+					: `${bot.loggerMessages.CRITICAL_ERROR_RETRIEVING_QUEUE}`,
+			);
+		}
+	}
 
-        const queue = await bot.queueService.getQueue(channelId);
-        if (queue.tracks.length === 0) {
-            await bot.commandService.reply(interaction, "The queue is empty.");
-            return;
-        }
+	private async handleQueueCommand(
+		interaction: CommandInteraction,
+	): Promise<void> {
+		const member = interaction.member;
+		if (!(member instanceof GuildMember) || !member.voice.channelId) {
+			await bot.commandService.reply(
+				interaction,
+				`${bot.messages.QUEUE_ERROR_NOT_IN_VOICE_CHANNEL}`,
+			);
+			return;
+		}
 
-        const queueString = this.formatQueueString(queue.tracks);
-        await bot.commandService.reply(interaction, `Current queue:\n${queueString}`);
-    }
+		const queue = await bot.queueService.getQueue(member.voice.channelId);
+		if (queue.tracks.length === 0) {
+			await bot.commandService.reply(
+				interaction,
+				`${bot.messages.QUEUE_EMPTY}`,
+			);
+			return;
+		}
 
-    private getVoiceChannelId(interaction: CommandInteraction): string | null {
-        const member = interaction.member;
-        if (!(member instanceof GuildMember)) {
-            logger.warn("Interaction member is not a GuildMember");
-            return null;
-        }
-        return member.voice.channelId;
-    }
+		this.pages = this.createPages(queue.tracks as Track[]);
+		this.currentPage = 0;
 
-    private formatQueueString(tracks: Track[]): string {
-        return tracks
-            .map((track, index) => `${index + 1}. ${track.info}`)
-            .join("\n");
-    }
+		const message = (await interaction.reply({
+			content: await this.createPageMessage(),
+			fetchReply: true,
+		})) as Message;
 
-    private async handleError(interaction: CommandInteraction, error: unknown): Promise<void> {
-        const errorMsg = error instanceof Error
-            ? `An error occurred while fetching the queue: ${error.name}: ${error.message}`
-            : "An unexpected error occurred while fetching the queue.";
+		this.message = message;
 
-        logger.error("Queue command error:", error);
-        await bot.commandService.reply(interaction, errorMsg);
-    }
+		if (
+			this.pages.length > 1 &&
+			message.guild?.members.me?.permissions.has(
+				PermissionsBitField.Flags.ManageMessages,
+			)
+		) {
+			await this.setupReactions(message, interaction);
+		}
+	}
+
+	private async setupReactions(
+		message: Message,
+		interaction: CommandInteraction,
+	): Promise<void> {
+		try {
+			for (const reaction of Object.values(REACTIONS)) {
+				await message.react(reaction);
+			}
+			this.createReactionCollector(message, interaction);
+		} catch (error) {
+			logger.error(
+				`${bot.loggerMessages.ERROR_SETTING_UP_REACTIONS}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
+	private createReactionCollector(
+		message: Message,
+		interaction: CommandInteraction,
+	): void {
+		const collector = message.createReactionCollector({
+			filter: (reaction, user) => {
+				const emoji = reaction.emoji.name as string;
+				return (
+					Object.values(REACTIONS).includes(emoji as ReactionEmoji) &&
+					user.id === interaction.user.id
+				);
+			},
+			time: 300000,
+		});
+
+		collector.on("collect", async (reaction, user) => {
+			if (!this.message) return;
+
+			try {
+				await reaction.users.remove(user.id).catch(() => {});
+
+				const emoji = reaction.emoji.name as ReactionEmoji;
+				switch (emoji) {
+					case REACTIONS.PREV:
+						if (this.currentPage > 0) {
+							this.currentPage--;
+							await this.updateMessage();
+						}
+						break;
+					case REACTIONS.NEXT:
+						if (this.currentPage < this.pages.length - 1) {
+							this.currentPage++;
+							await this.updateMessage();
+						}
+						break;
+					case REACTIONS.CLOSE:
+						await this.message.delete();
+						this.message = null;
+						collector.stop();
+						break;
+				}
+			} catch (error) {
+				if (
+					error instanceof Error &&
+					error.message.includes(`${bot.messages.UNKNOWN_MESSAGE}`)
+				) {
+					this.message = null;
+					collector.stop();
+				} else {
+					logger.error(
+						`${bot.loggerMessages.ERROR_RETRIEVING_QUEUE}: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
+			}
+		});
+
+		collector.on("end", () => {
+			if (this.message?.reactions) {
+				this.message.reactions.removeAll().catch(() => {});
+			}
+		});
+	}
+
+	private async updateMessage(): Promise<void> {
+		if (this.message) {
+			await this.message.edit(await this.createPageMessage());
+		}
+	}
+
+	private async createPageMessage(): Promise<string> {
+		return this.pages.length > 1
+			? `${bot.messages.QUEUE_PAGES(this.pages[this.currentPage])} ${this.currentPage + 1}/${this.pages.length}`
+			: this.pages[this.currentPage];
+	}
+
+	private createPages(tracks: Track[]): string[] {
+		const pages: string[] = [];
+		let currentPage = "";
+
+		tracks.forEach((track, index) => {
+			const entry = `${index + 1}. ${track.info}\n`;
+			if ((currentPage + entry).length > MAX_PAGE_LENGTH) {
+				pages.push(currentPage);
+				currentPage = entry;
+			} else {
+				currentPage += entry;
+			}
+		});
+
+		if (currentPage) pages.push(currentPage);
+		return pages;
+	}
 }
