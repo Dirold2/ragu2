@@ -1,0 +1,28 @@
+{
+    "logger": {
+        "server": {
+            "started": "Сервер запущен на порту {port}",
+            "stopped": "Сервер остановлен",
+            "corsEnabled": "CORS включен",
+            "portInUse": "Порт {port} занят"
+        },
+        "errors": {
+            "route": "Ошибка маршрута: {error}",
+            "serverStart": "Ошибка запуска сервера: {error}",
+            "serverStop": "Ошибка остановки сервера: {error}"
+        },
+        "welcome": "Добро пожаловать в API"
+        
+    },
+    "messages": {
+        "server": {
+            "health": "Сервер работает",
+            "error": "Внутренняя ошибка сервера"
+        },
+        "welcome": "Добро пожаловать в API сервис",
+        "errors": {
+            "route": "Маршрут не найден",
+            "server": "Внутренняя ошибка сервера"
+        }
+    }
+} 

@@ -1,0 +1,265 @@
+{
+    "errors": {
+        "track": {
+            "processing": "Ошибка обработки трека: {error}",
+            "invalid": "Некорректные данные трека",
+            "invalid_url": "Некорректный URL трека: {url}",
+            "invalid_data": "Некорректные данные трека: {error}",
+            "url_not_found": "Не удалось получить URL для трека: {trackId}",
+            "add_failed": "Не удалось добавить трек {id} после {retries} попыток: {error}",
+            "search": "Ошибка поиска для {query}",
+            "playback": "Ошибка воспроизведения: {error}"
+        },
+        "playlist": {
+            "empty": "Плейлист пуст",
+            "not_found": "Плейлист не найден или пуст",
+            "processing": "Ошибка обработки плейлиста: {error}"
+        },
+        "plugin": {
+            "not_found": "Плагин {name} не найден",
+            "search": "Ошибка поиска в плагине {name}: {error}",
+            "url_processing": "Ошибка обработки URL в плагине {name}: {error}",
+            "missing_config": "Отсутствует конфигурация плагина",
+            "invalid_config": "Неверная конфигурация плагина: {errors}"
+        },
+        "voice": {
+            "not_in_channel": "Вы должны находиться в голосовом канале",
+            "connection": "Ошибка подключения к голосовому каналу: {error}",
+            "join": "Не удалось присоединиться к голосовому каналу",
+            "empty_check": "Ошибка проверки пустого канала: {error}",
+            "channel_id_null": "ID канала отсутствует"
+        },
+        "interaction": {
+            "expired": "Время взаимодействия истекло",
+            "not_repliable": "Невозможно ответить на это взаимодействие",
+            "already_replied": "Ответ на это взаимодействие уже был отправлен"
+        },
+        "message": {
+            "not_deletable": "Невозможно удалить это сообщение",
+            "unknown": "Неизвестное сообщение"
+        },
+        "discord_api": "Ошибка Discord API (код {code}) для {context}: {message}",
+        "server": "Эта команда работает только на сервере",
+        "bot_token": "Токен бота не найден в переменных окружения",
+        "guild_not_found": "Сервер не найден",
+        "unexpected": "Произошла непредвиденная ошибка",
+        "player": {
+            "not_found": "Плеер не найден"
+        },
+        "reply_error": "Ошибка при ответе на взаимодействие",
+        "notInVoiceChannel": "Вы должны находиться в голосовом канале: {error}",
+        "unsupported_track_source": "Неподдерживаемый источник трека: {error}",
+        "unexpectedError": "Произошла непредвиденная ошибка",
+        "serverError": "Эта команда может быть использована только на сервере",
+        "playerNotFound": "Плеер не найден для сервера: {guildId}",
+        "failed_to_play_queue_track": "Не удалось воспроизвести или добавить трек в очередь",
+        "voice_connection": "Ошибка голосового соединения: {error}",
+        "joinError": "Не удалось присоединиться к голосовому каналу",
+        "invalid_track": "Некорректные данные трека",
+        "invalid_track_url": "Некорректный URL трека",
+        "track_url_not_found": "URL трека не найден: {trackId}",
+        "playback": "Ошибка воспроизведения: {error}",
+        "empty_check": "Ошибка проверки пустого канала: {error}",
+        "channel_id_null": "ID канала отсутствует"
+    },
+    "success": {
+        "track": {
+            "added": "Трек добавлен: {track}",
+            "added_to_queue": "Добавлено в очередь: {track}",
+            "started_playing": "Начало воспроизведения: {track}"
+        },
+        "playlist": {
+            "added": "Плейлист успешно добавлен в очередь",
+            "processed": "Добавлено {count} треков из плейлиста"
+        },
+        "plugin": {
+            "registered": "Плагин {name} успешно зарегистрирован"
+        }
+    },
+    "info": {
+        "track": {
+            "searching": "Поиск трека: {query}",
+            "processing": "Обработка трека...",
+            "now_playing": "Сейчас играет: {track}"
+        },
+        "playlist": {
+            "processing": "Обработка плейлиста..."
+        }
+    },
+    "player": {
+        "volume": {
+            "set": "Громкость установлена на {volume}%",
+            "error_max": "Громкость должна быть от 0 до {maxVolume}"
+        },
+        "queue": {
+            "empty": "Очередь пуста",
+            "pages": "Страница {current} из {total}",
+            "cleared": "Очередь очищена"
+        },
+        "loop": {
+            "enabled": "Повтор трека включен: {track}",
+            "disabled": "Повтор трека выключен"
+        },
+        "status": {
+            "created": "Создан новый плеер для сервера: {guildId}",
+            "destroyed": "Плеер удален для сервера: {guildId}",
+            "joined": "Присоединился к голосовому каналу",
+            "left": "Покинул голосовой канал",
+            "paused": "Воспроизведение приостановлено",
+            "resumed": "Воспроизведение возобновлено",
+            "skipped": "Трек пропущен",
+            "nothing_playing": "Сейчас ничего не воспроизводится",
+            "error": "Произошла ошибка плеера"
+        },
+        "fadeout": {
+            "cleared": "Затухание очищено",
+            "set": "Установлено затухание: {duration}мс"
+        },
+        "playerCreated": "Создан новый плеер для сервера: {guildId}",
+        "nothingPlaying": "Сейчас ничего не воспроизводится",
+        "skipped": "Трек пропущен",
+        "paused": "Воспроизведение приостановлено",
+        "resumed": "Воспроизведение возобновлено",
+        "fadeout_cleared": "Затухание очищено",
+        "fadeout_set": "Установлено затухание: {duration}мс"
+    },
+    "commands": {
+        "play": {
+            "description": "Воспроизвести трек",
+            "option_track": "Название трека или URL"
+        },
+        "skip": {
+            "description": "Пропустить текущий трек"
+        },
+        "volume": {
+            "description": "Изменить громкость",
+            "option_number": "Значение от 0 до {max}"
+        },
+        "queue": {
+            "description": "Показать очередь воспроизведения",
+            "not_in_voice_channel": "Вы должны находиться в голосовом канале",
+            "empty": "Очередь пуста",
+            "cleared": "Очередь очищена"
+        },
+        "loop": {
+            "description": "Включить/выключить повтор трека"
+        },
+        "other": {
+            "no_recently_played_tracks": "Нет недавно проигранных треков",
+            "recently_played_tracks": "Недавно проигранные треки",
+            "no_popular_tracks": "Нет популярных треков",
+            "popular_tracks": "Популярные треки"
+        },
+        "interaction": {
+            "editing_reply": "Редактирование ответа для взаимодействия: {id}",
+            "sending_reply": "Отправка ответа для взаимодействия: {id}",
+            "not_repliable": "Невозможно ответить на взаимодействие: {id}",
+            "already_replied": "Ответ на взаимодействие уже отправлен: {id}",
+            "unknown_error": "Неизвестная ошибка взаимодействия: {id}",
+            "expired": "Время взаимодействия истекло: {context}"
+        },
+        "message": {
+            "not_deletable": "Невозможно удалить сообщение: {id}",
+            "deleted": "Сообщение удалено: {id}",
+            "unknown_error": "Неизвестная ошибка сообщения: {id}"
+        }
+    },
+    "logger": {
+        "track": {
+            "searching": "Поиск трека: {query}",
+            "add_error": "Не удалось добавить трек {id} после {retries} попыток: {error}"
+        },
+        "plugin": {
+            "registered": "Плагин {name} успешно зарегистрирован",
+            "register_error": "Не удалось зарегистрировать плагин",
+            "not_found": "Плагин не найден",
+            "search_error": "Ошибка поиска в плагине {name}",
+            "url_process_error": "Ошибка обработки URL в плагине {name}",
+            "cache": {
+                "hit": "Найдено в кеше"
+            }
+        },
+        "module": {
+            "loaded": "Модуль {name} загружен",
+            "started": "Модуль {name} запущен",
+            "stopped": "Модуль {name} остановлен"
+        },
+        "cache": {
+            "hit": "Найдено в кеше: {key}",
+            "miss": "Не найдено в кеше: {key}"
+        },
+        "server": {
+            "started": "API сервер запущен на порту {port}",
+            "stopped": "API сервер остановлен"
+        }
+    },
+    "bot": {
+        "status": {
+            "initialized": "Бот успешно инициализирован",
+            "init_failed": "Ошибка инициализации бота: {error}",
+            "started": "Бот успешно запущен",
+            "start_error": "Ошибка запуска бота: {error}",
+            "token_error": "Токен бота отсутствует или недействителен",
+            "stopped": "Бот остановлен",
+            "restarting": "Бот перезапускается...",
+            "restart_complete": "Перезапуск бота завершен"
+        }
+    },
+    "plugins": {
+        "yandex": {
+            "no_similar_tracks_found": "Не найдено похожих треков для ID: {trackId}",
+            "error_fetching_similar_tracks": "Ошибка при получении похожих треков для ID: {trackId}",
+            "error_initializing_service": "Ошибка инициализации сервиса Яндекс.Музыка",
+            "failed_to_initialize": "Не удалось инициализировать плагин Яндекс.Музыка",
+            "retrying_search": "Повторная попытка поиска для {trackName}"
+        }
+    },
+    "messages": {
+        "nameService": {
+            "info": {
+                "searching_track": "Поиск трека: {query}"
+            },
+            "errors": {
+                "plugin_not_found": "Плагин не найден для источника: {source}",
+                "empty_playlist": "Плейлист пуст",
+                "search_error": "Ошибка поиска в плагине {plugin}: {error}",
+                "url_processing": "Ошибка обработки URL в плагине {plugin}: {error}",
+                "add_track_failed": "Не удалось добавить трек {id} после {retries} попыток: {error}",
+                "track_processing": "Ошибка обработки трека: {error}"
+            },
+            "success": {
+                "added_to_queue": "Добавлено в очередь: {track}",
+                "playlist_added": "Плейлист успешно добавлен в очередь"
+            }
+        },
+        "bot": {
+            "initialization": {
+                "failed": "Ошибка инициализации бота",
+                "success": "Бот успешно инициализирован"
+            },
+            "start": {
+                "error": "Ошибка запуска бота",
+                "success": "Бот успешно запущен"
+            },
+            "token": {
+                "error": "Токен бота отсутствует или недействителен"
+            }
+        }
+    },
+    "queue": {
+        "error_adding_track": "Ошибка добавления трека: {trackId}",
+        "guild_id_required": "Требуется ID сервера",
+        "error_retrieving_track": "Ошибка получения трека для сервера: {guildId}",
+        "error_fetching_queue": "Ошибка получения очереди для сервера: {guildId}",
+        "error_clearing_queue": "Ошибка очистки очереди для сервера: {guildId}",
+        "error_removing_track": "Ошибка удаления трека: {trackId}",
+        "loop_set": "Установлен повтор для сервера: {guildId}",
+        "error_logging_play": "Ошибка логирования воспроизведения трека {trackId} пользователем {userId}",
+        "error_fetching_history": "Ошибка получения истории для пользователя: {userId}",
+        "error_fetching_top_tracks": "Ошибка получения популярных треков",
+        "tracks_array_empty": "Массив треков пуст",
+        "added_batch": "Добавлено {count} треков в очередь для сервера: {guildId}",
+        "error_adding_tracks": "Ошибка добавления треков в очередь",
+        "missing_required_parameters": "Отсутствуют необходимые параметры"
+    }
+} 

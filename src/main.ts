@@ -1,25 +1,45 @@
-import { dirname } from "dirname-filename-esm";
-import dotenv from "dotenv";
+import dotenv from 'dotenv';
+import { ModuleManager } from './core/ModuleManager.js';
+import logger from './utils/logger.js';
 
-import { importx } from "@discordx/importer";
-
-import { bot } from "./bot.js";
-
-const __dirname = dirname(import.meta);
-
+// Загружаем переменные окружения
 dotenv.config();
 
-/**
- * Runs the bot
- */
-async function run() {
-	await importx(`${__dirname}/{events,commands}/**/*.{ts,js}`);
+async function main() {
+    try {
+        // Создаем менеджер модулей
+        const moduleManager = new ModuleManager();
 
-	if (!process.env.DISCORD_TOKEN) {
-		throw Error(`${bot.loggerMessages.BOT_NOT_ENV_TOKEN}`);
-	}
+        // Загружаем все модули автоматически
+        await moduleManager.loadModules();
 
-	await bot.start(process.env.DISCORD_TOKEN);
+        // Инициализируем все модули (с учетом зависимостей)
+        await moduleManager.initializeModules();
+
+        // Запускаем все модули
+        await moduleManager.startModules();
+
+        // Обработка завершения работы
+        process.on('SIGTERM', async () => {
+            logger.info('Received SIGTERM signal. Starting graceful shutdown...');
+            await moduleManager.stopModules();
+            process.exit(0);
+        });
+
+        process.on('SIGINT', async () => {
+            logger.info('Received SIGINT signal. Starting graceful shutdown...');
+            await moduleManager.stopModules();
+            process.exit(0);
+        });
+
+    } catch (error) {
+        logger.error('Fatal error during application startup:', error);
+        process.exit(1);
+    }
 }
 
-void run();
+// Запускаем приложение
+main().catch((error) => {
+    logger.error('Unhandled error in main:', error);
+    process.exit(1);
+});

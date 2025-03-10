@@ -1,0 +1,266 @@
+{
+    "errors": {
+        "track": {
+            "processing": "Error processing track: {error}",
+            "invalid": "Invalid track data",
+            "invalid_url": "Invalid track URL",
+            "invalid_data": "Invalid track data: {error}",
+            "url_not_found": "Track URL not found: {trackId}",
+            "add_failed": "Failed to add track {id} after {retries} attempts: {error}",
+            "search": "Error searching for {query}",
+            "playback": "Playback error: {error}"
+        },
+        "playlist": {
+            "empty": "Playlist is empty",
+            "not_found": "Playlist not found or empty",
+            "processing": "Error processing playlist: {error}"
+        },
+        "plugin": {
+            "not_found": "Plugin {name} not found",
+            "search": "Error searching in plugin {name}: {error}",
+            "url_processing": "Error processing URL with plugin {name}: {error}",
+            "no_similar_tracks_found": "",
+            "missing_config": "Missing plugin configuration",
+            "invalid_config": "Invalid plugin configuration: {errors}"
+        },
+        "voice": {
+            "not_in_channel": "You must be in a voice channel: {error}",
+            "connection": "Voice connection error: {error}",
+            "join": "Failed to join voice channel",
+            "empty_check": "Error checking empty channel: {error}",
+            "channel_id_null": "Channel ID is null"
+        },
+        "interaction": {
+            "expired": "Interaction has expired",
+            "not_repliable": "Cannot reply to this interaction",
+            "already_replied": "This interaction has already been replied to"
+        },
+        "message": {
+            "not_deletable": "Cannot delete this message",
+            "unknown": "Unknown message"
+        },
+        "discord_api": "Discord API Error (code {code}) for {context}: {message}",
+        "server": "This command only works on a server",
+        "bot_token": "Bot token not found in environment variables",
+        "guild_not_found": "Guild not found",
+        "unexpected": "An unexpected error occurred",
+        "player": {
+            "not_found": "Player not found"
+        },
+        "reply_error": "Error replying to interaction",
+        "notInVoiceChannel": "You must be in a voice channel: {error}",
+        "unsupported_track_source": "Unsupported track source: {error}",
+        "unexpectedError": "An unexpected error occurred",
+        "serverError": "This command can only be used in a server",
+        "playerNotFound": "Player not found for guild: {guildId}",
+        "failed_to_play_queue_track": "Failed to play or queue track",
+        "voice_connection": "Voice connection error: {error}",
+        "joinError": "Failed to join voice channel",
+        "invalid_track": "Invalid track data",
+        "invalid_track_url": "Invalid track URL",
+        "track_url_not_found": "Track URL not found: {trackId}",
+        "playback": "Playback error: {error}",
+        "empty_check": "Error checking empty channel: {error}",
+        "channel_id_null": "Channel ID is null"
+    },
+    "success": {
+        "track": {
+            "added": "Track added: {track}",
+            "added_to_queue": "Added to queue: {track}",
+            "started_playing": "Started playing: {track}"
+        },
+        "playlist": {
+            "added": "Playlist successfully added to queue",
+            "processed": "Added {count} tracks from playlist"
+        },
+        "plugin": {
+            "registered": "Plugin {name} registered successfully"
+        }
+    },
+    "info": {
+        "track": {
+            "searching": "Searching for track: {query}",
+            "processing": "Processing track...",
+            "now_playing": "Now playing: {track}"
+        },
+        "playlist": {
+            "processing": "Processing playlist..."
+        }
+    },
+    "player": {
+        "volume": {
+            "set": "Volume set to {volume}%",
+            "error_max": "Volume must be between 0 and {maxVolume}"
+        },
+        "queue": {
+            "empty": "Queue is empty",
+            "pages": "Page {current} of {total}",
+            "cleared": "Queue cleared"
+        },
+        "loop": {
+            "enabled": "Track loop enabled: {track}",
+            "disabled": "Track loop disabled"
+        },
+        "status": {
+            "created": "Created new player for guild: {guildId}",
+            "destroyed": "Player destroyed for guild: {guildId}",
+            "joined": "Joined voice channel",
+            "left": "Left voice channel",
+            "paused": "Playback paused",
+            "resumed": "Playback resumed",
+            "skipped": "Track skipped",
+            "nothing_playing": "Nothing is currently playing",
+            "error": "Player error occurred"
+        },
+        "fadeout": {
+            "cleared": "Fadeout cleared",
+            "set": "Fadeout set: {duration}ms"
+        },
+        "playerCreated": "Created new player for guild: {guildId}",
+        "nothingPlaying": "Nothing is currently playing",
+        "skipped": "Track skipped",
+        "paused": "Playback paused",
+        "resumed": "Playback resumed",
+        "fadeout_cleared": "Fadeout cleared",
+        "fadeout_set": "Fadeout set: {duration}ms"
+    },
+    "commands": {
+        "play": {
+            "description": "Play a track",
+            "option_track": "Track name or URL"
+        },
+        "skip": {
+            "description": "Skip current track"
+        },
+        "volume": {
+            "description": "Adjust volume",
+            "option_number": "Value from 0 to {max}"
+        },
+        "queue": {
+            "description": "Show playback queue",
+            "not_in_voice_channel": "You must be in a voice channel",
+            "empty": "Queue is empty",
+            "cleared": "Queue cleared"
+        },
+        "loop": {
+            "description": "Toggle track loop"
+        },
+        "other": {
+            "no_recently_played_tracks": "No recently played tracks",
+            "recently_played_tracks": "Recently played tracks",
+            "no_popular_tracks": "No popular tracks",
+            "popular_tracks": "Popular tracks"
+        },
+        "interaction": {
+            "editing_reply": "Editing reply for interaction: {id}",
+            "sending_reply": "Sending reply for interaction: {id}",
+            "not_repliable": "Interaction is not repliable: {id}",
+            "already_replied": "Interaction already replied to: {id}",
+            "unknown_error": "Unknown error for interaction: {id}",
+            "expired": "Interaction expired: {context}"
+        },
+        "message": {
+            "not_deletable": "Message is not deletable: {id}",
+            "deleted": "Message deleted: {id}",
+            "unknown_error": "Unknown error for message: {id}"
+        }
+    },
+    "logger": {
+        "track": {
+            "searching": "Searching for track: {query}",
+            "add_error": "Failed to add track {id} after {retries} attempts: {error}"
+        },
+        "plugin": {
+            "registered": "Plugin {name} registered successfully",
+            "register_error": "Failed to register plugin",
+            "not_found": "Plugin not found",
+            "search_error": "Error searching in plugin {name}",
+            "url_process_error": "Error processing URL in plugin {name}",
+            "cache": {
+                "hit": "Cache hit"
+            }
+        },
+        "module": {
+            "loaded": "Module {name} loaded",
+            "started": "Module {name} started",
+            "stopped": "Module {name} stopped"
+        },
+        "cache": {
+            "hit": "Cache hit for: {key}",
+            "miss": "Cache miss for: {key}"
+        },
+        "server": {
+            "started": "API server started on port {port}",
+            "stopped": "API server stopped"
+        }
+    },
+    "bot": {
+        "status": {
+            "initialized": "Bot initialized successfully",
+            "init_failed": "Bot initialization failed: {error}",
+            "started": "Bot started successfully",
+            "start_error": "Bot start error: {error}",
+            "token_error": "Bot token is missing or invalid",
+            "stopped": "Bot stopped",
+            "restarting": "Bot is restarting...",
+            "restart_complete": "Bot restart complete"
+        }
+    },
+    "plugins": {
+        "yandex": {
+            "no_similar_tracks_found": "No similar tracks found for track ID: {trackId}",
+            "error_fetching_similar_tracks": "Error fetching similar tracks for track ID: {trackId}",
+            "error_initializing_service": "Error initializing Yandex Music service",
+            "failed_to_initialize": "Failed to initialize Yandex Music plugin",
+            "retrying_search": "Retrying search for {trackName}"
+        }
+    },
+    "messages": {
+        "nameService": {
+            "info": {
+                "searching_track": "Searching for track: {query}"
+            },
+            "errors": {
+                "plugin_not_found": "Plugin not found for source: {source}",
+                "empty_playlist": "Playlist is empty",
+                "search_error": "Error searching in plugin {plugin}: {error}",
+                "url_processing": "Error processing URL in plugin {plugin}: {error}",
+                "add_track_failed": "Failed to add track {id} after {retries} attempts: {error}",
+                "track_processing": "Error processing track: {error}"
+            },
+            "success": {
+                "added_to_queue": "Added to queue: {track}",
+                "playlist_added": "Playlist successfully added to queue"
+            }
+        },
+        "bot": {
+            "initialization": {
+                "failed": "Bot initialization failed",
+                "success": "Bot initialized successfully"
+            },
+            "start": {
+                "error": "Bot start error",
+                "success": "Bot started successfully"
+            },
+            "token": {
+                "error": "Bot token is missing or invalid"
+            }
+        }
+    },
+    "queue": {
+        "error_adding_track": "Error adding track: {trackId}",
+        "guild_id_required": "Guild ID is required",
+        "error_retrieving_track": "Error retrieving track for guild: {guildId}",
+        "error_fetching_queue": "Error fetching queue for guild: {guildId}",
+        "error_clearing_queue": "Error clearing queue for guild: {guildId}",
+        "error_removing_track": "Error removing track: {trackId}",
+        "loop_set": "Loop set for guild: {guildId}",
+        "error_logging_play": "Error logging play for track {trackId} by user {userId}",
+        "error_fetching_history": "Error fetching history for user: {userId}",
+        "error_fetching_top_tracks": "Error fetching top tracks",
+        "tracks_array_empty": "Tracks array is empty",
+        "added_batch": "Added {count} tracks to queue for guild: {guildId}",
+        "error_adding_tracks": "Error adding tracks to queue",
+        "missing_required_parameters": "Missing required parameters"
+    }
+}

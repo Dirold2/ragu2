@@ -1,0 +1,27 @@
+{
+    "logger": {
+        "server": {
+            "started": "Server started on port {port}",
+            "stopped": "Server stopped",
+            "corsEnabled": "CORS enabled",
+            "portInUse": "Port {port} is in use"
+        },
+        "errors": {
+            "route": "Route error: {error}",
+            "serverStart": "Server startup error: {error}",
+            "serverStop": "Server shutdown error: {error}"
+        },
+        "welcome": "Welcome to API"
+    },
+    "messages": {
+        "server": {
+            "health": "Server is healthy",
+            "error": "Internal server error"
+        },
+        "welcome": "Welcome to the API service",
+        "errors": {
+            "route": "Route not found",
+            "server": "Internal server error"
+        }
+    }
+} 

@@ -1,2 +1,2 @@
-export { default as logger } from "./logger.js";
-export { register, trackPlayCounter } from "./monitoring.js";
+export { createLogger } from "./logger.js";
+export { createLocale } from './locale.js';
