@@ -19,7 +19,7 @@ import {
 	createLogger, 
 	createLocale 
 } from "../../utils/index.js";
-import translations from './locales/en.json' assert { type: "json" };
+import translations from './locales/en.json' with { type: "json" };
 
 const __dirname = dirname(import.meta);
 dotenv.config();

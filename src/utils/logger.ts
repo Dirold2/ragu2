@@ -9,7 +9,7 @@ import chalk from "chalk";
  * @param {string} [nameModule] - Optional module name to include in log messages
  * @returns {winston.Logger} Configured winston logger instance
  */
-export const createLogger = (nameModule?: string) => {
+export const createLogger = (nameModule?: string): winston.Logger => {
 	// Custom format for log messages including timestamp and module name
 	const customFormat = winston.format.printf(
 		({ level, message, timestamp, stack, url }) => {

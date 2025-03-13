@@ -84,14 +84,16 @@ export default class CommandService {
 		try {
 			if (!interaction.isRepliable()) {
 				this.logger.warn(
-					bot.locale.t('commands.interaction.not_repliable', { id: interaction.id })
+					bot.locale.t('commands.interaction.not_repliable', { id: interaction.id }),
+					{ url: new Error().stack?.split('\n')[1] }
 				);
 				return;
 			}
 
 			if (interaction.replied) {
 				this.logger.warn(
-					bot.locale.t('commands.interaction.already_replied', { id: interaction.id })
+					bot.locale.t('commands.interaction.already_replied', { id: interaction.id }),
+					{ url: new Error().stack?.split('\n')[1] }
 				);
 				return;
 			}

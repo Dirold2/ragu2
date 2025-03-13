@@ -61,7 +61,8 @@
         "track_url_not_found": "Track URL not found: {trackId}",
         "playback": "Playback error: {error}",
         "empty_check": "Error checking empty channel: {error}",
-        "channel_id_null": "Channel ID is null"
+        "channel_id_null": "Channel ID is null",
+        "url_processing": "Error processing URL {url}"
     },
     "success": {
         "track": {

@@ -21,7 +21,16 @@
         "welcome": "Welcome to the API service",
         "errors": {
             "route": "Route not found",
-            "server": "Internal server error"
+            "server": "Internal server error",
+            "player": {
+                "not_found": "Player not found"
+            },
+            "track": {
+                "not_found": "Track not found",
+                "add_failed": "Failed to add track"
+            },
+            "missing_query": "Search query is required",
+            "missing_url_or_query": "URL or search query is required"
         }
     }
 } 

@@ -60,7 +60,8 @@
         "track_url_not_found": "URL трека не найден: {trackId}",
         "playback": "Ошибка воспроизведения: {error}",
         "empty_check": "Ошибка проверки пустого канала: {error}",
-        "channel_id_null": "ID канала отсутствует"
+        "channel_id_null": "ID канала отсутствует",
+        "url_processing": "Ошибка обработки URL {url}"
     },
     "success": {
         "track": {

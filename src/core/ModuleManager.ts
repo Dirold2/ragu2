@@ -99,13 +99,12 @@ export class ModuleManager extends EventEmitter {
             return;
         }
 
-        // Проверяем наличие всех зависимостей перед сортировкой
+        // Проверяем наличие всех зависимостей
         for (const [moduleName, module] of this.modules) {
             for (const depName of module.dependencies) {
                 if (!this.modules.has(depName)) {
                     throw new Error(
-                        `Module "${moduleName}" requires "${depName}" module, but it's not loaded. ` +
-                        `Please ensure all required modules are present in the modules directory.`
+                        `Module "${moduleName}" requires "${depName}" module, but it's not loaded.`
                     );
                 }
             }
@@ -115,7 +114,7 @@ export class ModuleManager extends EventEmitter {
         
         // Подготавливаем импорты для каждого модуля
         for (const module of sortedModules) {
-            const imports: Record<string, any> = {};
+            const imports: Record<string, unknown> = {};
             
             for (const depName of module.dependencies) {
                 const depModule = this.modules.get(depName);
@@ -125,10 +124,13 @@ export class ModuleManager extends EventEmitter {
                 imports[depName] = depModule.exports;
             }
 
-            module.setImports(imports);
+            // Используем protected метод через явное приведение типа
+            (module as any).setImports(imports);
+            
+            // Инициализируем модуль
+            await module.initialize();
         }
 
-        // Убираем вызов start() отсюда, так как он будет вызван в startModules()
         this.initialized = true;
         this.logger.info('All modules initialized successfully');
     }
@@ -182,7 +184,11 @@ export class ModuleManager extends EventEmitter {
             sorted.push(module);
         };
 
-        for (const [moduleName] of this.modules) {
+        // Сначала сортируем модули по приоритету
+        const modulesByPriority = Array.from(this.modules.entries())
+            .sort(([, a], [, b]) => (b.priority || 0) - (a.priority || 0));
+
+        for (const [moduleName] of modulesByPriority) {
             visit(moduleName);
         }
 

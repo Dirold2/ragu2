@@ -1,3 +1,6 @@
+import type { Logger as WinstonLogger } from 'winston';
+import type { Locale } from '../utils/locale.js';
+
 export type ModuleExports = ModuleExportsMap[keyof ModuleExportsMap];
 
 export interface ModuleConfig {
@@ -9,27 +12,51 @@ export interface ModuleConfig {
 }
 
 export interface ModuleConstructor {
-    new (): {
-        config: ModuleConfig;
-        start(): Promise<void>;
-        stop(): Promise<void>;
-        restart(): Promise<void>;
-    };
-} 
+    new(): BaseModule;
+}
 
 // Базовый тип для всех модулей
-export interface BaseModule {
+export enum ModuleState {
+    UNINITIALIZED = 'UNINITIALIZED',
+    INITIALIZING = 'INITIALIZING',
+    INITIALIZED = 'INITIALIZED',
+    STARTING = 'STARTING',
+    RUNNING = 'RUNNING',
+    STOPPING = 'STOPPING',
+    STOPPED = 'STOPPED',
+    ERROR = 'ERROR'
+}
+
+export interface ModuleMetadata {
     readonly name: string;
     readonly description: string;
     readonly version: string;
     readonly dependencies: string[];
-    readonly exports: Record<string, unknown>;
     readonly disabled: boolean;
+    readonly priority: number;
+}
+
+// Определяем тип для логгера на основе winston
+export interface Logger extends WinstonLogger {
+    playerError(error: unknown, url?: string): void;
+}
+
+// Используем тип Locale из utils/locale.ts
+export type I18n = Locale;
+
+export interface BaseModule extends ModuleMetadata {
+    readonly exports: Record<string, unknown>;
+    readonly state: ModuleState;
+    readonly logger: Logger;
+    readonly locale: I18n;
     
+    initialize(): Promise<void>;
     start(): Promise<void>;
     stop(): Promise<void>;
     restart(): Promise<void>;
-    setImports(imports: { [key: string]: unknown }): void;
+    
+    getState(): ModuleState;
+    getError(): Error | null;
 }
 
 // Тип для объединения всех модулей
@@ -48,3 +75,6 @@ export interface ModuleTranslations {
         [key: string]: any;
     };
 }
+
+// Изменим утилитарный тип, чтобы он работал с BaseModule
+export type ModuleExportsType<T extends BaseModule> = T extends { exports: infer E } ? E : never;

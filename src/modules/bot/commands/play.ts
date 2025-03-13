@@ -70,7 +70,7 @@ export class PlayCommand {
 
 		await bot.commandService.reply(
 			interaction,
-			bot.locale.t('success.track.started_playing')
+			bot.locale.t('success.track.started_playing', { track: player.state.currentTrack?.info })
 		);
 		await bot.playerManager.joinChannel(interaction);
 	}
