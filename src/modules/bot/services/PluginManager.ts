@@ -18,11 +18,11 @@ export default class PluginManager {
 		try {
 			this.plugins.set(plugin.name, plugin);
 			bot.logger.info(
-				bot.locale.t('logger.plugin.registered', { name: plugin.name }),
+				bot.locale.t("logger.plugin.registered", { name: plugin.name }),
 			);
 		} catch (error) {
 			bot.logger.error(
-				`${bot.locale.t('logger.plugin.register_error')}:`,
+				`${bot.locale.t("logger.plugin.register_error")}:`,
 				error,
 			);
 		}
@@ -55,7 +55,7 @@ export default class PluginManager {
 			const cachedPluginName = this.urlCache.get<string>(url);
 			if (cachedPluginName) {
 				logger.debug(
-					`${bot.locale.t('logger.plugin.cache.hit')}:`,
+					`${bot.locale.t("logger.plugin.cache.hit")}:`,
 					cachedPluginName,
 				);
 				return this.plugins.get(cachedPluginName);
@@ -67,19 +67,14 @@ export default class PluginManager {
 
 			if (plugin) {
 				this.urlCache.set(url, plugin.name);
-				logger.debug(
-					`${bot.locale.t('logger.plugin.not_found')}`,
-				);
+				logger.debug(`${bot.locale.t("logger.plugin.not_found")}`);
 			} else {
-				logger.debug(`${bot.locale.t('logger.plugin.not_found')}`);
+				logger.debug(`${bot.locale.t("logger.plugin.not_found")}`);
 			}
 
 			return plugin;
 		} catch (error) {
-			logger.error(
-				`${bot.locale.t('logger.plugin.not_found')}:`,
-				error,
-			);
+			logger.error(`${bot.locale.t("logger.plugin.not_found")}:`, error);
 			return undefined;
 		}
 	}

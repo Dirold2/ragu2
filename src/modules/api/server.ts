@@ -2,7 +2,7 @@ import Fastify, { FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import net from "net";
 
-import { module } from './module.js';
+import { module } from "./module.js";
 
 export class ApiServer {
 	private server: FastifyInstance | null = null;
@@ -43,12 +43,12 @@ export class ApiServer {
 			origin: "*",
 			methods: ["GET", "POST"],
 		});
-		module.logger.debug('CORS enabled');
+		module.logger.debug("CORS enabled");
 
 		// Set error handler
 		this.server.setErrorHandler((error, _request, reply) => {
-			module.logger.error('Route error', { error: error.message });
-			reply.status(500).send({ error: 'Internal server error'});
+			module.logger.error("Route error", { error: error.message });
+			reply.status(500).send({ error: "Internal server error" });
 		});
 
 		return this.server;
@@ -56,7 +56,7 @@ export class ApiServer {
 
 	public async start(): Promise<FastifyInstance> {
 		if (!this.server) {
-			throw new Error('Server must be created before starting');
+			throw new Error("Server must be created before starting");
 		}
 
 		try {
@@ -71,7 +71,11 @@ export class ApiServer {
 
 			return this.server;
 		} catch (error) {
-			module.logger.error(module.locale.t('logger.errors.serverStart', {error: error instanceof Error ? error.message : String(error)}));
+			module.logger.error(
+				module.locale.t("logger.errors.serverStart", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
+			);
 			throw error;
 		}
 	}
@@ -82,7 +86,11 @@ export class ApiServer {
 				await this.server.close();
 				this.server = null;
 			} catch (error) {
-				module.logger.error(module.locale.t('logger.errors.serverStop', {error: error instanceof Error ? error.message : String(error)}));
+				module.logger.error(
+					module.locale.t("logger.errors.serverStop", {
+						error: error instanceof Error ? error.message : String(error),
+					}),
+				);
 				throw error;
 			}
 		}

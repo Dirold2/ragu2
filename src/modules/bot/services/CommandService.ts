@@ -33,13 +33,17 @@ export default class CommandService {
 		try {
 			if (interaction.replied || interaction.deferred) {
 				this.logger.debug(
-					bot.locale.t('commands.interaction.editing_reply', { id: interaction.id })
+					bot.locale.t("commands.interaction.editing_reply", {
+						id: interaction.id,
+					}),
 				);
 				return interaction.editReply({ content: message });
 			}
 
 			this.logger.debug(
-				bot.locale.t('commands.interaction.sending_reply', { id: interaction.id })
+				bot.locale.t("commands.interaction.sending_reply", {
+					id: interaction.id,
+				}),
 			);
 			return interaction.reply({
 				content: message,
@@ -57,7 +61,7 @@ export default class CommandService {
 	public async delete(message: Message): Promise<void> {
 		if (!message.deletable) {
 			this.logger.debug(
-				bot.locale.t('commands.message.not_deletable', { id: message.id })
+				bot.locale.t("commands.message.not_deletable", { id: message.id }),
 			);
 			return;
 		}
@@ -65,7 +69,7 @@ export default class CommandService {
 		try {
 			await message.delete();
 			this.logger.debug(
-				bot.locale.t('commands.message.deleted', { id: message.id })
+				bot.locale.t("commands.message.deleted", { id: message.id }),
 			);
 		} catch (error) {
 			this.handleMessageError(error, message);
@@ -81,30 +85,38 @@ export default class CommandService {
 		interaction: CommandInteraction,
 		content: string,
 	): Promise<void> {
+		if (!interaction.isRepliable()) {
+			this.logger.debug(
+				bot.locale.t("commands.interaction.not_repliable", {
+					id: interaction.id
+				})
+			);
+			return;
+		}
+
 		try {
-			if (!interaction.isRepliable()) {
-				this.logger.warn(
-					bot.locale.t('commands.interaction.not_repliable', { id: interaction.id }),
-					{ url: new Error().stack?.split('\n')[1] }
-				);
-				return;
+			if (!interaction.deferred && !interaction.replied) {
+				await interaction.deferReply({ ephemeral: true });
 			}
-
-			if (interaction.replied) {
-				this.logger.warn(
-					bot.locale.t('commands.interaction.already_replied', { id: interaction.id }),
-					{ url: new Error().stack?.split('\n')[1] }
-				);
-				return;
-			}
-
-			if (interaction.deferred) {
-				await interaction.editReply({ content });
-			} else {
-				await interaction.reply({ content, ephemeral: true });
-			}
+			
+			await interaction.editReply({ content });
 		} catch (error) {
-			this.logger.error(bot.locale.t('errors.reply_error'), error);
+			if (error instanceof DiscordAPIError) {
+				if (error.code === 40060) {
+					this.logger.debug(
+						bot.locale.t("commands.interaction.already_acknowledged", {
+							id: interaction.id
+						})
+					);
+				} else {
+					this.logger.error(
+						bot.locale.t("errors.discord_api", {
+							code: error.code,
+							message: error.message
+						})
+					);
+				}
+			}
 		}
 	}
 
@@ -123,7 +135,9 @@ export default class CommandService {
 			);
 		} else {
 			this.logger.error(
-				bot.locale.t('commands.interaction.unknown_error', { id: interaction.id }),
+				bot.locale.t("commands.interaction.unknown_error", {
+					id: interaction.id,
+				}),
 				error,
 			);
 		}
@@ -138,7 +152,7 @@ export default class CommandService {
 			this.handleDiscordAPIError(error, `message with ID: ${message.id}`);
 		} else {
 			this.logger.error(
-				bot.locale.t('commands.message.unknown_error', { id: message.id }),
+				bot.locale.t("commands.message.unknown_error", { id: message.id }),
 				error,
 			);
 		}
@@ -154,15 +168,15 @@ export default class CommandService {
 
 		if (isExpiredInteraction) {
 			this.logger.debug(
-				bot.locale.t('commands.interaction.expired', { context })
+				bot.locale.t("commands.interaction.expired", { context }),
 			);
 		} else {
 			this.logger.error(
-				bot.locale.t('errors.discord_api', { 
+				bot.locale.t("errors.discord_api", {
 					code: errorCode,
 					context,
-					message: error.message 
-				})
+					message: error.message,
+				}),
 			);
 		}
 	}

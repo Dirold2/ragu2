@@ -34,7 +34,11 @@ export default class NameService {
 	 * @returns {Promise<SearchTrackResult[]>} Array of search results
 	 */
 	async searchName(trackName: string): Promise<SearchTrackResult[]> {
-		bot.logger.debug(bot.locale.t('messages.nameService.info.searching_track', { query: trackName }));
+		bot.logger.debug(
+			bot.locale.t("messages.nameService.info.searching_track", {
+				query: trackName,
+			}),
+		);
 		const trimmedName = trackName.trim();
 		if (!trimmedName) return [];
 
@@ -50,7 +54,11 @@ export default class NameService {
 	) {
 		const plugin = bot.pluginManager.getPlugin(track[0].source);
 		if (!plugin) {
-			bot.logger.error(bot.locale.t('messages.nameService.errors.plugin_not_found', { source: track[0].source }));
+			bot.logger.error(
+				bot.locale.t("messages.nameService.errors.plugin_not_found", {
+					source: track[0].source,
+				}),
+			);
 			return;
 		}
 
@@ -71,14 +79,27 @@ export default class NameService {
 		interaction: CommandInteraction,
 	): Promise<void> {
 		try {
+			if (!interaction.deferred) {
+				await interaction.deferReply({ ephemeral: true });
+			}
+			
 			const { guildId } = this.getVoiceChannelInfo(interaction);
 			const track = this.createTrackInfo(selectedTrack, interaction, true);
 
 			await this.addTrackToQueue(track, guildId, interaction);
 			trackPlayCounter.inc({ status: "success" });
 		} catch (error) {
-			await this.handleError(error, interaction);
-			trackPlayCounter.inc({ status: "failure" });
+			bot.logger.error(
+				bot.locale.t("messages.nameService.errors.track_processing", {
+					error: error instanceof Error ? error.message : String(error),
+				})
+			);
+			
+			if (!interaction.replied && interaction.isRepliable()) {
+				await interaction.editReply({
+					content: bot.locale.t("errors.track.processing")
+				});
+			}
 		}
 	}
 
@@ -95,7 +116,9 @@ export default class NameService {
 	): Promise<void> {
 		await bot.commandService.reply(
 			interaction,
-			bot.locale.t('messages.nameService.success.added_to_queue', { track: track.info })
+			bot.locale.t("messages.nameService.success.added_to_queue", {
+				track: track.info,
+			}),
 		);
 
 		await Promise.all([
@@ -119,10 +142,13 @@ export default class NameService {
 			const { guildId } = this.getVoiceChannelInfo(interaction);
 			const tracks = await this.searchAndProcessURL(url);
 
-			if (!tracks.length) throw new Error(bot.locale.t('messages.nameService.errors.empty_playlist'));
+			if (!tracks.length)
+				throw new Error(
+					bot.locale.t("messages.nameService.errors.empty_playlist"),
+				);
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t('messages.nameService.success.playlist_added'),
+				bot.locale.t("messages.nameService.success.playlist_added"),
 			);
 
 			await Promise.all([
@@ -170,7 +196,10 @@ export default class NameService {
 			return await plugin.searchName(trackName);
 		} catch (error) {
 			bot.logger.warn(
-				bot.locale.t('messages.nameService.errors.search_error', { plugin: plugin.name, error: error instanceof Error ? error.message : String(error) })
+				bot.locale.t("messages.nameService.errors.search_error", {
+					plugin: plugin.name,
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return [];
 		}
@@ -190,7 +219,10 @@ export default class NameService {
 			return Array.isArray(result) ? result : [];
 		} catch (error) {
 			bot.logger.warn(
-				bot.locale.t('messages.nameService.errors.url_processing', { plugin: plugin.name, error: error instanceof Error ? error.message : String(error) })
+				bot.locale.t("messages.nameService.errors.url_processing", {
+					plugin: plugin.name,
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return [];
 		}
@@ -253,7 +285,11 @@ export default class NameService {
 			} catch (error) {
 				if (retries === MAX_RETRIES - 1) {
 					bot.logger.error(
-						bot.locale.t('messages.nameService.errors.add_track_failed', { id: track.id, retries: MAX_RETRIES, error: error instanceof Error ? error.message : String(error) })
+						bot.locale.t("messages.nameService.errors.add_track_failed", {
+							id: track.id,
+							retries: MAX_RETRIES,
+							error: error instanceof Error ? error.message : String(error),
+						}),
 					);
 				} else {
 					await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
@@ -322,7 +358,9 @@ export default class NameService {
 		interaction: CommandInteraction,
 	): Promise<void> {
 		bot.logger.error(
-			bot.locale.t('messages.nameService.errors.track_processing', { error: error instanceof Error ? error.message : String(error) }),
+			bot.locale.t("messages.nameService.errors.track_processing", {
+				error: error instanceof Error ? error.message : String(error),
+			}),
 			error,
 		);
 		await bot.commandService.reply(interaction, this.getErrorMessage(error));
@@ -335,10 +373,14 @@ export default class NameService {
 	 */
 	private getErrorMessage(error: unknown): string {
 		if (error instanceof UserNotInVoiceChannelError)
-			return bot.locale.t('errors.notInVoiceChannel', { error: error instanceof Error ? error.message : String(error) });
-		
+			return bot.locale.t("errors.notInVoiceChannel", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+
 		if (error instanceof PluginNotFoundError)
-			return bot.locale.t('errors.unsupported_track_source', { error: error instanceof Error ? error.message : String(error) });
-		return bot.locale.t('errors.unexpectedError');
+			return bot.locale.t("errors.unsupported_track_source", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		return bot.locale.t("errors.unexpectedError");
 	}
 }

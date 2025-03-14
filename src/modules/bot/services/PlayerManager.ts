@@ -35,15 +35,15 @@ export default class PlayerManager {
 		var handles = undefined;
 		if (!guildId) {
 			await this.commandService.send(
-				interaction, 
-				bot.locale.t('errors.serverError')
+				interaction,
+				bot.locale.t("errors.serverError"),
 			);
 			return null;
 		}
 		if (!channelId) {
 			await this.commandService.send(
-				interaction, 
-				bot.locale.t('errors.serverError')
+				interaction,
+				bot.locale.t("errors.serverError"),
 			);
 			return null;
 		}
@@ -60,9 +60,7 @@ export default class PlayerManager {
 		return (
 			this.players.get(guildId) ??
 			(() => {
-				this.logger.debug(
-					bot.locale.t('player.playerCreated', { guildId })
-				);
+				this.logger.debug(bot.locale.t("player.playerCreated", { guildId }));
 				const newPlayer = new PlayerService(
 					this.queueService,
 					this.commandService,
@@ -148,9 +146,7 @@ export default class PlayerManager {
 	public leaveChannel(guildId: string): void {
 		const player = this.players.get(guildId);
 		if (!player) {
-			this.logger.warn(
-				bot.locale.t('errors.playerNotFound', { guildId })
-			);
+			this.logger.warn(bot.locale.t("errors.playerNotFound", { guildId }));
 			return;
 		}
 

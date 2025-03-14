@@ -18,7 +18,7 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 				"dd.MM.yyyy HH:mm:ss",
 				{ locale: ru },
 			);
-			let logMessage = `${formattedTime} ${nameModule ? ` | ${chalk.blue(nameModule.toUpperCase())}` : ''} | ${level}: ${message}`;
+			let logMessage = `${formattedTime} ${nameModule ? ` | ${chalk.blue(nameModule.toUpperCase())}` : ""} | ${level}: ${message}`;
 			if (url) {
 				logMessage += `\nAt: ${url}`;
 			}
@@ -99,13 +99,10 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 	// Add player-specific transport with custom format
 	logger.add(
 		new winston.transports.File({
-			filename: 'logs/player-error.log',
-			level: 'error',
-			format: winston.format.combine(
-				playerFormat(),
-				fileFormat
-			)
-		})
+			filename: "logs/player-error.log",
+			level: "error",
+			format: winston.format.combine(playerFormat(), fileFormat),
+		}),
 	);
 
 	return logger;

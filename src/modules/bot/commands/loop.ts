@@ -5,9 +5,9 @@ import { bot } from "../bot.js";
 
 @Discord()
 export class LoopCommand {
-	@Slash({ 
-		name: "loop", 
-		description: bot.locale.t('commands.loop.description') 
+	@Slash({
+		name: "loop",
+		description: bot.locale.t("commands.loop.description"),
 	})
 	async toggleLoop(interaction: CommandInteraction) {
 		try {
@@ -15,7 +15,7 @@ export class LoopCommand {
 			if (!player) {
 				return await bot.commandService.reply(
 					interaction,
-					bot.locale.t('errors.player.not_found')
+					bot.locale.t("errors.player.not_found"),
 				);
 			}
 
@@ -26,21 +26,23 @@ export class LoopCommand {
 			return await bot.commandService.reply(
 				interaction,
 				bot.locale.t(
-					player.state.loop ? 'player.loop.enabled' : 'player.loop.disabled',
-					player.state.loop ? { track: player.state.currentTrack?.info || '' } : undefined
-				)
+					player.state.loop ? "player.loop.enabled" : "player.loop.disabled",
+					player.state.loop
+						? { track: player.state.currentTrack?.info || "" }
+						: undefined,
+				),
 			);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t('errors.track.playback', {
-					error: error instanceof Error ? error.message : String(error)
-				})
+				bot.locale.t("errors.track.playback", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return await bot.commandService.reply(
 				interaction,
-				bot.locale.t('errors.track.playback', {
-					error: error instanceof Error ? error.message : String(error)
-				})
+				bot.locale.t("errors.track.playback", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 		}
 	}

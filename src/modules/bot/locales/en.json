@@ -128,7 +128,8 @@
     "commands": {
         "play": {
             "description": "Play a track",
-            "option_track": "Track name or URL"
+            "option_track": "Track name or URL",
+            "searching": "Searching for track: {query}"
         },
         "skip": {
             "description": "Skip current track"
@@ -157,6 +158,7 @@
             "sending_reply": "Sending reply for interaction: {id}",
             "not_repliable": "Interaction is not repliable: {id}",
             "already_replied": "Interaction already replied to: {id}",
+            "already_acknowledged": "Interaction already acknowledged: {id}",
             "unknown_error": "Unknown error for interaction: {id}",
             "expired": "Interaction expired: {context}"
         },

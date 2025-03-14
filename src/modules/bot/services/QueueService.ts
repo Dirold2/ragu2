@@ -65,7 +65,7 @@ export default class QueueService {
 		} catch (error) {
 			this.handleError(
 				error,
-				bot.locale.t('queue.error_adding_track', { trackId: track.trackId })
+				bot.locale.t("queue.error_adding_track", { trackId: track.trackId }),
 			);
 		}
 	}
@@ -77,7 +77,7 @@ export default class QueueService {
 	 */
 	public async getTrack(guildId: string): Promise<Track | null> {
 		if (!guildId)
-			throw new QueueServiceError(bot.locale.t('queue.guild_id_required'));
+			throw new QueueServiceError(bot.locale.t("queue.guild_id_required"));
 		try {
 			return await this.prisma.$transaction(async (txPrisma) => {
 				const nextTrack = await txPrisma.tracks.findFirst({
@@ -100,7 +100,7 @@ export default class QueueService {
 		} catch (error) {
 			this.handleError(
 				error,
-				bot.locale.t('queue.error_retrieving_track', { guildId })
+				bot.locale.t("queue.error_retrieving_track", { guildId }),
 			);
 			return null;
 		}
@@ -145,7 +145,7 @@ export default class QueueService {
 		} catch (error) {
 			this.handleError(
 				error,
-				bot.locale.t('queue.error_fetching_queue', { guildId })
+				bot.locale.t("queue.error_fetching_queue", { guildId }),
 			);
 			return this.createEmptyQueueResult();
 		}
@@ -195,7 +195,7 @@ export default class QueueService {
 		} catch (error) {
 			this.handleError(
 				error,
-				bot.locale.t('queue.error_clearing_queue', { guildId })
+				bot.locale.t("queue.error_clearing_queue", { guildId }),
 			);
 		}
 	}
@@ -254,7 +254,7 @@ export default class QueueService {
 		} catch (error) {
 			this.handleError(
 				error,
-				bot.locale.t('queue.error_removing_track', { trackId })
+				bot.locale.t("queue.error_removing_track", { trackId }),
 			);
 		}
 	}
@@ -307,7 +307,7 @@ export default class QueueService {
 			where: { guildId },
 			data: { loop },
 		});
-		logger.debug(bot.locale.t('queue.loop_set', { guildId }));
+		logger.debug(bot.locale.t("queue.loop_set", { guildId }));
 	}
 
 	/**
@@ -331,7 +331,7 @@ export default class QueueService {
 		} catch (error) {
 			this.handleError(
 				error,
-				bot.locale.t('queue.error_logging_play', { trackId, userId })
+				bot.locale.t("queue.error_logging_play", { trackId, userId }),
 			);
 		}
 	}
@@ -361,7 +361,7 @@ export default class QueueService {
 		} catch (error) {
 			this.handleError(
 				error,
-				bot.locale.t('queue.error_fetching_history', { userId })
+				bot.locale.t("queue.error_fetching_history", { userId }),
 			);
 			return [];
 		}
@@ -383,10 +383,7 @@ export default class QueueService {
 
 			return topTracks.map(this.createBasicTrack);
 		} catch (error) {
-			this.handleError(
-				error,
-				bot.locale.t('queue.error_fetching_top_tracks')
-			);
+			this.handleError(error, bot.locale.t("queue.error_fetching_top_tracks"));
 			return [];
 		}
 	}
@@ -402,9 +399,7 @@ export default class QueueService {
 	): Promise<void> {
 		this.validateParams(guildId);
 		if (!tracks.length)
-			throw new QueueServiceError(
-				bot.locale.t('queue.tracks_array_empty')
-			);
+			throw new QueueServiceError(bot.locale.t("queue.tracks_array_empty"));
 
 		try {
 			const validatedTracks = tracks.map((track) => TrackSchema.parse(track));
@@ -423,13 +418,13 @@ export default class QueueService {
 			}
 
 			logger.info(
-				bot.locale.t('queue.added_batch', { 
+				bot.locale.t("queue.added_batch", {
 					count: newTracks.length,
-					guildId 
-				})
+					guildId,
+				}),
 			);
 		} catch (error) {
-			this.handleError(error, bot.locale.t('queue.error_adding_tracks'));
+			this.handleError(error, bot.locale.t("queue.error_adding_tracks"));
 		}
 	}
 
@@ -449,7 +444,7 @@ export default class QueueService {
 			(guildId === undefined && trackId === undefined)
 		) {
 			throw new QueueServiceError(
-				bot.locale.t('queue.missing_required_parameters')
+				bot.locale.t("queue.missing_required_parameters"),
 			);
 		}
 	}
@@ -678,10 +673,10 @@ export default class QueueService {
 			skipDuplicates: true,
 		});
 		logger.info(
-			bot.locale.t('queue.added_batch', { 
+			bot.locale.t("queue.added_batch", {
 				count: tracks.length,
-				queueId
-			})
+				queueId,
+			}),
 		);
 	}
 }
