@@ -3,6 +3,32 @@ import { ru } from "date-fns/locale";
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import chalk from "chalk";
+import { ModuleState } from "../types/index.js";
+
+const getStateColor = (state?: ModuleState): (text: string) => string => {
+	if (!state) return chalk.blue;
+
+	switch (state) {
+		case ModuleState.UNINITIALIZED:
+			return chalk.dim;
+		case ModuleState.INITIALIZING:
+			return chalk.hex('#6495ED');
+		case ModuleState.INITIALIZED:
+			return chalk.hex('#00CED1');
+		case ModuleState.STARTING:
+			return chalk.hex('#FFD700');
+		case ModuleState.RUNNING:
+			return chalk.hex('#32CD32');
+		case ModuleState.STOPPING:
+			return chalk.hex('#FFA500');
+		case ModuleState.STOPPED:
+			return chalk.hex('#A9A9A9');
+		case ModuleState.ERROR:
+			return chalk.hex('#FF4500');
+		default:
+			return chalk.blue;
+	}
+};
 
 /**
  * Creates and configures a winston logger instance
@@ -12,13 +38,19 @@ import chalk from "chalk";
 export const createLogger = (nameModule?: string): winston.Logger => {
 	// Custom format for log messages including timestamp and module name
 	const customFormat = winston.format.printf(
-		({ level, message, timestamp, stack, url }) => {
+		({ level, message, timestamp, stack, url, moduleState }) => {
 			const formattedTime = format(
 				new Date(timestamp as unknown as string),
 				"dd.MM.yyyy HH:mm:ss",
 				{ locale: ru },
 			);
-			let logMessage = `${formattedTime} ${nameModule ? ` | ${chalk.blue(nameModule.toUpperCase())}` : ""} | ${level}: ${message}`;
+
+			const colorize = getStateColor(moduleState as ModuleState | undefined);
+			const moduleName = nameModule ? 
+				` | ${colorize(nameModule.toUpperCase())}` : 
+				"";
+
+			let logMessage = `${formattedTime}${moduleName} | ${level}: ${message}`;
 			if (url) {
 				logMessage += `\nAt: ${url}`;
 			}

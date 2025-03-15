@@ -31,9 +31,9 @@ export interface ModuleMetadata {
 	readonly name: string;
 	readonly description: string;
 	readonly version: string;
-	readonly dependencies: string[];
-	readonly disabled: boolean;
-	readonly priority: number;
+	readonly dependencies?: string[];
+	readonly disabled?: boolean;
+	readonly priority?: number;
 }
 
 // Определяем тип для логгера на основе winston
@@ -44,8 +44,9 @@ export interface Logger extends WinstonLogger {
 // Используем тип Locale из utils/locale.ts
 export type I18n = Locale;
 
-export interface BaseModule extends ModuleMetadata {
-	readonly exports: Record<string, unknown>;
+export interface BaseModule {
+	readonly metadata: ModuleMetadata;
+	readonly exports?: Record<string, unknown>;
 	readonly state: ModuleState;
 	readonly logger: Logger;
 	readonly locale: I18n;

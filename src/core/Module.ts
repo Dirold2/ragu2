@@ -12,12 +12,24 @@ export abstract class Module extends EventEmitter implements BaseModule {
 	private _moduleInitialized = false;
 
 	public abstract readonly metadata: ModuleMetadata;
-	public abstract readonly exports: Record<string, unknown>;
+	public readonly exports?: Record<string, unknown>;
 
 	constructor() {
 		super();
-		this._logger = createLogger("module");
-		this._locale = createLocale("module");
+		// Получаем имя модуля из пути к файлу
+		const moduleName = this.getModuleName();
+		this._logger = createLogger(moduleName);
+		this._locale = createLocale(moduleName);
+	}
+
+	private getModuleName(): string {
+		// Получаем путь к файлу модуля из стека
+		const stack = new Error().stack?.split('\n');
+		const modulePath = stack
+			?.find(line => line.includes('/modules/'))
+			?.match(/\/modules\/([^/]+)\//)?.[1];
+	
+		return modulePath || 'core';
 	}
 
 	// Геттеры для логгера и локализации
@@ -48,13 +60,13 @@ export abstract class Module extends EventEmitter implements BaseModule {
 		return this.metadata.version;
 	}
 	public get dependencies(): string[] {
-		return this.metadata.dependencies;
+		return this.metadata.dependencies || [];
 	}
 	public get disabled(): boolean {
-		return this.metadata.disabled;
+		return this.metadata.disabled || false;
 	}
 	public get priority(): number {
-		return this.metadata.priority;
+		return this.metadata.priority || 50;
 	}
 	public get state(): ModuleState {
 		return this._state;
@@ -111,12 +123,12 @@ export abstract class Module extends EventEmitter implements BaseModule {
 		this.emit("stateChange", state);
 	}
 
-	protected getModuleExports(moduleName: string): Record<string, unknown> {
+	protected getModuleExports<T>(moduleName: string): T {
 		const moduleExports = this._imports[moduleName];
 		if (!moduleExports) {
 			throw new Error(`Module ${moduleName} not found in imports`);
 		}
-		return moduleExports as Record<string, unknown>;
+		return moduleExports as T;
 	}
 
 	protected setImports(imports: Record<string, unknown>): void {
@@ -130,7 +142,7 @@ export abstract class Module extends EventEmitter implements BaseModule {
 	}
 
 	// Абстрактные методы для переопределения в модулях
-	protected abstract onInitialize(): Promise<void>;
-	protected abstract onStart(): Promise<void>;
-	protected abstract onStop(): Promise<void>;
+	protected async onInitialize(): Promise<void> {}
+	protected async onStart(): Promise<void> {}
+	protected async onStop(): Promise<void> {}
 }

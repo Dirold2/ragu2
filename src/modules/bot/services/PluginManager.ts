@@ -2,6 +2,7 @@ import NodeCache from "node-cache";
 import { MusicServicePlugin } from "../interfaces/index.js";
 import logger from "../../../utils/logger.js";
 import { bot } from "../bot.js";
+import { ModuleState } from "../../../types/index.js";
 
 export default class PluginManager {
 	private plugins: Map<string, MusicServicePlugin> = new Map();
@@ -17,9 +18,10 @@ export default class PluginManager {
 	registerPlugin(plugin: MusicServicePlugin): void {
 		try {
 			this.plugins.set(plugin.name, plugin);
-			bot.logger.info(
-				bot.locale.t("logger.plugin.registered", { name: plugin.name }),
-			);
+			bot.logger.info({
+				message: bot.locale.t("logger.plugin.registered", { name: plugin.name }),
+				moduleState: ModuleState.INITIALIZED
+			});
 		} catch (error) {
 			bot.logger.error(
 				`${bot.locale.t("logger.plugin.register_error")}:`,

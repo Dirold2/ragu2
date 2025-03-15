@@ -31,7 +31,8 @@
       "@api/*": ["src/api/*"], 
       "@service/*": ["src/services/*"],
       "@commands/*": ["src/commands/*"],
-      "@plugins/*": ["src/plugins/*"]
+      "@plugins/*": ["src/plugins/*"],
+      ".prisma/*": ["src/modules/database/.prisma/*"]
     },
     "resolveJsonModule": true,
     "isolatedModules": true

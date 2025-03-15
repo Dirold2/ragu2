@@ -1,0 +1,21 @@
+{
+  "name": "@ragu2/database",
+  "version": "0.0.1",
+  "description": "Database module for Prisma client management",
+  "private": true,
+  "type": "module",
+  "prisma": {
+    "schema": "./src/modules/database/prisma/schema.prisma"
+  },
+  "main": "build/modules/database/module.js",
+  "types": "build/modules/database/module.d.ts",
+  "scripts": {		
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.5.0",
+    "prisma": "^6.5.0"
+  }
+}

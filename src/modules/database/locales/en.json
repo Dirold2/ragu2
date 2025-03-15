@@ -1,0 +1,24 @@
+{
+	"messages": {
+		"database": {
+			"connected": "База данных успешно подключена",
+			"disconnected": "Соединение с базой данных закрыто",
+			"connectionError": "Ошибка подключения к базе данных"
+		}
+	},
+	"errors": {
+		"database": {
+			"notInitialized": "Клиент базы данных не инициализирован",
+			"queryError": "Ошибка выполнения запроса: {error}",
+			"transactionError": "Ошибка транзакции: {error}"
+		}
+	},
+	"logger": {
+		"database": {
+			"queryExecuted": "Выполнен запрос: {query}",
+			"transactionStarted": "Начата транзакция",
+			"transactionCommitted": "Транзакция подтверждена",
+			"transactionRollback": "Откат транзакции"
+		}
+	}
+}

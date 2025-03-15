@@ -5,6 +5,8 @@ import fs from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "url";
 import { dirname } from "dirname-filename-esm";
+import { ModuleState } from "../types/index.js";
+import { clear } from "console";
 
 const __dirname = dirname(import.meta);
 
@@ -12,7 +14,7 @@ export class ModuleManager extends EventEmitter {
 	private modules: Map<string, Module>;
 	private initialized: boolean;
 	private modulesPath: string;
-	private logger = createLogger("ModuleManager");
+	private logger = createLogger("core");
 
 	constructor(modulesPath?: string) {
 		super();
@@ -25,6 +27,9 @@ export class ModuleManager extends EventEmitter {
 	 * Загружает все модули из директории modules
 	 */
 	public async loadModules(): Promise<void> {
+		// Очищаем консоль перед загрузкой модулей
+		clear();
+
 		try {
 			const files = await fs.readdir(this.modulesPath);
 			const moduleDirectories = (
@@ -51,15 +56,11 @@ export class ModuleManager extends EventEmitter {
 					const { default: ModuleClass } = await import(modulePath);
 					if (ModuleClass?.prototype instanceof Module) {
 						const module = new ModuleClass();
-
-						// Проверяем disabled после создания экземпляра
 						if (module.disabled) {
-							this.logger.info(`Skipping disabled module: ${module.name}`);
 							disabledCount++;
 							continue;
 						}
-
-						this.registerModule(module);
+						await this.registerModule(module);
 						loadedCount++;
 					}
 				} catch (error) {
@@ -67,31 +68,26 @@ export class ModuleManager extends EventEmitter {
 				}
 			}
 
-			this.logger.info(
-				`Loaded ${loadedCount} modules` +
-					(disabledCount > 0 ? `, ${disabledCount} modules disabled` : ""),
-			);
+			if (disabledCount > 0) {
+				this.logger.debug(`Disabled modules: ${disabledCount}`);
+			}
 		} catch (error) {
 			this.logger.error("Failed to load modules:", error);
 			throw error;
 		}
 	}
 
-	public registerModule(module: Module): void {
+	public async registerModule(module: Module): Promise<void> {
 		if (this.modules.has(module.name)) {
 			throw new Error(`Module ${module.name} is already registered`);
 		}
 
-		// Не регистрируем отключенные модули
 		if (module.disabled) {
-			this.logger.info(
-				`Module ${module.name} is disabled, skipping registration`,
-			);
+			this.logger.debug(`Module ${module.name} is disabled, skipping registration`);
 			return;
 		}
 
 		this.modules.set(module.name, module);
-		this.logger.info(`Module ${module.name} registered successfully`);
 	}
 
 	/**
@@ -103,67 +99,106 @@ export class ModuleManager extends EventEmitter {
 			return;
 		}
 
-		// Проверяем наличие всех зависимостей
-		for (const [moduleName, module] of this.modules) {
-			for (const depName of module.dependencies) {
-				if (!this.modules.has(depName)) {
-					throw new Error(
-						`Module "${moduleName}" requires "${depName}" module, but it's not loaded.`,
-					);
-				}
-			}
-		}
+		this.logger.info({ 
+			message: "Initializing modules...",
+			moduleState: ModuleState.INITIALIZED 
+		});
 
 		const sortedModules = this.sortModulesByDependencies();
 
-		// Подготавливаем импорты для каждого модуля
 		for (const module of sortedModules) {
-			const imports: Record<string, unknown> = {};
-
-			for (const depName of module.dependencies) {
-				const depModule = this.modules.get(depName);
-				if (!depModule) {
-					throw new Error(
-						`Module ${module.name} depends on ${depName}, but it's not registered`,
-					);
+			try {
+				const currentState = module.getState();
+				if (currentState === ModuleState.INITIALIZED) {
+					continue;
 				}
-				imports[depName] = depModule.exports;
+
+				const imports: Record<string, unknown> = {};
+				for (const depName of module.dependencies) {
+					const depModule = this.modules.get(depName);
+					if (!depModule) {
+						throw new Error(
+							`Module ${module.name} depends on ${depName}, but it's not registered`
+						);
+					}
+					if (depModule.getState() !== ModuleState.INITIALIZED) {
+						throw new Error(
+							`Module ${module.name} depends on ${depName}, but it's not initialized yet`
+						);
+					}
+					imports[depName] = depModule.exports;
+				}
+
+				(module as any).setImports(imports);
+				await module.initialize();
+				
+				if (module.getState() !== ModuleState.INITIALIZED) {
+					throw new Error(`Module ${module.name} failed to initialize properly`);
+				}
+			} catch (error) {
+				this.logger.error({ 
+					message: `${module.name}`,
+					moduleState: ModuleState.ERROR,
+					error
+				});
+				throw error;
 			}
-
-			// Используем protected метод через явное приведение типа
-			(module as any).setImports(imports);
-
-			// Инициализируем модуль
-			await module.initialize();
 		}
 
 		this.initialized = true;
-		this.logger.info("All modules initialized successfully");
 	}
 
 	public async startModules(): Promise<void> {
 		if (!this.initialized) {
-			throw new Error(
-				"ModuleManager must be initialized before starting modules",
-			);
+			throw new Error("ModuleManager must be initialized before starting modules");
 		}
 
 		const sortedModules = this.sortModulesByDependencies();
-		for (const module of sortedModules) {
-			await module.start();
-		}
+		this.logger.info({ 
+			message: "Starting modules...",
+			moduleState: ModuleState.RUNNING 
+		});
 
-		this.logger.info("All modules started successfully");
+		for (const module of sortedModules) {
+			try {
+				const currentState = module.getState();
+				if (currentState === ModuleState.RUNNING) {
+					continue;
+				}
+
+				await module.start();
+				
+				if (module.getState() !== ModuleState.RUNNING) {
+					throw new Error(`Module ${module.name} failed to start properly`);
+				}
+			} catch (error) {
+				this.logger.error({ 
+					message: `${module.name}`,
+					moduleState: ModuleState.ERROR,
+					error
+				});
+				throw error;
+			}
+		}
 	}
 
 	public async stopModules(): Promise<void> {
 		const sortedModules = this.sortModulesByDependencies().reverse();
 
 		for (const module of sortedModules) {
-			await module.stop();
+			try {
+				await module.stop();
+			} catch (error) {
+				this.logger.error({ 
+					message: `${module.name}`,
+					moduleState: ModuleState.ERROR,
+					error
+				});
+				throw error;
+			}
 		}
 
-		this.logger.info("All modules stopped successfully");
+		this.initialized = false;
 	}
 
 	private sortModulesByDependencies(): Module[] {
@@ -208,5 +243,28 @@ export class ModuleManager extends EventEmitter {
 
 	public getModule<T extends Module>(name: string): T | undefined {
 		return this.modules.get(name) as T | undefined;
+	}
+
+	public getModuleStatus(): Array<{
+		name: string;
+		state: ModuleState;
+		disabled: boolean;
+		dependencies: string[];
+	}> {
+		return Array.from(this.modules.entries()).map(([name, module]) => ({
+			name,
+			state: module.getState(),
+			disabled: module.disabled,
+			dependencies: module.dependencies
+		}));
+	}
+
+	public getModuleExports<T = unknown>(moduleName: string): T | undefined {
+		const module = this.modules.get(moduleName);
+		if (!module) {
+			this.logger.warn(`Attempted to get exports from non-existent module: ${moduleName}`);
+			return undefined;
+		}
+		return module.exports as T;
 	}
 }

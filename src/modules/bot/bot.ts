@@ -1,10 +1,9 @@
-import { dirname } from "dirname-filename-esm";
 import { IntentsBitField } from "discord.js";
 import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
-import dotenv from "dotenv";
+import type { PrismaClient } from "@prisma/client";
 
 import {
 	CommandService,
@@ -18,8 +17,13 @@ import {
 import { createLogger, createLocale } from "../../utils/index.js";
 import translations from "./locales/en.json" with { type: "json" };
 
+import { config } from "dotenv";
+import { dirname } from "dirname-filename-esm";
+import { resolve } from "path";
+
 const __dirname = dirname(import.meta);
-dotenv.config();
+
+config({ path: resolve(__dirname, ".env") });
 
 const LOG_MESSAGES = {
 	PLUGIN_REGISTRATION_ERROR: (name: string) => ({
@@ -41,6 +45,7 @@ export class Bot {
 	public pluginManager!: PluginManager;
 	public readonly logger = createLogger("bot");
 	public readonly locale = createLocale<typeof translations>("bot");
+	public prisma!: PrismaClient;
 
 	constructor() {
 		this.client = new Client({
@@ -57,7 +62,8 @@ export class Bot {
 		});
 	}
 
-	public async initialize(): Promise<void> {
+	public async initialize(prisma: PrismaClient): Promise<void> {
+		this.prisma = prisma;
 		try {
 			await this.init();
 		} catch (error) {
@@ -74,13 +80,13 @@ export class Bot {
 	private async initServices(): Promise<void> {
 		try {
 			await this.locale.load();
-			await this.locale.setLanguage(`${process.env.BOT_LOCALE}`);
+			await this.locale.setLanguage(`${process.env.BOT_LOCALE}` || "en");
 
 			this.commandService = new CommandService();
 			this.pluginManager = new PluginManager();
 			await this.loadPlugins();
 
-			this.queueService = new QueueService();
+			this.queueService = new QueueService(this.prisma);
 			this.playerManager = new PlayerManager(
 				this.queueService,
 				this.commandService,
@@ -126,7 +132,6 @@ export class Bot {
 		this.client.once("ready", async () => {
 			try {
 				await this.client.initApplicationCommands();
-				this.log("info", { key: "messages.bot.initialization.success" });
 			} catch {
 				this.log("error", LOG_MESSAGES.INIT_ERROR);
 			}

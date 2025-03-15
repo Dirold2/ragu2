@@ -1,5 +1,6 @@
 import { AudioResource, StreamType, VoiceConnection } from "@discordjs/voice";
 import { z } from "zod";
+import type { PrismaClient } from "@prisma/client";
 
 // Define schema for individual track search result
 export const TrackResultSchema = z.object({
@@ -78,4 +79,8 @@ export interface ResourceData {
 
 export interface Messages {
 	[key: string]: string;
+}
+
+export interface DatabaseExports {
+	getPrismaClient: () => PrismaClient;
 }

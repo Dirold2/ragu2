@@ -1,8 +1,10 @@
 import fs from "fs/promises";
 import path from "path";
 import { dirname } from "dirname-filename-esm";
+import { createLogger } from "./logger.js";
 
 const __dirname = dirname(import.meta);
+const logger = createLogger("locale");
 
 /**
  * Type for translation parameters
@@ -81,12 +83,12 @@ export function createLocale<T extends Record<string, any>>(
 					translations.set("en", JSON.parse(defaultContent));
 					currentLanguage = "en";
 				} catch (fallbackError) {
-					console.error(
+					logger.error(
 						`Failed to load both '${language}' and fallback English translations for ${moduleName}`,
 					);
 				}
 			} else {
-				console.error(`Failed to load English translations for ${moduleName}`);
+				logger.error(`Failed to load English translations for ${moduleName}`);
 			}
 		}
 	}

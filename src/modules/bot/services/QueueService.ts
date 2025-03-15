@@ -32,8 +32,8 @@ export default class QueueService {
 	private static readonly BATCH_SIZE = 50;
 	// private readonly queues: Map<string, QueueState> = new Map();
 
-	constructor() {
-		this.prisma = new PrismaClient();
+	constructor(prisma: PrismaClient) {
+		this.prisma = prisma;
 	}
 
 	/**
