@@ -143,14 +143,26 @@ export default class PlayerManager {
 	 * Disconnects from voice channel and removes player instance
 	 * @param guildId - Discord guild ID
 	 */
-	public leaveChannel(guildId: string): void {
+	public async leaveChannel(guildId: string): Promise<void> {
 		const player = this.players.get(guildId);
 		if (!player) {
 			this.logger.warn(bot.locale.t("errors.playerNotFound", { guildId }));
 			return;
 		}
 
+		await player.destroy();
 		player.leaveChannel();
 		this.players.delete(guildId);
+	}
+
+	/**
+	 * Destroys all player instances and clears the map
+	 */
+	public async destroyAll(): Promise<void> {
+		for (const [, player] of this.players) {
+			await player.destroy();
+			player.leaveChannel();
+		}
+		this.players.clear();
 	}
 }

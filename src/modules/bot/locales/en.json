@@ -45,7 +45,9 @@
         "guild_not_found": "Guild not found",
         "unexpected": "An unexpected error occurred",
         "player": {
-            "not_found": "Player not found"
+            "not_found": "Player not found",
+            "destroy_failed": "Ошибка при очистке ресурсов плеера: {error}",
+            "destroy": "Ошибка при очистке ресурсов плеера: {error}"
         },
         "reply_error": "Error replying to interaction",
         "notInVoiceChannel": "You must be in a voice channel: {error}",

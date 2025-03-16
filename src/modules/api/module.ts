@@ -15,10 +15,10 @@ config({ path: resolve(__dirname, ".env") });
 
 export default class ApiModule extends Module {
 	public readonly metadata: ModuleMetadata = {
-		name: packageJson.name.replace('@ragu2/', ''),
+		name: packageJson.name.replace("@ragu2/", ""),
 		version: packageJson.version,
 		description: packageJson.description,
-		dependencies: ['bot'],
+		dependencies: ["bot"],
 		priority: 50,
 	};
 
@@ -60,7 +60,7 @@ export default class ApiModule extends Module {
 		const port = Number(process.env.API_PORT) || 1750;
 		this.logger.info({
 			message: this.locale.t("logger.server.started", { port: String(port) }),
-			moduleState: ModuleState.RUNNING
+			moduleState: ModuleState.RUNNING,
 		});
 	}
 
@@ -71,7 +71,7 @@ export default class ApiModule extends Module {
 			this.api = null;
 			this.logger.info({
 				message: this.locale.t("logger.server.stopped"),
-				moduleState: ModuleState.STOPPED
+				moduleState: ModuleState.STOPPED,
 			});
 		}
 	}

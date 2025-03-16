@@ -33,18 +33,29 @@ import type { CommandService, QueueService, Track } from "./index.js";
 import { getAudioDurationInSeconds } from "get-audio-duration";
 import pathToFfmpeg from "ffmpeg-ffprobe-static";
 import type { PlayerState } from "../types/index.js";
+import { EventEmitter } from "events";
+
+interface PlayerTimers {
+	emptyChannel: NodeJS.Timeout | null;
+	fadeOut: NodeJS.Timeout | null;
+}
 
 @Discord()
-export default class PlayerService {
+export default class PlayerService extends EventEmitter {
 	private readonly player: AudioPlayer;
+	private timers: PlayerTimers = {
+		emptyChannel: null,
+		fadeOut: null
+	};
 	public state: PlayerState;
-	private timers: Record<string, NodeJS.Timeout | null> = {};
+	private disconnectHandler: ((...args: any[]) => void) | null = null;
 
 	constructor(
 		private readonly queueService: QueueService,
 		private readonly commandService: CommandService,
 		public readonly guildId: string,
 	) {
+		super();
 		this.player = createAudioPlayer({
 			behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
 		});
@@ -286,36 +297,45 @@ export default class PlayerService {
 		memorize: boolean = true,
 		zero: boolean = false,
 	): Promise<void> {
-		return new Promise((resolve) => {
-			if (this.timers.volumeChange) {
-				clearTimeout(this.timers.volumeChange);
-				this.timers.volumeChange = null;
-			}
-
-			const start = zero ? 0 : this.state.volume / 100 || 0;
-			const diff = target - start;
-			const startTime = Date.now();
-
-			if (memorize) this.state.volume = target * 100;
-
-			const animate = () => {
-				const elapsed = Date.now() - startTime;
-				const progress = Math.min(elapsed / duration, 1);
-
-				const vol = start + diff * progress;
-				this.state.resource?.volume?.setVolumeLogarithmic(
-					Math.max(0, Math.min(1, vol)),
-				);
-
-				if (progress < 1) {
-					this.timers.volumeChange = setTimeout(animate, 16);
-				} else {
-					this.timers.volumeChange = null;
-					resolve();
+		return new Promise((resolve, reject) => {
+			const cleanup = () => {
+				if (this.timers.fadeOut) {
+					clearTimeout(this.timers.fadeOut);
+					this.timers.fadeOut = null;
 				}
 			};
 
-			animate();
+			cleanup(); // Очищаем предыдущий таймер
+
+			try {
+				const start = zero ? 0 : this.state.volume / 100 || 0;
+				const diff = target - start;
+				const startTime = Date.now();
+
+				if (memorize) this.state.volume = target * 100;
+
+				const animate = () => {
+					const elapsed = Date.now() - startTime;
+					const progress = Math.min(elapsed / duration, 1);
+
+					const vol = start + diff * progress;
+					this.state.resource?.volume?.setVolumeLogarithmic(
+						Math.max(0, Math.min(1, vol))
+					);
+
+					if (progress < 1) {
+						this.timers.fadeOut = setTimeout(animate, 16);
+					} else {
+						cleanup();
+						resolve();
+					}
+				};
+
+				animate();
+			} catch (error) {
+				cleanup();
+				reject(error);
+			}
 		});
 	}
 
@@ -550,7 +570,11 @@ export default class PlayerService {
 	 * Sets up the disconnect handler
 	 */
 	private setupDisconnectHandler(): void {
-		this.state.connection?.on(VoiceConnectionStatus.Disconnected, async () => {
+		if (this.disconnectHandler) {
+			this.state.connection?.off(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
+		}
+		
+		this.disconnectHandler = async () => {
 			try {
 				await Promise.race([
 					entersState(
@@ -567,7 +591,9 @@ export default class PlayerService {
 			} catch {
 				this.handleDisconnect();
 			}
-		});
+		};
+		
+		this.state.connection?.on(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
 	}
 
 	/**
@@ -586,9 +612,9 @@ export default class PlayerService {
 	 * Starts the empty channel check
 	 */
 	private startEmptyCheck(): void {
-		if (this.timers.emptyChannelCheck)
-			clearInterval(this.timers.emptyChannelCheck);
-		this.timers.emptyChannelCheck = setInterval(
+		if (this.timers.emptyChannel)
+			clearInterval(this.timers.emptyChannel);
+		this.timers.emptyChannel = setInterval(
 			() => this.checkEmpty(),
 			EMPTY_CHANNEL_CHECK_INTERVAL,
 		);
@@ -658,14 +684,75 @@ export default class PlayerService {
 	 * Resets the player state
 	 */
 	private reset(): void {
-		this.manageFadeOutTimeout();
-		this.state.connection = null;
-		this.state.currentTrack = this.state.nextTrack = null;
-		this.state.isPlaying = false;
-
-		Object.values(this.timers).forEach((timer) => {
-			if (timer) clearTimeout(timer);
+		// Очищаем все таймеры
+		Object.entries(this.timers).forEach(([, timer]) => {
+			if (timer) {
+				clearTimeout(timer);
+			}
 		});
-		this.timers = {};
+		
+		// Правильно инициализируем таймеры
+		this.timers = {
+			emptyChannel: null,
+			fadeOut: null
+		};
+
+		// Остальной код reset()
+		this.state = {
+			...this.state,
+			isPlaying: false,
+			currentTrack: null,
+			nextTrack: null,
+			resource: null
+		};
+	}
+
+	public async destroy(): Promise<void> {
+		try {
+			this.player.stop();
+			this.removeAllListeners();
+			
+			// Очистка всех таймеров и интервалов
+			Object.entries(this.timers).forEach(([, timer]) => {
+				if (timer) {
+					clearTimeout(timer);
+					clearInterval(timer);
+				}
+			});
+			
+			// Очистка обработчика отключения
+			if (this.disconnectHandler && this.state.connection) {
+				this.state.connection.off(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
+				this.disconnectHandler = null;
+			}
+			
+			this.timers = {
+				emptyChannel: null,
+				fadeOut: null
+			};
+			
+			this.reset();
+		} catch (error) {
+			logger.error(
+				bot.locale.t("errors.player.destroy", {
+					error: error instanceof Error ? error.message : String(error),
+				})
+			);
+		}
+	}
+
+	// Методы для управления таймерами
+	protected setFadeOutTimer(callback: () => void, duration: number): void {
+		if (this.timers.fadeOut) {
+			clearTimeout(this.timers.fadeOut);
+		}
+		this.timers.fadeOut = setTimeout(callback, duration);
+	}
+
+	protected setEmptyChannelTimer(callback: () => void, duration: number): void {
+		if (this.timers.emptyChannel) {
+			clearTimeout(this.timers.emptyChannel);
+		}
+		this.timers.emptyChannel = setTimeout(callback, duration);
 	}
 }

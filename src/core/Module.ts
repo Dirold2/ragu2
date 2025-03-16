@@ -24,12 +24,12 @@ export abstract class Module extends EventEmitter implements BaseModule {
 
 	private getModuleName(): string {
 		// Получаем путь к файлу модуля из стека
-		const stack = new Error().stack?.split('\n');
+		const stack = new Error().stack?.split("\n");
 		const modulePath = stack
-			?.find(line => line.includes('/modules/'))
+			?.find((line) => line.includes("/modules/"))
 			?.match(/\/modules\/([^/]+)\//)?.[1];
-	
-		return modulePath || 'core';
+
+		return modulePath || "core";
 	}
 
 	// Геттеры для логгера и локализации

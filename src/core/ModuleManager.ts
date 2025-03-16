@@ -83,7 +83,9 @@ export class ModuleManager extends EventEmitter {
 		}
 
 		if (module.disabled) {
-			this.logger.debug(`Module ${module.name} is disabled, skipping registration`);
+			this.logger.debug(
+				`Module ${module.name} is disabled, skipping registration`,
+			);
 			return;
 		}
 
@@ -99,9 +101,9 @@ export class ModuleManager extends EventEmitter {
 			return;
 		}
 
-		this.logger.info({ 
+		this.logger.info({
 			message: "Initializing modules...",
-			moduleState: ModuleState.INITIALIZED 
+			moduleState: ModuleState.INITIALIZED,
 		});
 
 		const sortedModules = this.sortModulesByDependencies();
@@ -118,12 +120,12 @@ export class ModuleManager extends EventEmitter {
 					const depModule = this.modules.get(depName);
 					if (!depModule) {
 						throw new Error(
-							`Module ${module.name} depends on ${depName}, but it's not registered`
+							`Module ${module.name} depends on ${depName}, but it's not registered`,
 						);
 					}
 					if (depModule.getState() !== ModuleState.INITIALIZED) {
 						throw new Error(
-							`Module ${module.name} depends on ${depName}, but it's not initialized yet`
+							`Module ${module.name} depends on ${depName}, but it's not initialized yet`,
 						);
 					}
 					imports[depName] = depModule.exports;
@@ -131,15 +133,17 @@ export class ModuleManager extends EventEmitter {
 
 				(module as any).setImports(imports);
 				await module.initialize();
-				
+
 				if (module.getState() !== ModuleState.INITIALIZED) {
-					throw new Error(`Module ${module.name} failed to initialize properly`);
+					throw new Error(
+						`Module ${module.name} failed to initialize properly`,
+					);
 				}
 			} catch (error) {
-				this.logger.error({ 
+				this.logger.error({
 					message: `${module.name}`,
 					moduleState: ModuleState.ERROR,
-					error
+					error,
 				});
 				throw error;
 			}
@@ -150,13 +154,15 @@ export class ModuleManager extends EventEmitter {
 
 	public async startModules(): Promise<void> {
 		if (!this.initialized) {
-			throw new Error("ModuleManager must be initialized before starting modules");
+			throw new Error(
+				"ModuleManager must be initialized before starting modules",
+			);
 		}
 
 		const sortedModules = this.sortModulesByDependencies();
-		this.logger.info({ 
+		this.logger.info({
 			message: "Starting modules...",
-			moduleState: ModuleState.RUNNING 
+			moduleState: ModuleState.RUNNING,
 		});
 
 		for (const module of sortedModules) {
@@ -167,15 +173,15 @@ export class ModuleManager extends EventEmitter {
 				}
 
 				await module.start();
-				
+
 				if (module.getState() !== ModuleState.RUNNING) {
 					throw new Error(`Module ${module.name} failed to start properly`);
 				}
 			} catch (error) {
-				this.logger.error({ 
+				this.logger.error({
 					message: `${module.name}`,
 					moduleState: ModuleState.ERROR,
-					error
+					error,
 				});
 				throw error;
 			}
@@ -189,10 +195,10 @@ export class ModuleManager extends EventEmitter {
 			try {
 				await module.stop();
 			} catch (error) {
-				this.logger.error({ 
+				this.logger.error({
 					message: `${module.name}`,
 					moduleState: ModuleState.ERROR,
-					error
+					error,
 				});
 				throw error;
 			}
@@ -255,14 +261,16 @@ export class ModuleManager extends EventEmitter {
 			name,
 			state: module.getState(),
 			disabled: module.disabled,
-			dependencies: module.dependencies
+			dependencies: module.dependencies,
 		}));
 	}
 
 	public getModuleExports<T = unknown>(moduleName: string): T | undefined {
 		const module = this.modules.get(moduleName);
 		if (!module) {
-			this.logger.warn(`Attempted to get exports from non-existent module: ${moduleName}`);
+			this.logger.warn(
+				`Attempted to get exports from non-existent module: ${moduleName}`,
+			);
 			return undefined;
 		}
 		return module.exports as T;

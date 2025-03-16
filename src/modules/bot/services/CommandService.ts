@@ -88,32 +88,34 @@ export default class CommandService {
 		if (!interaction.isRepliable()) {
 			this.logger.debug(
 				bot.locale.t("commands.interaction.not_repliable", {
-					id: interaction.id
-				})
+					id: interaction.id,
+				}),
 			);
 			return;
 		}
 
 		try {
 			if (!interaction.deferred && !interaction.replied) {
-				await interaction.deferReply({ ephemeral: true });
+				await interaction.deferReply({ 
+					flags: MessageFlags.Ephemeral 
+				});
 			}
-			
+
 			await interaction.editReply({ content });
 		} catch (error) {
 			if (error instanceof DiscordAPIError) {
 				if (error.code === 40060) {
 					this.logger.debug(
 						bot.locale.t("commands.interaction.already_acknowledged", {
-							id: interaction.id
-						})
+							id: interaction.id,
+						}),
 					);
 				} else {
 					this.logger.error(
 						bot.locale.t("errors.discord_api", {
 							code: error.code,
-							message: error.message
-						})
+							message: error.message,
+						}),
 					);
 				}
 			}

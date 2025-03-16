@@ -37,6 +37,8 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	private cache = new NodeCache({
 		stdTTL: CACHE_TTL,
 		checkperiod: CACHE_CHECK_PERIOD,
+		maxKeys: 1000,
+		deleteOnExpire: true,
 	});
 	private initialized = false;
 	private readonly logger = bot.logger;
@@ -432,5 +434,33 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			.toString()
 			.padStart(2, "0");
 		return `${minutes}:${seconds}`;
+	}
+
+	public async destroy(): Promise<void> {
+		this.results = [];
+		this.cache.flushAll();
+		
+		// Очищаем API клиентов через их методы
+		if (this.wrapper) {
+			this.wrapper = new WrappedYMApi();
+		}
+		if (this.api) {
+			this.api = new YMApi();
+		}
+		
+		this.initialized = false;
+	}
+
+	private startCacheCleanup(): void {
+		setInterval(() => {
+			const stats = this.cache.getStats();
+			if (stats.keys > 800) {
+				this.cache.flushAll();
+			}
+		}, CACHE_CHECK_PERIOD * 1000);
+	}
+
+	constructor() {
+		this.startCacheCleanup();
 	}
 }

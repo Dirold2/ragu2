@@ -1,4 +1,4 @@
-import type { CommandInteraction, GuildMember } from "discord.js";
+import { MessageFlags, type CommandInteraction, type GuildMember } from "discord.js";
 import { z } from "zod";
 
 import {
@@ -80,9 +80,9 @@ export default class NameService {
 	): Promise<void> {
 		try {
 			if (!interaction.deferred) {
-				await interaction.deferReply({ ephemeral: true });
+				await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 			}
-			
+
 			const { guildId } = this.getVoiceChannelInfo(interaction);
 			const track = this.createTrackInfo(selectedTrack, interaction, true);
 
@@ -92,12 +92,12 @@ export default class NameService {
 			bot.logger.error(
 				bot.locale.t("messages.nameService.errors.track_processing", {
 					error: error instanceof Error ? error.message : String(error),
-				})
+				}),
 			);
-			
+
 			if (!interaction.replied && interaction.isRepliable()) {
 				await interaction.editReply({
-					content: bot.locale.t("errors.track.processing")
+					content: bot.locale.t("errors.track.processing"),
 				});
 			}
 		}

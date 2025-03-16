@@ -11,14 +11,14 @@ import type { DatabaseExports } from "./types/index.ts";
 
 const __dirname = dirname(import.meta);
 
-config({ path: resolve(__dirname, ".env") });
+config({ path: resolve(__dirname, "./.env") });
 
 export default class BotModule extends Module {
 	public readonly metadata: ModuleMetadata = {
-		name: packageJson.name.replace('@ragu2/', ''),
+		name: packageJson.name.replace("@ragu2/", ""),
 		version: packageJson.version,
 		description: packageJson.description,
-		dependencies: ['database'],
+		dependencies: ["database"],
 		priority: 100,
 	};
 
@@ -27,15 +27,28 @@ export default class BotModule extends Module {
 	} as const;
 
 	protected async onInitialize(): Promise<void> {
-		await this.locale.load();
-		await this.locale.setLanguage(process.env.BOT_LOCALE || "en");
-		
-		// Получаем клиент Prisma из модуля database
-		const database = this.getModuleExports<DatabaseExports>('database');
-		const prisma = database.getPrismaClient();
-		
-		// Теперь можно использовать prisma для работы с БД
-		await bot.initialize(prisma);
+		try {
+			await this.locale.load();
+			await this.locale.setLanguage(process.env.BOT_LOCALE || "en");
+
+			// Проверяем наличие модуля database
+			const database = this.getModuleExports<DatabaseExports>("database");
+			if (!database) {
+				throw new Error("Database module is required but not loaded");
+			}
+
+			const prisma = database.getPrismaClient();
+			if (!prisma) {
+				throw new Error("Failed to get Prisma client from database module");
+			}
+
+			// Теперь можно использовать prisma для работы с БД
+			await bot.initialize(prisma);
+		} catch (error: unknown) {
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			this.logger.error(`Failed to initialize bot module: ${errorMessage}`);
+			throw error;
+		}
 	}
 
 	protected async onStart(): Promise<void> {
@@ -57,17 +70,17 @@ export default class BotModule extends Module {
 		}
 
 		await bot.start(process.env.DISCORD_TOKEN);
-		this.logger.info({ 
+		this.logger.info({
 			message: `${this.locale.t("bot.status.started")}`,
-			moduleState: ModuleState.RUNNING 
+			moduleState: ModuleState.RUNNING,
 		});
 	}
 
 	private async stopBot(): Promise<void> {
 		bot.destroy();
-		this.logger.info({ 
+		this.logger.info({
 			message: `${this.locale.t("bot.status.stopped")}`,
-			moduleState: ModuleState.STOPPED 
+			moduleState: ModuleState.STOPPED,
 		});
 	}
 }

@@ -1,4 +1,4 @@
-import { IntentsBitField } from "discord.js";
+import { ClientEvents, IntentsBitField, Interaction, Message } from "discord.js";
 import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
@@ -46,6 +46,7 @@ export class Bot {
 	public readonly logger = createLogger("bot");
 	public readonly locale = createLocale<typeof translations>("bot");
 	public prisma!: PrismaClient;
+	private eventHandlers: Map<string, Function> = new Map();
 
 	constructor() {
 		this.client = new Client({
@@ -129,21 +130,31 @@ export class Bot {
 	}
 
 	private setupEvents(): void {
-		this.client.once("ready", async () => {
+		// Сохраняем ссылки на обработчики
+		const readyHandler = async () => {
 			try {
 				await this.client.initApplicationCommands();
 			} catch {
 				this.log("error", LOG_MESSAGES.INIT_ERROR);
 			}
-		});
-
-		this.client.on("interactionCreate", (interaction) => {
+		};
+		
+		const interactionHandler = (interaction: Interaction) => {
 			this.client.executeInteraction(interaction);
-		});
-
-		this.client.on("messageCreate", (message) => {
+		};
+		
+		const messageHandler = (message: Message) => {
 			void this.client.executeCommand(message);
-		});
+		};
+
+		this.eventHandlers.set('ready', readyHandler);
+		this.eventHandlers.set('interactionCreate', interactionHandler);
+		this.eventHandlers.set('messageCreate', messageHandler);
+
+		// Добавляем обработчики
+		this.client.once("ready", readyHandler);
+		this.client.on("interactionCreate", interactionHandler);
+		this.client.on("messageCreate", messageHandler);
 	}
 
 	public async start(token: string): Promise<void> {
@@ -156,7 +167,11 @@ export class Bot {
 	}
 
 	public removeEvents(): void {
-		this.client.removeAllListeners();
+		// Удаляем обработчики по сохраненным ссылкам
+		for (const [event, handler] of this.eventHandlers) {
+			this.client.off(event as keyof ClientEvents, handler as (...args: any[]) => void);
+		}
+		this.eventHandlers.clear();
 	}
 
 	public initEvents(): void {

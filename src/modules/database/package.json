@@ -10,7 +10,7 @@
   "main": "build/modules/database/module.js",
   "types": "build/modules/database/module.d.ts",
   "scripts": {		
-    "prisma:generate": "prisma generate",
+    "prisma:generate": "prisma generate --schema=./src/modules/database/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
   },

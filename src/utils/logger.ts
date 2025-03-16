@@ -4,27 +4,29 @@ import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
 import chalk from "chalk";
 import { ModuleState } from "../types/index.js";
+import path from "path";
+import fs from "fs/promises";
 
-const getStateColor = (state?: ModuleState): (text: string) => string => {
+const getStateColor = (state?: ModuleState): ((text: string) => string) => {
 	if (!state) return chalk.blue;
 
 	switch (state) {
 		case ModuleState.UNINITIALIZED:
 			return chalk.dim;
 		case ModuleState.INITIALIZING:
-			return chalk.hex('#6495ED');
+			return chalk.hex("#6495ED");
 		case ModuleState.INITIALIZED:
-			return chalk.hex('#00CED1');
+			return chalk.hex("#00CED1");
 		case ModuleState.STARTING:
-			return chalk.hex('#FFD700');
+			return chalk.hex("#FFD700");
 		case ModuleState.RUNNING:
-			return chalk.hex('#32CD32');
+			return chalk.hex("#32CD32");
 		case ModuleState.STOPPING:
-			return chalk.hex('#FFA500');
+			return chalk.hex("#FFA500");
 		case ModuleState.STOPPED:
-			return chalk.hex('#A9A9A9');
+			return chalk.hex("#A9A9A9");
 		case ModuleState.ERROR:
-			return chalk.hex('#FF4500');
+			return chalk.hex("#FF4500");
 		default:
 			return chalk.blue;
 	}
@@ -36,6 +38,9 @@ const getStateColor = (state?: ModuleState): (text: string) => string => {
  * @returns {winston.Logger} Configured winston logger instance
  */
 export const createLogger = (nameModule?: string): winston.Logger => {
+	// Увеличиваем лимит слушателей для process
+	process.setMaxListeners(21);
+
 	// Custom format for log messages including timestamp and module name
 	const customFormat = winston.format.printf(
 		({ level, message, timestamp, stack, url, moduleState }) => {
@@ -46,9 +51,9 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 			);
 
 			const colorize = getStateColor(moduleState as ModuleState | undefined);
-			const moduleName = nameModule ? 
-				` | ${colorize(nameModule.toUpperCase())}` : 
-				"";
+			const moduleName = nameModule
+				? ` | ${colorize(nameModule.toUpperCase())}`
+				: "";
 
 			let logMessage = `${formattedTime}${moduleName} | ${level}: ${message}`;
 			if (url) {
@@ -72,6 +77,14 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 		customFormat,
 	);
 
+	const logConfig = {
+		maxSize: "20m",
+		maxFiles: "14d",
+		zippedArchive: true,
+		tailable: true, // Автоматически удаляет старые логи
+		compress: true // Сжимает архивные файлы
+	};
+
 	// Create base logger with file transports
 	const logger = winston.createLogger({
 		level: process.env.LOG_LEVEL || "info",
@@ -79,19 +92,15 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 		transports: [
 			// Daily rotating transport for general application logs
 			new DailyRotateFile({
+				...logConfig,
 				filename: "logs/application-%DATE%.log",
 				datePattern: "YYYY-MM-DD",
-				zippedArchive: true,
-				maxSize: "20m",
-				maxFiles: "14d",
 			}),
 			// Daily rotating transport for error logs
 			new DailyRotateFile({
+				...logConfig,
 				filename: "logs/error-%DATE%.log",
 				datePattern: "YYYY-MM-DD",
-				zippedArchive: true,
-				maxSize: "20m",
-				maxFiles: "14d",
 				level: "error",
 			}),
 		],
@@ -137,6 +146,19 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 		}),
 	);
 
+	// Добавляем обработчик ошибок для транспортов
+	logger.transports.forEach(transport => {
+		transport.on('error', (error) => {
+			console.error('Logger transport error:', error);
+		});
+	});
+
+	// Добавляем очистку обработчиков при завершении работы
+	process.once('beforeExit', () => {
+		logger.close();
+		logger.clear(); // Очищаем все обработчики
+	});
+
 	return logger;
 };
 
@@ -158,3 +180,19 @@ declare module "winston" {
 const logger = createLogger();
 
 export default logger;
+
+// Добавляем функцию очистки старых логов
+export const cleanupOldLogs = async (daysToKeep = 14): Promise<void> => {
+	const logsDir = path.join(process.cwd(), 'logs');
+	const files = await fs.readdir(logsDir);
+	const now = Date.now();
+	const maxAge = daysToKeep * 24 * 60 * 60 * 1000;
+
+	for (const file of files) {
+		const filePath = path.join(logsDir, file);
+		const stats = await fs.stat(filePath);
+		if (now - stats.mtime.getTime() > maxAge) {
+			await fs.unlink(filePath);
+		}
+	}
+};

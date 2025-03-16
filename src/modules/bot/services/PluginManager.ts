@@ -19,8 +19,10 @@ export default class PluginManager {
 		try {
 			this.plugins.set(plugin.name, plugin);
 			bot.logger.info({
-				message: bot.locale.t("logger.plugin.registered", { name: plugin.name }),
-				moduleState: ModuleState.INITIALIZED
+				message: bot.locale.t("logger.plugin.registered", {
+					name: plugin.name,
+				}),
+				moduleState: ModuleState.INITIALIZED,
 			});
 		} catch (error) {
 			bot.logger.error(

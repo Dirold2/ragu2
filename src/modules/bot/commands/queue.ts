@@ -3,6 +3,7 @@ import {
 	GuildMember,
 	Message,
 	PermissionsBitField,
+	ReactionCollector,
 } from "discord.js";
 import { Discord, Slash } from "discordx";
 
@@ -30,6 +31,7 @@ export class QueueCommand {
 	private currentPage = 0;
 	private pages: string[] = [];
 	private message: Message | null = null;
+	private currentCollector: ReactionCollector | null = null;
 
 	@Slash({
 		name: "queue",
@@ -112,10 +114,19 @@ export class QueueCommand {
 		}
 	}
 
-	private createReactionCollector(
+	private async cleanupCollector(): Promise<void> {
+		if (this.currentCollector) {
+			this.currentCollector.stop();
+			this.currentCollector = null;
+		}
+	}
+
+	private async createReactionCollector(
 		message: Message,
 		interaction: CommandInteraction,
-	): void {
+	): Promise<void> {
+		await this.cleanupCollector();
+		
 		const collector = message.createReactionCollector({
 			filter: (reaction, user) => {
 				const emoji = reaction.emoji.name as string;
@@ -127,8 +138,13 @@ export class QueueCommand {
 			time: 300000,
 		});
 
+		this.currentCollector = collector;
+
 		collector.on("collect", async (reaction, user) => {
-			if (!this.message) return;
+			if (!this.message) {
+				await this.cleanupCollector();
+				return;
+			}
 
 			try {
 				await reaction.users.remove(user.id).catch(() => {});
@@ -170,10 +186,12 @@ export class QueueCommand {
 			}
 		});
 
-		collector.on("end", () => {
+		collector.on("end", async () => {
 			if (this.message?.reactions) {
-				this.message.reactions.removeAll().catch(() => {});
+				await this.message.reactions.removeAll().catch(() => {});
 			}
+			this.message = null;
+			this.currentCollector = null;
 		});
 	}
 
@@ -208,5 +226,16 @@ export class QueueCommand {
 
 		if (currentPage) pages.push(currentPage);
 		return pages;
+	}
+
+	// Добавляем метод очистки при уничтожении команды
+	public async destroy(): Promise<void> {
+		await this.cleanupCollector();
+		if (this.message) {
+			await this.message.delete().catch(() => {});
+			this.message = null;
+		}
+		this.pages = [];
+		this.currentPage = 0;
 	}
 }

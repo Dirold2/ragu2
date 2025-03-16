@@ -216,13 +216,13 @@ export class PlayCommand {
 		try {
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t("commands.play.searching", { query })
+				bot.locale.t("commands.play.searching", { query }),
 			);
-			
+
 			const results = await bot.nameService.searchName(query);
 			if (!results.length) {
 				await interaction.editReply(
-					bot.locale.t("errors.track.search", { query })
+					bot.locale.t("errors.track.search", { query }),
 				);
 				return;
 			}
@@ -232,13 +232,11 @@ export class PlayCommand {
 			bot.logger.error(
 				bot.locale.t("errors.track.processing", {
 					error: error instanceof Error ? error.message : String(error),
-				})
+				}),
 			);
-			
+
 			if (interaction.deferred) {
-				await interaction.editReply(
-					bot.locale.t("errors.track.processing")
-				);
+				await interaction.editReply(bot.locale.t("errors.track.processing"));
 			}
 		}
 	}
