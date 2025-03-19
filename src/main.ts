@@ -1,103 +1,111 @@
-import dotenv from "dotenv";
 import { ModuleManager } from "./core/ModuleManager.js";
-import logger from "./utils/logger.js";
+import { createLogger } from "./utils/logger.js";
+import path from "path";
+import { dirname } from "dirname-filename-esm";
 import { ModuleState } from "./types/index.js";
 import { clear } from "console";
-import { cleanupOldLogs } from "./utils/logger.js";
 
-// Загружаем переменные окружения
-dotenv.config();
+const __dirname = dirname(import.meta);
+const logger = createLogger("App");
 
 async function main() {
 	try {
-		// Обработка необработанных исключений
-		process.on('uncaughtException', (error) => {
-			logger.error({
-				message: 'Uncaught Exception',
-				moduleState: ModuleState.ERROR,
-				error: error.stack
-			});
+		logger.info("Starting application...");
+
+		// Create module manager
+		const moduleManager = new ModuleManager({
+			modulesPath: path.resolve(__dirname, "./modules"),
+			configPath: path.resolve(__dirname, "./config"),
 		});
 
-		// Обработка необработанных промисов
-		process.on('unhandledRejection', (reason) => {
-			logger.error({
-				message: 'Unhandled Rejection',
-				moduleState: ModuleState.ERROR,
-				error: reason
-			});
+		// Set up error handling
+		moduleManager.on("error", (error, moduleName, operation) => {
+			logger.error(
+				`Module error in ${moduleName || "unknown"} during ${operation || "unknown operation"}:`,
+				error,
+			);
 		});
 
-		// Мониторинг использования памяти
-		const memoryMonitor = setInterval(() => {
-			const used = process.memoryUsage();
-			logger.debug({
-				message: 'Memory usage',
-				moduleState: ModuleState.RUNNING,
-				heapUsed: `${Math.round(used.heapUsed / 1024 / 1024)}MB`,
-				heapTotal: `${Math.round(used.heapTotal / 1024 / 1024)}MB`
-			});
-		}, 300000); // каждые 5 минут
+		// Set up ready event
+		moduleManager.on("ready", (moduleStatus) => {
+			const runningModules = moduleStatus.filter(
+				(m: { state: string }) => m.state === "RUNNING",
+			).length;
+			const totalModules = moduleStatus.length;
 
-		// Очищаем консоль перед запуском
-		clear();
+			logger.info(
+				`Application ready! ${runningModules}/${totalModules} modules running`,
+			);
 
-		logger.info({
-			message: "Starting Ragu2...",
-			moduleState: ModuleState.INITIALIZING,
+			clear()
+
+			// Log any modules with errors
+			const modulesWithErrors = moduleStatus.filter(
+				(m: { hasError: boolean }) => m.hasError,
+			);
+			if (modulesWithErrors.length > 0) {
+				logger.warn({
+					message: `${modulesWithErrors.length} modules have errors:`,
+					modules: modulesWithErrors,
+					moduleState: ModuleState.WARNING,
+				});
+				modulesWithErrors.forEach((m: { name: string; state: string }) => {
+					logger.warn({
+						message: `- ${m.name} (${m.state})`,
+						moduleState: ModuleState.WARNING,
+					});
+				});
+			}
 		});
 
-		// Создаем менеджер модулей
-		const moduleManager = new ModuleManager();
-
-		// Загружаем все модули автоматически
+		// Load, initialize and start modules
 		await moduleManager.loadModules();
-
-		// Инициализируем все модули (с учетом зависимостей)
 		await moduleManager.initializeModules();
-
-		// Запускаем все модули
 		await moduleManager.startModules();
 
-		logger.info({
-			message: "ragu2 is ready!",
-			moduleState: ModuleState.RUNNING,
-		});
-
-		// Обработка завершения работы
-		process.on("SIGTERM", async () => {
-			clearInterval(memoryMonitor);
-			await moduleManager.stopModules();
-			await cleanupOldLogs();
-			process.exit(0);
-		});
-
-		process.on("SIGINT", async () => {
-			clearInterval(memoryMonitor);
-			await moduleManager.stopModules();
-			await cleanupOldLogs();
-			logger.info({
-				message: "Shutdown complete",
-				moduleState: ModuleState.STOPPED,
+		// Log performance metrics
+		const slowestModules = moduleManager.getSlowestModules();
+		if (slowestModules.length > 0) {
+			logger.debug({
+				message: "Slowest modules during initialization:",
+				modules: slowestModules,
+				moduleState: ModuleState.DEBUG,
 			});
+			slowestModules.slice(0, 3).forEach((m) => {
+				const avgTime =
+					m.operations.initialize.totalDuration / m.operations.initialize.count;
+				logger.debug({
+					message: `- ${m.name}: ${avgTime.toFixed(2)}ms`,
+					moduleState: ModuleState.DEBUG,
+				});
+			});
+		}
+
+		// Handle process termination
+		process.on("SIGINT", async () => {
+			logger.info("Received SIGINT signal, shutting down...");
+			await moduleManager.stopModules();
 			process.exit(0);
+		});
+
+		process.on("SIGTERM", async () => {
+			logger.info("Received SIGTERM signal, shutting down...");
+			await moduleManager.stopModules();
+			process.exit(0);
+		});
+
+		process.on("uncaughtException", (error) => {
+			logger.error("Uncaught exception:", error);
+		});
+
+		process.on("unhandledRejection", (reason) => {
+			logger.error("Unhandled rejection:", reason);
 		});
 	} catch (error) {
-		logger.error({
-			message: "Fatal error during application startup",
-			moduleState: ModuleState.ERROR,
-			error,
-		});
+		logger.error("Failed to start application:", error);
 		process.exit(1);
 	}
 }
 
-// Запускаем приложение
-main().catch((error) => {
-	logger.error({
-		message: "Unhandled error in main",
-		moduleState: ModuleState.ERROR,
-		error,
-	});
-	process.exit(1);
-});
+// Start the application
+main();

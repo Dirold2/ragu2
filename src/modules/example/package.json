@@ -1,9 +1,0 @@
-{
-    "name": "example",
-    "version": "0.0.1",
-    "description": "Example module",
-    "type": "module",
-    "private": true,
-    "main": "index.js",
-    "dependencies": {}
-}

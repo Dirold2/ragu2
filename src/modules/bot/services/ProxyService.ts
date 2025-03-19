@@ -1,9 +1,9 @@
 import { HttpsProxyAgent } from "https-proxy-agent";
-import logger from "../../../utils/logger.js";
-
+import { bot } from "../bot.js";
 export default class ProxyService {
 	private proxyAgent: HttpsProxyAgent<string> | null = null;
 	private proxyEnabled = false;
+	private readonly logger = bot.logger;
 
 	constructor() {
 		this.initializeProxy();
@@ -15,9 +15,9 @@ export default class ProxyService {
 			try {
 				this.proxyAgent = new HttpsProxyAgent(proxyUrl);
 				this.proxyEnabled = true;
-				logger.info("Proxy initialized successfully");
+				this.logger.info("Proxy initialized successfully");
 			} catch (error) {
-				logger.error(`Error initializing proxy: ${error}`);
+				this.logger.error(`Error initializing proxy: ${error}`);
 			}
 		}
 	}

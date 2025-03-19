@@ -8,12 +8,23 @@ import { dirname } from "dirname-filename-esm";
 import { resolve } from "path";
 
 import packageJson from "./package.json" with { type: "json" };
+import { BotExports } from "../bot/module.js";
 
 const __dirname = dirname(import.meta);
 
 config({ path: resolve(__dirname, ".env") });
 
-export default class ApiModule extends Module {
+interface ApiExports extends Record<string, unknown> {
+	getServer: () => ApiServer | null;
+}
+
+interface ApiModuleImports extends Record<string, unknown> {
+	bot: {
+		getBot: () => BotExports;
+	};
+}
+
+export default class ApiModule extends Module<ApiExports, ApiModuleImports> {
 	public readonly metadata: ModuleMetadata = {
 		name: packageJson.name.replace("@ragu2/", ""),
 		version: packageJson.version,
@@ -22,7 +33,7 @@ export default class ApiModule extends Module {
 		priority: 50,
 	};
 
-	public readonly exports = {
+	public override readonly exports = {
 		getServer: () => this.apiServer,
 	} as const;
 
@@ -44,7 +55,9 @@ export default class ApiModule extends Module {
 	}
 
 	private async setupServer(): Promise<void> {
-		// const botExports = this.getModuleExports('bot');
+		// const botExports = this.getModuleExports<BotExports>("bot");
+		// const bot = botExports.getBot();
+		// console.log(botExports);
 		this.apiServer = new ApiServer();
 		const server = await this.apiServer.create();
 		this.api = new Api(server, this.locale);

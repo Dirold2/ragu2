@@ -1,38 +1,29 @@
 import { Module } from "../../core/Module.js";
-import { PrismaClient } from "@prisma/client";
 import { ModuleState, type ModuleMetadata } from "../../types/index.js";
+import { PrismaClient } from "@prisma/client";
 import packageJson from "./package.json" with { type: "json" };
-import { DatabaseExports } from "./index.js";
 
-export class DatabaseModule extends Module {
-	private prismaClient: PrismaClient | null = null;
+// Define the exports interface for type safety
+export interface DatabaseExports extends Record<string, unknown> {
+	getPrismaClient: () => PrismaClient;
+}
 
+export default class DatabaseModule extends Module<DatabaseExports> {
 	public readonly metadata: ModuleMetadata = {
 		name: packageJson.name.replace("@ragu2/", ""),
 		version: packageJson.version,
 		description: packageJson.description,
-		priority: 0,
+		dependencies: [],
+		priority: 100,
 	};
 
-	protected async onInitialize(): Promise<void> {
-		await this.locale.load();
-		await this.locale.setLanguage(process.env.BOT_LOCALE || "en");
-		await this.init();
-	}
+	private prisma: PrismaClient | null = null;
 
-	public readonly exports = {
-		getPrismaClient: this.getPrismaClient.bind(this),
-	} as const satisfies DatabaseExports;
-
-	constructor() {
-		super();
-	}
-
-	public async init(): Promise<void> {
+	private async initializePrisma(): Promise<void> {
 		try {
 			const prisma = new PrismaClient();
 			await prisma.$connect();
-			this.prismaClient = prisma;
+			this.prisma = prisma;
 			this.logger.info({
 				message: this.locale.t("messages.database.connected"),
 				moduleState: ModuleState.INITIALIZED,
@@ -43,20 +34,24 @@ export class DatabaseModule extends Module {
 				moduleState: ModuleState.ERROR,
 				error,
 			});
-			throw error;
+			// throw error;
 		}
 	}
 
-	public getPrismaClient(): PrismaClient {
-		if (!this.prismaClient) {
-			throw new Error(this.locale.t("errors.database.notInitialized"));
+	protected async onInitialize(): Promise<void> {
+		try {
+			await this.locale.load();
+			await this.locale.setLanguage(process.env.BOT_LOCALE || "en");
+			await this.initializePrisma();
+		} catch (error) {
+			this.handleError("initialization", error);
+			// throw error;
 		}
-		return this.prismaClient;
 	}
 
-	public async destroy(): Promise<void> {
-		if (this.prismaClient) {
-			await this.prismaClient.$disconnect();
+	protected async onStop(): Promise<void> {
+		if (this.prisma) {
+			await this.prisma.$disconnect();
 			this.logger.info({
 				message: this.locale.t("messages.database.disconnected"),
 				moduleState: ModuleState.STOPPED,
@@ -64,5 +59,3 @@ export class DatabaseModule extends Module {
 		}
 	}
 }
-
-export default DatabaseModule;

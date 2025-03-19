@@ -1,7 +1,6 @@
 import { PrismaClient, Queue, Tracks } from "@prisma/client";
 
 import { QueueResult, Track } from "../interfaces/index.js";
-import logger from "../../../utils/logger.js";
 import { TrackSchema } from "./index.js";
 import { bot } from "../bot.js";
 
@@ -26,15 +25,13 @@ class QueueServiceError extends Error {
  * @class QueueService
  */
 export default class QueueService {
-	private readonly prisma: PrismaClient;
+	private readonly prisma = new PrismaClient();
 	private static readonly DEFAULT_VOLUME = 10;
 	private static readonly DEFAULT_TRANSACTION_TIMEOUT = 10000;
 	private static readonly BATCH_SIZE = 50;
 	// private readonly queues: Map<string, QueueState> = new Map();
-
-	constructor(prisma: PrismaClient) {
-		this.prisma = prisma;
-	}
+	private readonly logger = bot.logger;
+	private readonly locale = bot.locale;
 
 	/**
 	 * Adds a track to the queue for a specific guild
@@ -205,7 +202,7 @@ export default class QueueService {
 	 * @param {string} guildId - Discord guild ID
 	 * @returns {Promise<boolean>} Wave status
 	 */
-	public async getWaveStatus(guildId: string): Promise<boolean> {
+	public async getWave(guildId: string): Promise<boolean> {
 		const queue = await this.prisma.queue.findFirst({
 			where: { guildId },
 			select: { waveStatus: true },
@@ -218,7 +215,7 @@ export default class QueueService {
 	 * @param {string} guildId - Discord guild ID
 	 * @param {boolean} status - Wave status
 	 */
-	public async setWaveStatus(guildId: string, status: boolean): Promise<void> {
+	public async setWave(guildId: string, status: boolean): Promise<void> {
 		await this.prisma.queue.updateMany({
 			where: { guildId },
 			data: { waveStatus: status },
@@ -307,7 +304,7 @@ export default class QueueService {
 			where: { guildId },
 			data: { loop },
 		});
-		logger.debug(bot.locale.t("queue.loop_set", { guildId }));
+		this.logger.debug(this.locale.t("queue.loop_set", { guildId }));
 	}
 
 	/**
@@ -417,8 +414,8 @@ export default class QueueService {
 				await this.addTrackBatch(batch, queue.id);
 			}
 
-			logger.info(
-				bot.locale.t("queue.added_batch", {
+			this.logger.info(
+				this.locale.t("queue.added_batch", {
 					count: newTracks.length,
 					guildId,
 				}),
@@ -609,7 +606,7 @@ export default class QueueService {
 
 	private handleError(error: unknown, message: string): void {
 		const errorMessage = error instanceof Error ? error.message : String(error);
-		logger.error(`${message}: ${errorMessage}`);
+		this.logger.error(`${message}: ${errorMessage}`);
 
 		if (
 			error instanceof Error &&
@@ -672,8 +669,8 @@ export default class QueueService {
 			})),
 			skipDuplicates: true,
 		});
-		logger.info(
-			bot.locale.t("queue.added_batch", {
+		this.logger.info(
+			this.locale.t("queue.added_batch", {
 				count: tracks.length,
 				queueId,
 			}),

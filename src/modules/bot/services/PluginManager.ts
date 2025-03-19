@@ -1,6 +1,5 @@
 import NodeCache from "node-cache";
 import { MusicServicePlugin } from "../interfaces/index.js";
-import logger from "../../../utils/logger.js";
 import { bot } from "../bot.js";
 import { ModuleState } from "../../../types/index.js";
 
@@ -11,6 +10,9 @@ export default class PluginManager {
 		checkperiod: 600,
 	});
 
+	private readonly logger = bot.logger;
+	private readonly locale = bot.locale;
+
 	/**
 	 * Registers a new plugin.
 	 * @param plugin - The plugin to register.
@@ -18,15 +20,15 @@ export default class PluginManager {
 	registerPlugin(plugin: MusicServicePlugin): void {
 		try {
 			this.plugins.set(plugin.name, plugin);
-			bot.logger.info({
-				message: bot.locale.t("logger.plugin.registered", {
+			this.logger.info({
+				message: this.locale.t("logger.plugin.registered", {
 					name: plugin.name,
 				}),
 				moduleState: ModuleState.INITIALIZED,
 			});
 		} catch (error) {
-			bot.logger.error(
-				`${bot.locale.t("logger.plugin.register_error")}:`,
+			this.logger.error(
+				`${this.locale.t("logger.plugin.register_error")}:`,
 				error,
 			);
 		}
@@ -58,8 +60,8 @@ export default class PluginManager {
 		try {
 			const cachedPluginName = this.urlCache.get<string>(url);
 			if (cachedPluginName) {
-				logger.debug(
-					`${bot.locale.t("logger.plugin.cache.hit")}:`,
+				this.logger.debug(
+					`${this.locale.t("logger.plugin.cache.hit")}:`,
 					cachedPluginName,
 				);
 				return this.plugins.get(cachedPluginName);
@@ -71,14 +73,14 @@ export default class PluginManager {
 
 			if (plugin) {
 				this.urlCache.set(url, plugin.name);
-				logger.debug(`${bot.locale.t("logger.plugin.not_found")}`);
+				this.logger.debug(`${this.locale.t("logger.plugin.not_found")}`);
 			} else {
-				logger.debug(`${bot.locale.t("logger.plugin.not_found")}`);
+				this.logger.debug(`${this.locale.t("logger.plugin.not_found")}`);
 			}
 
 			return plugin;
 		} catch (error) {
-			logger.error(`${bot.locale.t("logger.plugin.not_found")}:`, error);
+			this.logger.error(`${this.locale.t("logger.plugin.not_found")}:`, error);
 			return undefined;
 		}
 	}

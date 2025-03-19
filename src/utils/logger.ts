@@ -7,6 +7,9 @@ import { ModuleState } from "../types/index.js";
 import path from "path";
 import fs from "fs/promises";
 
+// Увеличиваем лимит слушателей для process
+process.setMaxListeners(33);
+
 const getStateColor = (state?: ModuleState): ((text: string) => string) => {
 	if (!state) return chalk.blue;
 
@@ -18,7 +21,7 @@ const getStateColor = (state?: ModuleState): ((text: string) => string) => {
 		case ModuleState.INITIALIZED:
 			return chalk.hex("#00CED1");
 		case ModuleState.STARTING:
-			return chalk.hex("#FFD700");
+			return chalk.hex("#32CD12");
 		case ModuleState.RUNNING:
 			return chalk.hex("#32CD32");
 		case ModuleState.STOPPING:
@@ -27,6 +30,10 @@ const getStateColor = (state?: ModuleState): ((text: string) => string) => {
 			return chalk.hex("#A9A9A9");
 		case ModuleState.ERROR:
 			return chalk.hex("#FF4500");
+		case ModuleState.WARNING:
+			return chalk.hex("#FFA500");
+		case ModuleState.DEBUG:
+			return chalk.hex("#0000FF");
 		default:
 			return chalk.blue;
 	}
@@ -38,9 +45,6 @@ const getStateColor = (state?: ModuleState): ((text: string) => string) => {
  * @returns {winston.Logger} Configured winston logger instance
  */
 export const createLogger = (nameModule?: string): winston.Logger => {
-	// Увеличиваем лимит слушателей для process
-	process.setMaxListeners(21);
-
 	// Custom format for log messages including timestamp and module name
 	const customFormat = winston.format.printf(
 		({ level, message, timestamp, stack, url, moduleState }) => {
@@ -82,7 +86,7 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 		maxFiles: "14d",
 		zippedArchive: true,
 		tailable: true, // Автоматически удаляет старые логи
-		compress: true // Сжимает архивные файлы
+		compress: true, // Сжимает архивные файлы
 	};
 
 	// Create base logger with file transports
@@ -123,7 +127,7 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 	);
 
 	// Handle unhandled promise rejections
-	process.on("unhandledRejection", (ex) => {
+	process.on("unhandledRejection", (ex: unknown) => {
 		logger.error(
 			`ERROR_UNHANDLED_REJECTION: ${ex instanceof Error ? ex.message : String(ex)}`,
 		);
@@ -147,14 +151,14 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 	);
 
 	// Добавляем обработчик ошибок для транспортов
-	logger.transports.forEach(transport => {
-		transport.on('error', (error) => {
-			console.error('Logger transport error:', error);
+	logger.transports.forEach((transport) => {
+		transport.on("error", (error) => {
+			console.error("Logger transport error:", error);
 		});
 	});
 
 	// Добавляем очистку обработчиков при завершении работы
-	process.once('beforeExit', () => {
+	process.once("beforeExit", () => {
 		logger.close();
 		logger.clear(); // Очищаем все обработчики
 	});
@@ -183,7 +187,7 @@ export default logger;
 
 // Добавляем функцию очистки старых логов
 export const cleanupOldLogs = async (daysToKeep = 14): Promise<void> => {
-	const logsDir = path.join(process.cwd(), 'logs');
+	const logsDir = path.join(process.cwd(), "logs");
 	const files = await fs.readdir(logsDir);
 	const now = Date.now();
 	const maxAge = daysToKeep * 24 * 60 * 60 * 1000;

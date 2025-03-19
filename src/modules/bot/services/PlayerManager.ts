@@ -5,7 +5,8 @@ import { CommandService, PlayerService, QueueService } from "./index.js";
 import { bot } from "../bot.js";
 
 /**
- * Manages player instances for different Discord guilds
+ * @en Manages player instances for different Discord guilds
+ * @ru Управляет экземплярами плеера для разных Discord-серверов
  */
 export default class PlayerManager {
 	private readonly players: Map<string, PlayerService> = new Map();
@@ -14,7 +15,8 @@ export default class PlayerManager {
 	private readonly logger = bot.logger;
 
 	/**
-	 * Creates a new PlayerManager instance
+	 * @en Creates a new PlayerManager instance
+	 * @ru Создает новый экземпляр PlayerManager
 	 * @param queueService - Service for managing track queues
 	 * @param commandService - Service for handling Discord commands
 	 */
@@ -24,7 +26,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Validates that a command is executed within a server context
+	 * @en Validates that a command is executed within a server context
+	 * @ru Проверяет, что команда выполняется в контексте сервера
 	 * @param interaction - Discord command interaction
 	 * @returns Guild ID if command is valid, null otherwise
 	 */
@@ -52,7 +55,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Gets or creates a player instance for a guild
+	 * @en Gets or creates a player instance for a guild
+	 * @ru Получает или создает экземпляр плеера для сервера
 	 * @param guildId - Discord guild ID
 	 * @returns PlayerService instance
 	 */
@@ -73,7 +77,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Joins a voice channel
+	 * @en Joins a voice channel
+	 * @ru Присоединяется к голосовому каналу
 	 * @param interaction - Discord command interaction
 	 */
 	public async joinChannel(interaction: CommandInteraction): Promise<void> {
@@ -85,7 +90,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Plays or queues a track in a guild
+	 * @en Plays or queues a track in a guild
+	 * @ru Воспроизводит или добавляет трек в очередь на сервере
 	 * @param guildId - Discord guild ID
 	 * @param track - Track to play or queue
 	 */
@@ -94,7 +100,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Skips the current track
+	 * @en Skips the current track
+	 * @ru Пропускает текущий трек
 	 * @param interaction - Discord command interaction
 	 */
 	public async skip(interaction: CommandInteraction): Promise<void> {
@@ -105,7 +112,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Toggles playback pause state
+	 * @en Toggles playback pause state
+	 * @ru Переключает состояние паузы воспроизведения
 	 * @param interaction - Discord command interaction
 	 */
 	public async togglePause(interaction: CommandInteraction): Promise<void> {
@@ -116,7 +124,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Sets player volume
+	 * @en Sets player volume
+	 * @ru Устанавливает громкость плеера
 	 * @param guildId - Discord guild ID
 	 * @param volume - Volume level (0-100)
 	 */
@@ -127,7 +136,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Sets player loop state
+	 * @en Sets player loop state
+	 * @ru Устанавливает состояние повтора плеера
 	 * @param guildId - Discord guild ID
 	 * @param channelId - Discord channel ID
 	 * @param loop - Loop state
@@ -140,7 +150,21 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Disconnects from voice channel and removes player instance
+	 * @en Sets player wave state
+	 * @ru Устанавливает состояние волны плеера
+	 * @param guildId - Discord guild ID
+	 * @param wave - Wave state
+	 */
+	public async setWave(guildId: string, wave: boolean): Promise<void> {
+		if (guildId) {
+			this.getPlayer(guildId).state.wave = wave;
+			this.queueService.setWave(guildId, wave);
+		}
+	}
+
+	/**
+	 * @en Disconnects from voice channel and removes player instance
+	 * @ru Отключается от голосового канала и удаляет экземпляр плеера
 	 * @param guildId - Discord guild ID
 	 */
 	public async leaveChannel(guildId: string): Promise<void> {
@@ -156,7 +180,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Destroys all player instances and clears the map
+	 * @en Destroys all player instances and clears the map
+	 * @ru Уничтожает все экземпляры плеера и очищает карту
 	 */
 	public async destroyAll(): Promise<void> {
 		for (const [, player] of this.players) {

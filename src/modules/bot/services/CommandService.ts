@@ -10,13 +10,15 @@ import {
 import { bot } from "../bot.js";
 
 /**
- * Service for handling Discord command interactions and messages
+ * @en Service for handling Discord command interactions and messages
+ * @ru Сервис для обработки взаимодействий и сообщений команд Discord
  */
 export default class CommandService {
 	private readonly logger = bot.logger;
 
 	/**
-	 * Sends a response to a Discord interaction
+	 * @en Sends a response to a Discord interaction
+	 * @ru Отправляет ответ на взаимодействие Discord
 	 * @param interaction - The Discord interaction to respond to
 	 * @param message - The message content to send
 	 * @param ephemeral - Whether the message should be ephemeral (only visible to the command user)
@@ -55,7 +57,8 @@ export default class CommandService {
 	}
 
 	/**
-	 * Deletes a Discord message
+	 * @en Deletes a Discord message
+	 * @ru Удаляет сообщение Discord
 	 * @param message - The message to delete
 	 */
 	public async delete(message: Message): Promise<void> {
@@ -77,7 +80,8 @@ export default class CommandService {
 	}
 
 	/**
-	 * Replies to a command interaction
+	 * @en Replies to a command interaction
+	 * @ru Отвечает на взаимодействие команды
 	 * @param interaction - The interaction to reply to
 	 * @param content - The content of the reply
 	 */
@@ -96,8 +100,8 @@ export default class CommandService {
 
 		try {
 			if (!interaction.deferred && !interaction.replied) {
-				await interaction.deferReply({ 
-					flags: MessageFlags.Ephemeral 
+				await interaction.deferReply({
+					flags: MessageFlags.Ephemeral,
 				});
 			}
 
@@ -123,7 +127,8 @@ export default class CommandService {
 	}
 
 	/**
-	 * Handles Discord API errors for interactions
+	 * @en Handles Discord API errors for interactions
+	 * @ru Обрабатывает ошибки API Discord для взаимодействий
 	 * @private
 	 */
 	private handleInteractionError(
@@ -146,7 +151,8 @@ export default class CommandService {
 	}
 
 	/**
-	 * Handles Discord API errors for messages
+	 * @en Handles Discord API errors for messages
+	 * @ru Обрабатывает ошибки API Discord для сообщений
 	 * @private
 	 */
 	private handleMessageError(error: unknown, message: Message): void {
@@ -161,7 +167,8 @@ export default class CommandService {
 	}
 
 	/**
-	 * Handles specific Discord API error codes
+	 * @en Handles specific Discord API error codes
+	 * @ru Обрабатывает определенные коды ошибок API Discord
 	 * @private
 	 */
 	private handleDiscordAPIError(error: DiscordAPIError, context: string): void {

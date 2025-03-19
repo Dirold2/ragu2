@@ -129,7 +129,8 @@
     "commands": {
         "play": {
             "description": "Воспроизвести трек",
-            "option_track": "Название трека или URL"
+            "option_track": "Название трека или URL",
+            "searching": "Поиск трека: {query}"
         },
         "skip": {
             "description": "Пропустить текущий трек"

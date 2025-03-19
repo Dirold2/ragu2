@@ -126,7 +126,7 @@ export class QueueCommand {
 		interaction: CommandInteraction,
 	): Promise<void> {
 		await this.cleanupCollector();
-		
+
 		const collector = message.createReactionCollector({
 			filter: (reaction, user) => {
 				const emoji = reaction.emoji.name as string;

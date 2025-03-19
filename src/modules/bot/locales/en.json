@@ -149,6 +149,11 @@
         "loop": {
             "description": "Toggle track loop"
         },
+        "wave": {
+            "description": "Toggle wave",
+            "enabled": "Wave enabled",
+            "disabled": "Wave disabled"
+        },
         "other": {
             "no_recently_played_tracks": "No recently played tracks",
             "recently_played_tracks": "Recently played tracks",

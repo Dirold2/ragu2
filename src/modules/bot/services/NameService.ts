@@ -1,4 +1,8 @@
-import { MessageFlags, type CommandInteraction, type GuildMember } from "discord.js";
+import {
+	MessageFlags,
+	type CommandInteraction,
+	type GuildMember,
+} from "discord.js";
 import { z } from "zod";
 
 import {
@@ -28,14 +32,18 @@ export default class NameService {
 		private readonly pluginManager: PluginManager,
 	) {}
 
+	private readonly logger = bot.logger;
+	private readonly locale = bot.locale;
+
 	/**
-	 * Searches for a track or URL
+	 * @en Searches for a track or URL
+	 * @ru Ищет трек или URL
 	 * @param {string} trackName - Track name or URL
 	 * @returns {Promise<SearchTrackResult[]>} Array of search results
 	 */
 	async searchName(trackName: string): Promise<SearchTrackResult[]> {
-		bot.logger.debug(
-			bot.locale.t("messages.nameService.info.searching_track", {
+		this.logger.debug(
+			this.locale.t("messages.nameService.info.searching_track", {
 				query: trackName,
 			}),
 		);
@@ -47,6 +55,13 @@ export default class NameService {
 			: this.searchAcrossPlugins(trimmedName);
 	}
 
+	/**
+	 * @en Processes track and URL
+	 * @ru Обрабатывает трек и URL
+	 * @param {string} url - URL for search
+	 * @param {SearchTrackResult[]} track - Search results
+	 * @param {CommandInteraction} interaction - Discord command interaction
+	 */
 	async trackAndUrl(
 		url: string,
 		track: SearchTrackResult[],
@@ -54,8 +69,8 @@ export default class NameService {
 	) {
 		const plugin = bot.pluginManager.getPlugin(track[0].source);
 		if (!plugin) {
-			bot.logger.error(
-				bot.locale.t("messages.nameService.errors.plugin_not_found", {
+			this.logger.error(
+				this.locale.t("messages.nameService.errors.plugin_not_found", {
 					source: track[0].source,
 				}),
 			);
@@ -70,7 +85,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Processes track selection and adds it to the queue
+	 * @en Processes track selection and adds it to the queue
+	 * @ru Обрабатывает выбор трека и добавляет его в очередь
 	 * @param {SearchTrackResult} selectedTrack - Selected track information
 	 * @param {CommandInteraction} interaction - Discord command interaction
 	 */
@@ -89,22 +105,23 @@ export default class NameService {
 			await this.addTrackToQueue(track, guildId, interaction);
 			trackPlayCounter.inc({ status: "success" });
 		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("messages.nameService.errors.track_processing", {
+			this.logger.error(
+				this.locale.t("messages.nameService.errors.track_processing", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
 
 			if (!interaction.replied && interaction.isRepliable()) {
 				await interaction.editReply({
-					content: bot.locale.t("errors.track.processing"),
+					content: this.locale.t("errors.track.processing"),
 				});
 			}
 		}
 	}
 
 	/**
-	 * Adds a track to the queue
+	 * @en Adds a track to the queue
+	 * @ru Добавляет трек в очередь
 	 * @param {Track} track - Track information
 	 * @param {string} guildId - Guild ID
 	 * @param {CommandInteraction} interaction - Discord command interaction
@@ -116,7 +133,7 @@ export default class NameService {
 	): Promise<void> {
 		await bot.commandService.reply(
 			interaction,
-			bot.locale.t("messages.nameService.success.added_to_queue", {
+			this.locale.t("messages.nameService.success.added_to_queue", {
 				track: track.info,
 			}),
 		);
@@ -129,7 +146,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Processes a playlist URL and adds its tracks to the queue
+	 * @en Processes a playlist URL and adds its tracks to the queue
+	 * @ru Обрабатывает URL плейлиста и добавляет его треки в очередь
 	 * @param {string} url - Playlist URL
 	 * @param {CommandInteraction} interaction - Discord command interaction
 	 * @returns {Promise<SearchTrackResult[] | void>} Array of tracks or void if an error occurs
@@ -167,7 +185,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Searches across all plugins for a track
+	 * @en Searches across all plugins for a track
+	 * @ru Ищет трек во всех плагинах
 	 * @param {string} trackName - Track name
 	 * @returns {Promise<SearchTrackResult[]>} Array of search results
 	 */
@@ -183,7 +202,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Searches with a specific plugin for a track
+	 * @en Searches with a specific plugin for a track
+	 * @ru Ищет трек с помощью определенного плагина
 	 * @param {MusicServicePlugin} plugin - Plugin to search with
 	 * @param {string} trackName - Track name
 	 * @returns {Promise<SearchTrackResult[]>} Array of search results
@@ -195,8 +215,8 @@ export default class NameService {
 		try {
 			return await plugin.searchName(trackName);
 		} catch (error) {
-			bot.logger.warn(
-				bot.locale.t("messages.nameService.errors.search_error", {
+			this.logger.warn(
+				this.locale.t("messages.nameService.errors.search_error", {
 					plugin: plugin.name,
 					error: error instanceof Error ? error.message : String(error),
 				}),
@@ -206,7 +226,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Searches and processes a URL
+	 * @en Searches and processes a URL
+	 * @ru Ищет и обрабатывает URL
 	 * @param {string} url - URL to search
 	 * @returns {Promise<SearchTrackResult[]>} Array of search results
 	 */
@@ -218,8 +239,8 @@ export default class NameService {
 			const result = await plugin.searchURL(url);
 			return Array.isArray(result) ? result : [];
 		} catch (error) {
-			bot.logger.warn(
-				bot.locale.t("messages.nameService.errors.url_processing", {
+			this.logger.warn(
+				this.locale.t("messages.nameService.errors.url_processing", {
 					plugin: plugin.name,
 					error: error instanceof Error ? error.message : String(error),
 				}),
@@ -229,7 +250,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Adds playlist tracks to the queue
+	 * @en Adds playlist tracks to the queue
+	 * @ru Добавляет треки плейлиста в очередь
 	 * @param {SearchTrackResult[]} tracks - Array of tracks
 	 * @param {string} guildId - Guild ID
 	 * @param {string} requestedBy - Requested by user ID
@@ -257,7 +279,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Processes a playlist track and adds it to the queue
+	 * @en Processes a playlist track and adds it to the queue
+	 * @ru Обрабатывает трек плейлиста и добавляет его в очередь
 	 * @param {SearchTrackResult} track - Track information
 	 * @param {string} guildId - Guild ID
 	 * @param {string} requestedBy - Requested by user ID
@@ -284,8 +307,8 @@ export default class NameService {
 				return;
 			} catch (error) {
 				if (retries === MAX_RETRIES - 1) {
-					bot.logger.error(
-						bot.locale.t("messages.nameService.errors.add_track_failed", {
+					this.logger.error(
+						this.locale.t("messages.nameService.errors.add_track_failed", {
 							id: track.id,
 							retries: MAX_RETRIES,
 							error: error instanceof Error ? error.message : String(error),
@@ -299,7 +322,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Formats track information
+	 * @en Formats track information
+	 * @ru Форматирует информацию о треке
 	 * @param {SearchTrackResult} track - Track information
 	 * @returns {string} Formatted track information
 	 */
@@ -308,7 +332,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Retrieves voice channel information from an interaction
+	 * @en Retrieves voice channel information from an interaction
+	 * @ru Извлекает информацию о голосовом канале из взаимодействия
 	 * @param {CommandInteraction} interaction - Discord command interaction
 	 * @returns {Object} Voice channel information
 	 */
@@ -328,7 +353,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Creates track information
+	 * @en Creates track information
+	 * @ru Создает информацию о треке
 	 * @param {SearchTrackResult} track - Track information
 	 * @param {CommandInteraction} interaction - Discord command interaction
 	 * @param {boolean} isPriority - Whether the track is priority
@@ -349,7 +375,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Handles an error
+	 * @en Handles an error
+	 * @ru Обрабатывает ошибку
 	 * @param {unknown} error - Error
 	 * @param {CommandInteraction} interaction - Discord command interaction
 	 */
@@ -367,7 +394,8 @@ export default class NameService {
 	}
 
 	/**
-	 * Retrieves an error message
+	 * @en Retrieves an error message
+	 * @ru Извлекает сообщение об ошибке
 	 * @param {unknown} error - Error
 	 * @returns {string} Error message
 	 */

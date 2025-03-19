@@ -1,4 +1,9 @@
-import { ClientEvents, IntentsBitField, Interaction, Message } from "discord.js";
+import {
+	ClientEvents,
+	IntentsBitField,
+	Interaction,
+	Message,
+} from "discord.js";
 import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
@@ -63,8 +68,7 @@ export class Bot {
 		});
 	}
 
-	public async initialize(prisma: PrismaClient): Promise<void> {
-		this.prisma = prisma;
+	public async initialize(): Promise<void> {
 		try {
 			await this.init();
 		} catch (error) {
@@ -87,7 +91,7 @@ export class Bot {
 			this.pluginManager = new PluginManager();
 			await this.loadPlugins();
 
-			this.queueService = new QueueService(this.prisma);
+			this.queueService = new QueueService();
 			this.playerManager = new PlayerManager(
 				this.queueService,
 				this.commandService,
@@ -138,18 +142,18 @@ export class Bot {
 				this.log("error", LOG_MESSAGES.INIT_ERROR);
 			}
 		};
-		
+
 		const interactionHandler = (interaction: Interaction) => {
 			this.client.executeInteraction(interaction);
 		};
-		
+
 		const messageHandler = (message: Message) => {
 			void this.client.executeCommand(message);
 		};
 
-		this.eventHandlers.set('ready', readyHandler);
-		this.eventHandlers.set('interactionCreate', interactionHandler);
-		this.eventHandlers.set('messageCreate', messageHandler);
+		this.eventHandlers.set("ready", readyHandler);
+		this.eventHandlers.set("interactionCreate", interactionHandler);
+		this.eventHandlers.set("messageCreate", messageHandler);
 
 		// Добавляем обработчики
 		this.client.once("ready", readyHandler);
@@ -169,7 +173,10 @@ export class Bot {
 	public removeEvents(): void {
 		// Удаляем обработчики по сохраненным ссылкам
 		for (const [event, handler] of this.eventHandlers) {
-			this.client.off(event as keyof ClientEvents, handler as (...args: any[]) => void);
+			this.client.off(
+				event as keyof ClientEvents,
+				handler as (...args: any[]) => void,
+			);
 		}
 		this.eventHandlers.clear();
 	}

@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import net from "net";
 
 import { module } from "./module.js";
-
+import { ModuleState } from "../../types/index.js";
 export class ApiServer {
 	private server: FastifyInstance | null = null;
 
@@ -74,6 +74,7 @@ export class ApiServer {
 			module.logger.error(
 				module.locale.t("logger.errors.serverStart", {
 					error: error instanceof Error ? error.message : String(error),
+					moduleState: ModuleState.ERROR,
 				}),
 			);
 			throw error;
@@ -89,6 +90,7 @@ export class ApiServer {
 				module.logger.error(
 					module.locale.t("logger.errors.serverStop", {
 						error: error instanceof Error ? error.message : String(error),
+						moduleState: ModuleState.ERROR,
 					}),
 				);
 				throw error;

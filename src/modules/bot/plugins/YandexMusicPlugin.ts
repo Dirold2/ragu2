@@ -41,7 +41,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		deleteOnExpire: true,
 	});
 	private initialized = false;
-	private readonly logger = bot.logger;
 
 	hasAvailableResults = (): boolean => this.results.length > 0;
 
@@ -106,7 +105,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 			return [];
 		} catch (error) {
-			this.logger.error(
+			bot.logger.error(
 				bot.locale.t("errors.plugin.url_processing", {
 					name: this.name,
 					error: error instanceof Error ? error.message : String(error),
@@ -143,7 +142,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				)) || ""
 			);
 		} catch (error) {
-			this.logger.error(
+			bot.logger.error(
 				bot.locale.t("errors.track.url_not_found", {
 					trackId,
 					error: error instanceof Error ? error.message : String(error),
@@ -169,7 +168,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				playlistName,
 			);
 			if (!playlistInfo?.tracks) {
-				this.logger.warn(bot.locale.t("errors.playlist.not_found"));
+				bot.logger.warn(bot.locale.t("errors.playlist.not_found"));
 				return [];
 			}
 
@@ -188,7 +187,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
 		} catch (error) {
-			this.logger.error(
+			bot.logger.error(
 				bot.locale.t("errors.playlist.processing", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
@@ -212,7 +211,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
 		} catch (error) {
-			this.logger.error(
+			bot.logger.error(
 				bot.locale.t("errors.track.processing", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
@@ -231,7 +230,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		try {
 			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
 			if (!similarTracks?.similarTracks) {
-				this.logger.warn(
+				bot.logger.warn(
 					bot.locale.t("plugins.yandex.no_similar_tracks_found", { trackId }),
 				);
 				return [];
@@ -242,7 +241,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
 		} catch (error) {
-			this.logger.error(
+			bot.logger.error(
 				`${bot.locale.t("plugins.yandex.error_fetching_similar_tracks", { trackId })}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 			return [];
@@ -317,7 +316,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	): SearchTrackResult | null {
 		const validation = TrackResultSchema.safeParse(searchResult);
 		if (!validation.success) {
-			this.logger.warn(
+			bot.logger.warn(
 				bot.locale.t("errors.track.invalid_data", {
 					error: JSON.stringify(validation.error),
 				}),
@@ -365,7 +364,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			await Promise.all([this.wrapper.init(config), this.api.init(config)]);
 			this.initialized = true;
 		} catch (error) {
-			this.logger.error(
+			bot.logger.error(
 				`${bot.locale.t("plugins.yandex.error_initializing_service")}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 			throw new Error(bot.locale.t("plugins.yandex.failed_to_initialize"));
@@ -386,7 +385,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			const result = await retry(() => this.api.searchTracks(trackName), {
 				retries: MAX_RETRIES,
 				onRetry: (error: Error) =>
-					this.logger.warn(
+					bot.logger.warn(
 						`${bot.locale.t("plugins.yandex.retrying_search", { trackName })}: ${error.message}`,
 					),
 			});
@@ -410,7 +409,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 			return validatedTracks;
 		} catch (error) {
-			this.logger.error(
+			bot.logger.error(
 				bot.locale.t("errors.track.search", {
 					query: trackName,
 					error: error instanceof Error ? error.message : String(error),
@@ -439,7 +438,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	public async destroy(): Promise<void> {
 		this.results = [];
 		this.cache.flushAll();
-		
+
 		// Очищаем API клиентов через их методы
 		if (this.wrapper) {
 			this.wrapper = new WrappedYMApi();
@@ -447,7 +446,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		if (this.api) {
 			this.api = new YMApi();
 		}
-		
+
 		this.initialized = false;
 	}
 
