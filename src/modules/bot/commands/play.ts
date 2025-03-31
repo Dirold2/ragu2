@@ -43,9 +43,11 @@ export class PlayCommand {
 			return;
 		}
 
-		interaction.isAutocomplete()
-			? await this.handleAutocomplete(interaction, query)
-			: await this.handlePlay(interaction as CommandInteraction, query);
+		if (interaction.isAutocomplete()) {
+			await this.handleAutocomplete(interaction, query);
+		} else {
+			await this.handlePlay(interaction as CommandInteraction, query);
+		}
 	}
 
 	/**
@@ -115,7 +117,10 @@ export class PlayCommand {
 				);
 			}
 		} catch (error) {
-			bot.logger.error(bot.locale.t("logger.track.searching", { query }));
+			bot.logger.error(
+				bot.locale.t("logger.track.searching", { query }),
+				error,
+			);
 			if (!interaction.responded) {
 				await interaction.respond([]);
 			}

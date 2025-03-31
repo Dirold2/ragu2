@@ -2,40 +2,44 @@ import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import chalk from "chalk";
 import { ModuleState } from "../types/index.js";
 import path from "path";
 import fs from "fs/promises";
+import styles from "ansi-styles";
 
 // Увеличиваем лимит слушателей для process
 process.setMaxListeners(33);
 
 const getStateColor = (state?: ModuleState): ((text: string) => string) => {
-	if (!state) return chalk.blue;
+	const applyStyle =
+		(bgStyle: any, fgStyle: any = styles.black.open) =>
+		(text: string): string => {
+			return `${bgStyle}${fgStyle}${text}${styles.reset.open}`;
+		};
+
+	if (!state) return applyStyle(styles.bgGreenBright.open);
 
 	switch (state) {
 		case ModuleState.UNINITIALIZED:
-			return chalk.dim;
-		case ModuleState.INITIALIZING:
-			return chalk.hex("#6495ED");
+			return applyStyle(styles.bgWhite.open, styles.black.open);
 		case ModuleState.INITIALIZED:
-			return chalk.hex("#00CED1");
+			return applyStyle(styles.bgBlueBright.open);
 		case ModuleState.STARTING:
-			return chalk.hex("#32CD12");
+			return applyStyle(styles.bgGreenBright.open);
 		case ModuleState.RUNNING:
-			return chalk.hex("#32CD32");
+			return applyStyle(styles.bgWhiteBright.open);
 		case ModuleState.STOPPING:
-			return chalk.hex("#FFA500");
+			return applyStyle(styles.bgYellowBright.open, styles.black.open);
 		case ModuleState.STOPPED:
-			return chalk.hex("#A9A9A9");
+			return applyStyle(styles.bgGray.open, styles.whiteBright.open);
 		case ModuleState.ERROR:
-			return chalk.hex("#FF4500");
+			return applyStyle(styles.bgRedBright.open);
 		case ModuleState.WARNING:
-			return chalk.hex("#FFA500");
+			return applyStyle(styles.bgYellowBright.open, styles.black.open);
 		case ModuleState.DEBUG:
-			return chalk.hex("#0000FF");
+			return applyStyle(styles.bgBlueBright.open, styles.whiteBright.open);
 		default:
-			return chalk.blue;
+			return applyStyle(styles.bgBlueBright.open);
 	}
 };
 
@@ -56,7 +60,7 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 
 			const colorize = getStateColor(moduleState as ModuleState | undefined);
 			const moduleName = nameModule
-				? ` | ${colorize(nameModule.toUpperCase())}`
+				? ` | ${colorize(` ${nameModule.toUpperCase()} `)}`
 				: "";
 
 			let logMessage = `${formattedTime}${moduleName} | ${level}: ${message}`;
@@ -67,11 +71,29 @@ export const createLogger = (nameModule?: string): winston.Logger => {
 		},
 	);
 
-	// Format configuration for file logging
+	// Format configuration for file logging without colors
 	const fileFormat = winston.format.combine(
 		winston.format.timestamp(),
 		winston.format.errors({ stack: true }),
-		customFormat,
+		winston.format.printf(
+			({ level, message, timestamp, stack, url, moduleState }) => {
+				const formattedTime = format(
+					new Date(timestamp as unknown as string),
+					"dd.MM.yyyy HH:mm:ss",
+					{ locale: ru },
+				);
+
+				const moduleName = nameModule
+					? ` | ${moduleState ? `[${moduleState}]` : ""} ${nameModule.toUpperCase()}`
+					: "";
+
+				let logMessage = `${formattedTime}${moduleName} | ${level}: ${message}`;
+				if (url) {
+					logMessage += `\nAt: ${url}`;
+				}
+				return stack ? `${logMessage}\n${stack}` : logMessage;
+			},
+		),
 	);
 
 	// Format configuration for console logging with colors

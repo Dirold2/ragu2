@@ -8,14 +8,12 @@ import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
-import type { PrismaClient } from "@prisma/client";
 
 import {
 	CommandService,
 	NameService,
 	PlayerManager,
 	PluginManager,
-	QueueService,
 	ProxyService,
 } from "./services/index.js";
 
@@ -25,33 +23,31 @@ import translations from "./locales/en.json" with { type: "json" };
 import { config } from "dotenv";
 import { dirname } from "dirname-filename-esm";
 import { resolve } from "path";
+import { ModuleManager } from "../../core/ModuleManager.js";
+import { ModuleState } from "../../types/index.js";
 
-const __dirname = dirname(import.meta);
+config({ path: resolve(dirname(import.meta), ".env") });
 
-config({ path: resolve(__dirname, ".env") });
-
-const LOG_MESSAGES = {
-	PLUGIN_REGISTRATION_ERROR: (name: string) => ({
-		key: "logger.pluginRegisterError",
-		params: { name },
-	}),
-	INIT_ERROR: { key: "messages.bot.initializationFailed" },
-	READY: { key: "messages.bot.initialized" },
-	LOGIN_ERROR: { key: "messages.bot.startError" },
-} as const;
-
+/**
+ * Bot class
+ */
 export class Bot {
 	public readonly client: Client;
+	public moduleManager!: ModuleManager;
+	public databaseModule: any;
 	public nameService!: NameService;
-	public queueService!: QueueService;
+	public queueService: any;
 	public playerManager!: PlayerManager;
 	public commandService!: CommandService;
 	public proxyService!: ProxyService;
 	public pluginManager!: PluginManager;
 	public readonly logger = createLogger("bot");
 	public readonly locale = createLocale<typeof translations>("bot");
-	public prisma!: PrismaClient;
-	private eventHandlers: Map<string, Function> = new Map();
+	private eventHandlers: Map<
+		string,
+		(event: Interaction | Message<boolean>) => void
+	> = new Map();
+	public prisma: any;
 
 	constructor() {
 		this.client = new Client({
@@ -68,78 +64,131 @@ export class Bot {
 		});
 	}
 
+	/**
+	 * Initialize bot
+	 */
 	public async initialize(): Promise<void> {
 		try {
-			await this.init();
+			await this.locale.load();
+			await this.locale.setLanguage(process.env.BOT_LOCALE || "en");
+
+			this.connectToModule();
+			this.setupEvents();
+			await this.initServices();
+
+			this.logger.info(this.locale.t("bot.status.initialized"));
 		} catch (error) {
-			this.log("error", LOG_MESSAGES.INIT_ERROR);
+			this.logger.error(this.locale.t("bot.status.init_failed"));
 			throw error;
 		}
 	}
 
-	private async init(): Promise<void> {
-		await this.initServices();
-		this.setupEvents();
+	/**
+	 * Connect to module
+	 */
+	private connectToModule(): void {
+		if (!this.moduleManager) {
+			this.logger.warn("ModuleManager not available, cannot connect to module");
+			return;
+		}
+
+		this.databaseModule =
+			this.moduleManager.getModule<
+				typeof import("../database/module.js").module
+			>("database");
+
+		if (this.databaseModule?.exports?.getQueueService?.()) {
+			this.queueService = this.databaseModule.exports.getQueueService();
+			this.prisma = this.databaseModule.prisma;
+			this.logger.info({
+				message: "Модуль базы данных успешно подключен",
+				moduleState: ModuleState.INITIALIZED,
+			});
+		} else {
+			this.logger.warn(
+				"Could not connect to database module or it has no queue service",
+			);
+		}
 	}
 
+	/**
+	 * Initialize services
+	 */
 	private async initServices(): Promise<void> {
 		try {
-			await this.locale.load();
-			await this.locale.setLanguage(`${process.env.BOT_LOCALE}` || "en");
-
 			this.commandService = new CommandService();
 			this.pluginManager = new PluginManager();
 			await this.loadPlugins();
 
-			this.queueService = new QueueService();
+			if (!this.queueService && this.databaseModule) {
+				this.queueService = this.databaseModule.exports.getQueueService();
+			}
+
+			if (!this.queueService) {
+				throw new Error("QueueService не может быть инициализирован");
+			}
+
 			this.playerManager = new PlayerManager(
 				this.queueService,
 				this.commandService,
 			);
+
 			this.nameService = new NameService(
 				this.queueService,
 				this.playerManager,
 				this.pluginManager,
 			);
 		} catch (error) {
-			this.log("error", LOG_MESSAGES.INIT_ERROR);
+			this.logger.error(this.locale.t("messages.bot.initialization.failed"));
 			throw error;
 		}
 	}
 
+	/**
+	 * Load plugins
+	 */
 	private async loadPlugins(): Promise<void> {
-		const pluginsDir = path.resolve(__dirname, "plugins");
+		const pluginsDir = path.resolve(dirname(import.meta), "plugins");
 
 		try {
 			const files = await fs.promises.readdir(pluginsDir);
+			const pluginFiles = files.filter(
+				(file) => file.endsWith(".ts") || file.endsWith(".js"),
+			);
+
 			await Promise.all(
-				files
-					.filter((file) => file.endsWith(".ts") || file.endsWith(".js"))
-					.map(async (file) => {
-						try {
-							const { default: Plugin } = await import(
-								String(pathToFileURL(path.join(pluginsDir, file)))
-							);
-							const plugin = new Plugin();
-							this.pluginManager.registerPlugin(plugin);
-						} catch (error) {
-							this.log("error", LOG_MESSAGES.PLUGIN_REGISTRATION_ERROR(file));
-						}
-					}),
+				pluginFiles.map(async (file) => {
+					try {
+						const pluginPath = String(
+							pathToFileURL(path.join(pluginsDir, file)),
+						);
+						const { default: Plugin } = await import(pluginPath);
+						const plugin = new Plugin();
+						this.pluginManager.registerPlugin(plugin);
+						this.logger.debug(`Plugin loaded: ${file}`);
+					} catch (error) {
+						this.logger.error(
+							this.locale.t("logger.plugin.register_error", { file }),
+							error,
+						);
+					}
+				}),
 			);
 		} catch (error) {
-			this.log("error", LOG_MESSAGES.PLUGIN_REGISTRATION_ERROR("unknown"));
+			this.logger.error(this.locale.t("logger.plugin.register_error"));
 			throw error;
 		}
 	}
 
+	/**
+	 * Setup events
+	 */
 	private setupEvents(): void {
-		// Сохраняем ссылки на обработчики
 		const readyHandler = async () => {
 			try {
 				await this.client.initApplicationCommands();
-			} catch {
-				this.log("error", LOG_MESSAGES.INIT_ERROR);
+			} catch (error) {
+				this.logger.error(this.locale.t("bot.status.init_failed"), error);
 			}
 		};
 
@@ -147,59 +196,69 @@ export class Bot {
 			this.client.executeInteraction(interaction);
 		};
 
-		const messageHandler = (message: Message) => {
+		const messageHandler = (message: Message<boolean>) => {
 			void this.client.executeCommand(message);
 		};
 
 		this.eventHandlers.set("ready", readyHandler);
-		this.eventHandlers.set("interactionCreate", interactionHandler);
-		this.eventHandlers.set("messageCreate", messageHandler);
+		this.eventHandlers.set(
+			"interactionCreate",
+			interactionHandler as (...args: unknown[]) => void,
+		);
+		this.eventHandlers.set(
+			"messageCreate",
+			messageHandler as (...args: unknown[]) => void,
+		);
 
-		// Добавляем обработчики
 		this.client.once("ready", readyHandler);
 		this.client.on("interactionCreate", interactionHandler);
 		this.client.on("messageCreate", messageHandler);
+
+		this.logger.debug("Discord client events are set");
 	}
 
+	/**
+	 * Start bot
+	 */
 	public async start(token: string): Promise<void> {
 		try {
 			await this.client.login(token);
+			this.logger.info(this.locale.t("messages.bot.start.success"));
 		} catch (error) {
-			this.log("error", LOG_MESSAGES.LOGIN_ERROR);
+			this.logger.error(this.locale.t("messages.bot.start.error"));
 			throw error;
 		}
 	}
 
+	/**
+	 * Remove events
+	 */
 	public removeEvents(): void {
-		// Удаляем обработчики по сохраненным ссылкам
 		for (const [event, handler] of this.eventHandlers) {
 			this.client.off(
 				event as keyof ClientEvents,
-				handler as (...args: any[]) => void,
+				handler as (...args: unknown[]) => void,
 			);
 		}
 		this.eventHandlers.clear();
 	}
 
+	/**
+	 * Initialize events
+	 */
 	public initEvents(): void {
 		this.setupEvents();
 	}
 
+	/**
+	 * Destroy bot
+	 */
 	public async destroy(): Promise<void> {
 		this.removeEvents();
 		await this.client.destroy();
 	}
-
-	private log(
-		level: "info" | "error",
-		message: { key: string; params?: Record<string, any> },
-	): void {
-		this.logger[level](this.locale.t(message.key as any, message.params));
-	}
 }
 
-// Создаём синглтон для обратной совместимости
 export const bot = new Bot();
 
-// Оставляем createBot для создания новых экземпляров при необходимости
 export const createBot = () => new Bot();

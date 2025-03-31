@@ -1,28 +1,29 @@
 import {
-	AutocompleteInteraction,
-	CacheType,
-	CommandInteraction,
+	type AutocompleteInteraction,
+	type CacheType,
+	type CommandInteraction,
 	DiscordAPIError,
-	InteractionResponse,
-	Message,
+	type InteractionResponse,
+	type Message,
 	MessageFlags,
 } from "discord.js";
 import { bot } from "../bot.js";
 
 /**
- * @en Service for handling Discord command interactions and messages
- * @ru Сервис для обработки взаимодействий и сообщений команд Discord
+ * Сервис для обработки взаимодействий и сообщений команд Discord
  */
 export default class CommandService {
 	private readonly logger = bot.logger;
 
+	// Добавляем кэш для оптимизации
+	private readonly interactionCache = new Map<
+		string,
+		{ content: string; timestamp: number }
+	>();
+	private readonly CACHE_TTL = 60000; // 1 минута
+
 	/**
-	 * @en Sends a response to a Discord interaction
-	 * @ru Отправляет ответ на взаимодействие Discord
-	 * @param interaction - The Discord interaction to respond to
-	 * @param message - The message content to send
-	 * @param ephemeral - Whether the message should be ephemeral (only visible to the command user)
-	 * @returns Promise resolving to the interaction response or void
+	 * Отправляет ответ на взаимодействие Discord
 	 */
 	public async send(
 		interaction:
@@ -33,33 +34,58 @@ export default class CommandService {
 		if (!interaction.isRepliable()) return;
 
 		try {
+			// Проверяем кэш для предотвращения дублирования сообщений
+			const cacheKey = `${interaction.id}-${interaction.user.id}`;
+			const cachedResponse = this.interactionCache.get(cacheKey);
+
+			if (
+				cachedResponse &&
+				cachedResponse.content === message &&
+				Date.now() - cachedResponse.timestamp < this.CACHE_TTL
+			) {
+				this.logger.debug(`Cached response for interaction ${interaction.id}`);
+				return;
+			}
+
+			let response;
 			if (interaction.replied || interaction.deferred) {
 				this.logger.debug(
 					bot.locale.t("commands.interaction.editing_reply", {
 						id: interaction.id,
 					}),
 				);
-				return interaction.editReply({ content: message });
+				response = await interaction.editReply({ content: message });
+			} else {
+				this.logger.debug(
+					bot.locale.t("commands.interaction.sending_reply", {
+						id: interaction.id,
+					}),
+				);
+				response = await interaction.reply({
+					content: message,
+					flags: MessageFlags.Ephemeral,
+				});
 			}
 
-			this.logger.debug(
-				bot.locale.t("commands.interaction.sending_reply", {
-					id: interaction.id,
-				}),
-			);
-			return interaction.reply({
+			// Кэшируем ответ
+			this.interactionCache.set(cacheKey, {
 				content: message,
-				flags: MessageFlags.Ephemeral,
+				timestamp: Date.now(),
 			});
-		} catch (error) {
+
+			// Устанавливаем TTL для кэша
+			setTimeout(() => {
+				this.interactionCache.delete(cacheKey);
+			}, this.CACHE_TTL);
+
+			return response;
+		} catch (error: unknown) {
 			this.handleInteractionError(error, interaction);
 		}
 	}
 
 	/**
-	 * @en Deletes a Discord message
-	 * @ru Удаляет сообщение Discord
-	 * @param message - The message to delete
+	 * Удаляет сообщение Discord
 	 */
 	public async delete(message: Message): Promise<void> {
 		if (!message.deletable) {
@@ -80,10 +106,7 @@ export default class CommandService {
 	}
 
 	/**
-	 * @en Replies to a command interaction
-	 * @ru Отвечает на взаимодействие команды
-	 * @param interaction - The interaction to reply to
-	 * @param content - The content of the reply
+	 * Отвечает на взаимодействие команды
 	 */
 	public async reply(
 		interaction: CommandInteraction,
@@ -99,6 +122,19 @@ export default class CommandService {
 		}
 
 		try {
+			// Проверяем кэш для предотвращения дублирования сообщений
+			const cacheKey = `${interaction.id}-${interaction.user.id}`;
+			const cachedResponse = this.interactionCache.get(cacheKey);
+
+			if (
+				cachedResponse &&
+				cachedResponse.content === content &&
+				Date.now() - cachedResponse.timestamp < this.CACHE_TTL
+			) {
+				this.logger.debug(`Cached response for interaction ${interaction.id}`);
+				return;
+			}
+
 			if (!interaction.deferred && !interaction.replied) {
 				await interaction.deferReply({
 					flags: MessageFlags.Ephemeral,
@@ -106,6 +142,17 @@ export default class CommandService {
 			}
 
 			await interaction.editReply({ content });
+
+			// Кэшируем ответ
+			this.interactionCache.set(cacheKey, {
+				content,
+				timestamp: Date.now(),
+			});
+
+			// Устанавливаем TTL для кэша
+			setTimeout(() => {
+				this.interactionCache.delete(cacheKey);
+			}, this.CACHE_TTL);
 		} catch (error) {
 			if (error instanceof DiscordAPIError) {
 				if (error.code === 40060) {
@@ -127,9 +174,7 @@ export default class CommandService {
 	}
 
 	/**
-	 * @en Handles Discord API errors for interactions
-	 * @ru Обрабатывает ошибки API Discord для взаимодействий
-	 * @private
+	 * Обрабатывает ошибки API Discord для взаимодействий
 	 */
 	private handleInteractionError(
 		error: unknown,
@@ -151,9 +196,7 @@ export default class CommandService {
 	}
 
 	/**
-	 * @en Handles Discord API errors for messages
-	 * @ru Обрабатывает ошибки API Discord для сообщений
-	 * @private
+	 * Обрабатывает ошибки API Discord для сообщений
 	 */
 	private handleMessageError(error: unknown, message: Message): void {
 		if (error instanceof DiscordAPIError) {
@@ -167,9 +210,7 @@ export default class CommandService {
 	}
 
 	/**
-	 * @en Handles specific Discord API error codes
-	 * @ru Обрабатывает определенные коды ошибок API Discord
-	 * @private
+	 * Обрабатывает определенные коды ошибок API Discord
 	 */
 	private handleDiscordAPIError(error: DiscordAPIError, context: string): void {
 		const errorCode = Number(error.code);
@@ -188,5 +229,13 @@ export default class CommandService {
 				}),
 			);
 		}
+	}
+
+	/**
+	 * Очищает кэш взаимодействий
+	 */
+	public clearCache(): void {
+		this.interactionCache.clear();
+		this.logger.debug("Interaction cache cleared");
 	}
 }

@@ -1,21 +1,45 @@
-import NodeCache from "node-cache";
-import { MusicServicePlugin } from "../interfaces/index.js";
+import { Hono } from "hono";
+import type { MusicServicePlugin } from "../interfaces/index.js";
 import { bot } from "../bot.js";
-import { ModuleState } from "../../../types/index.js";
 
+/**
+ * Manages music service plugins with improved caching and performance
+ */
 export default class PluginManager {
 	private plugins: Map<string, MusicServicePlugin> = new Map();
-	private urlCache: NodeCache = new NodeCache({
-		stdTTL: 3600,
-		checkperiod: 600,
-	});
+	// Используем встроенный в Bun кэш для лучшей производительности
+	private urlCache = new Map<string, string>();
+
+	// Создаем Hono API для плагинов (опционально)
+	private api = new Hono();
 
 	private readonly logger = bot.logger;
 	private readonly locale = bot.locale;
 
+	constructor() {
+		// Инициализация API для плагинов
+		this.setupPluginApi();
+	}
+
 	/**
-	 * Registers a new plugin.
-	 * @param plugin - The plugin to register.
+	 * Настраивает API для взаимодействия с плагинами
+	 */
+	private setupPluginApi(): void {
+		this.api.get("/plugins", (c) => {
+			return c.json(Array.from(this.plugins.keys()));
+		});
+
+		this.api.get("/plugins/:name", (c) => {
+			const name = c.req.param("name");
+			const plugin = this.plugins.get(name);
+			return plugin
+				? c.json(plugin)
+				: c.json({ error: "Plugin not found" }, 404);
+		});
+	}
+
+	/**
+	 * Регистрирует новый плагин
 	 */
 	registerPlugin(plugin: MusicServicePlugin): void {
 		try {
@@ -24,7 +48,7 @@ export default class PluginManager {
 				message: this.locale.t("logger.plugin.registered", {
 					name: plugin.name,
 				}),
-				moduleState: ModuleState.INITIALIZED,
+				moduleState: "INITIALIZED",
 			});
 		} catch (error) {
 			this.logger.error(
@@ -35,30 +59,27 @@ export default class PluginManager {
 	}
 
 	/**
-	 * Retrieves a plugin by its name.
-	 * @param name - The name of the plugin.
-	 * @returns The plugin if found, otherwise undefined.
+	 * Получает плагин по имени
 	 */
 	getPlugin(name: string): MusicServicePlugin | undefined {
 		return this.plugins.get(name);
 	}
 
 	/**
-	 * Retrieves all registered plugins.
-	 * @returns An array of all plugins.
+	 * Получает все зарегистрированные плагины
 	 */
 	getAllPlugins(): MusicServicePlugin[] {
 		return Array.from(this.plugins.values());
 	}
 
 	/**
-	 * Finds a plugin that matches a given URL.
-	 * @param url - The URL to match against plugin patterns.
-	 * @returns The matching plugin if found, otherwise undefined.
+	 * Находит плагин, соответствующий URL
+	 * Оптимизировано для Bun с использованием встроенного кэша
 	 */
 	getPluginForUrl(url: string): MusicServicePlugin | undefined {
 		try {
-			const cachedPluginName = this.urlCache.get<string>(url);
+			// Используем встроенный Map для кэширования
+			const cachedPluginName = this.urlCache.get(url);
 			if (cachedPluginName) {
 				this.logger.debug(
 					`${this.locale.t("logger.plugin.cache.hit")}:`,
@@ -67,13 +88,14 @@ export default class PluginManager {
 				return this.plugins.get(cachedPluginName);
 			}
 
+			// Используем Array.find вместо filter для лучшей производительности
 			const plugin = this.getAllPlugins().find((plugin) =>
 				plugin.urlPatterns.some((pattern) => pattern.test(url)),
 			);
 
 			if (plugin) {
 				this.urlCache.set(url, plugin.name);
-				this.logger.debug(`${this.locale.t("logger.plugin.not_found")}`);
+				this.logger.debug(`Plugin found: ${plugin.name}`);
 			} else {
 				this.logger.debug(`${this.locale.t("logger.plugin.not_found")}`);
 			}
@@ -83,5 +105,13 @@ export default class PluginManager {
 			this.logger.error(`${this.locale.t("logger.plugin.not_found")}:`, error);
 			return undefined;
 		}
+	}
+
+	/**
+	 * Очищает кэш URL
+	 */
+	clearCache(): void {
+		this.urlCache.clear();
+		this.logger.debug("URL cache cleared");
 	}
 }

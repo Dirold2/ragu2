@@ -125,7 +125,13 @@
         "paused": "Playback paused",
         "resumed": "Playback resumed",
         "fadeout_cleared": "Fadeout cleared",
-        "fadeout_set": "Fadeout set: {duration}ms"
+        "fadeout_set": "Fadeout set: {duration}ms",
+        "error": {
+            "plugin_not_found": "Plugin not found for source: {source}",
+            "track_url_not_found": "Track URL not found: {trackId}",
+            "get_track_url": "Error getting track URL: {trackId} - {error}",
+            "reconnection_failed": "Error reconnecting: {error}"
+        }
     },
     "commands": {
         "play": {
@@ -256,21 +262,5 @@
                 "error": "Bot token is missing or invalid"
             }
         }
-    },
-    "queue": {
-        "error_adding_track": "Error adding track: {trackId}",
-        "guild_id_required": "Guild ID is required",
-        "error_retrieving_track": "Error retrieving track for guild: {guildId}",
-        "error_fetching_queue": "Error fetching queue for guild: {guildId}",
-        "error_clearing_queue": "Error clearing queue for guild: {guildId}",
-        "error_removing_track": "Error removing track: {trackId}",
-        "loop_set": "Loop set for guild: {guildId}",
-        "error_logging_play": "Error logging play for track {trackId} by user {userId}",
-        "error_fetching_history": "Error fetching history for user: {userId}",
-        "error_fetching_top_tracks": "Error fetching top tracks",
-        "tracks_array_empty": "Tracks array is empty",
-        "added_batch": "Added {count} tracks to queue for guild: {guildId}",
-        "error_adding_tracks": "Error adding tracks to queue",
-        "missing_required_parameters": "Missing required parameters"
     }
 }

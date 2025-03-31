@@ -20,5 +20,21 @@
 			"transactionCommitted": "Транзакция подтверждена",
 			"transactionRollback": "Откат транзакции"
 		}
-	}
+	},
+    "queue": {
+        "error_adding_track": "Ошибка добавления трека: {trackId}",
+        "guild_id_required": "Требуется ID сервера",
+        "error_retrieving_track": "Ошибка получения трека для сервера: {guildId}",
+        "error_fetching_queue": "Ошибка получения очереди для сервера: {guildId}",
+        "error_clearing_queue": "Ошибка очистки очереди для сервера: {guildId}",
+        "error_removing_track": "Ошибка удаления трека: {trackId}",
+        "loop_set": "Установлен повтор для сервера: {guildId}",
+        "error_logging_play": "Ошибка логирования воспроизведения трека {trackId} пользователем {userId}",
+        "error_fetching_history": "Ошибка получения истории для пользователя: {userId}",
+        "error_fetching_top_tracks": "Ошибка получения популярных треков",
+        "tracks_array_empty": "Массив треков пуст",
+        "added_batch": "Добавлено {count} треков в очередь для сервера: {guildId}",
+        "error_adding_tracks": "Ошибка добавления треков в очередь",
+        "missing_required_parameters": "Отсутствуют необходимые параметры"
+    }
 }

@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  output   = ".././.prisma"
 }
 
 datasource db {
@@ -22,15 +23,15 @@ model Queue {
 }
 
 model Tracks {
-  id        Int       @id @default(autoincrement())
-  trackId   String
-  addedAt   BigInt
-  priority  Boolean   @default(false)
-  info      String
-  source    String
+  id          Int     @id @default(autoincrement())
+  trackId     String
+  addedAt     BigInt
+  priority    Boolean @default(false)
+  info        String
+  source      String
   requestedBy String?
-  queueId   Int
-  Queue     Queue     @relation(fields: [queueId], references: [id])
+  queueId     Int
+  Queue       Queue   @relation(fields: [queueId], references: [id])
 
   @@index([trackId])
   @@index([queueId])
@@ -47,12 +48,12 @@ model GlobalHistory {
 }
 
 model UserHistory {
-  id        Int      @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   requestedBy String
-  trackId   String
-  info      String
-  playedAt  DateTime @default(now())
-  playCount Int      @default(1)
+  trackId     String
+  info        String
+  playedAt    DateTime @default(now())
+  playCount   Int      @default(1)
 
   @@index([requestedBy, trackId])
 }

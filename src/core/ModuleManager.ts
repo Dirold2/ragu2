@@ -1,117 +1,165 @@
 import { EventEmitter } from "events";
 import { Module } from "./Module.js";
 import { ModuleHealth } from "./ModuleHealth.js";
-import { ModuleConfig } from "./ModuleConfig.js";
+import { ModuleConfig, ModuleConfigData } from "./ModuleConfig.js";
 import { createLogger } from "../utils/logger.js";
 import fs from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "url";
 import { dirname } from "dirname-filename-esm";
 import { ModuleState, type ModuleConstructor } from "../types/index.js";
-import { clear } from "console";
+import { ModuleMemoryInspector } from "./ModuleMemoryInspector.js";
 
 const __dirname = dirname(import.meta);
+
+/**
+ * Options for the ModuleManager constructor
+ */
+interface ModuleManagerOptions {
+	modulesPath?: string;
+	configPath?: string;
+	autoStart?: boolean;
+}
 
 /**
  * Manages the lifecycle of all modules in the application.
  * Handles loading, initialization, starting, and stopping modules.
  */
 export class ModuleManager extends EventEmitter {
-	private modules: Map<string, Module>;
-	private initialized: boolean;
+	private modules: Map<string, Module> = new Map();
+	private initialized = false;
 	private modulesPath: string;
-	private logger = createLogger("ModuleManager");
+	private logger = createLogger("core");
 	private startupTimestamp = 0;
-	private moduleLoadPromises: Map<string, Promise<void>> = new Map();
+	private moduleLoadPromises: Map<string, Promise<"loaded" | "disabled">> =
+		new Map();
 	private health: ModuleHealth;
 	private config: ModuleConfig;
+	private autoStart: boolean;
+	private memoryInspector: ModuleMemoryInspector;
 
-	constructor(options?: { modulesPath?: string; configPath?: string }) {
+	/**
+	 * Creates a new ModuleManager instance
+	 * @param options Configuration options
+	 */
+	constructor(options?: ModuleManagerOptions) {
 		super();
-		this.modules = new Map();
-		this.initialized = false;
 		this.modulesPath =
 			options?.modulesPath || path.resolve(__dirname, "../modules");
 		this.health = new ModuleHealth();
 		this.config = new ModuleConfig(options?.configPath);
+		this.autoStart = options?.autoStart ?? true;
+
+		// Создаем инспектор памяти с отключенным автозапуском
+		this.memoryInspector = new ModuleMemoryInspector(this, {
+			autoStart: false,
+		});
+
+		// Подписываемся на события инспектора памяти
+		this.memoryInspector.on("memoryLeakDetected", (results) => {
+			this.logger.warn(`Detected ${results.length} potential memory leaks`);
+
+			// Можно добавить дополнительные действия, например, отправку уведомлений
+			this.emit("memoryLeaks", results);
+		});
 
 		// Set up error handling
 		this.on("error", this.handleManagerError.bind(this));
-
-		// Handle process termination signals
-		process.on("SIGINT", this.handleShutdown.bind(this));
-		process.on("SIGTERM", this.handleShutdown.bind(this));
+		this.on("moduleError", (error, moduleName, operation) => {
+			this.emit("error", error, moduleName, operation);
+		});
 	}
 
 	/**
 	 * Load all modules from the modules directory
 	 */
 	public async loadModules(): Promise<void> {
-		this.startupTimestamp = Date.now();
-
-		// Clear console for better visibility during startup
-		if (process.env.NODE_ENV !== "test") {
-			clear();
-		}
-
-		// Load module configurations
-		await this.config.loadAllConfigs();
+		this.startupTimestamp = performance.now();
 
 		this.logger.info({
 			message: "Starting module discovery...",
-			moduleState: ModuleState.INITIALIZING,
+			moduleState: ModuleState.STARTING,
 		});
 
 		try {
+			// Load module configurations first
+			await this.config.loadAllConfigs();
+
+			// Get all directories in the modules path
 			const files = await fs.readdir(this.modulesPath);
-			const moduleDirectories = (
-				await Promise.all(
-					files.map(async (file) => {
-						const fullPath = path.join(this.modulesPath, file);
+			const moduleDirectories = await Promise.all(
+				files.map(async (file) => {
+					const fullPath = path.join(this.modulesPath, file);
+					try {
 						const stat = await fs.stat(fullPath);
 						return stat.isDirectory() ? file : null;
-					}),
-				)
-			).filter((dir): dir is string => dir !== null);
+					} catch (e) {
+						this.logger.error({
+							message: `Failed to load module from ${fullPath}: ${e}`,
+							error: e,
+							moduleState: ModuleState.ERROR,
+						});
+						return null;
+					}
+				}),
+			);
+
+			// Filter out null values
+			const validDirectories = moduleDirectories.filter(
+				(dir): dir is string => dir !== null,
+			);
 
 			let loadedCount = 0;
-			const disabledCount = 0;
+			let disabledCount = 0;
 			let errorCount = 0;
 
-			// Load modules in parallel
-			const loadPromises = moduleDirectories.map(async (dir) => {
-				const isDevMode = process.env.NODE_ENV === "development";
-				const moduleFileName = `module.${isDevMode ? "ts" : "js"}`;
-				const modulePath = String(
-					pathToFileURL(path.join(this.modulesPath, dir, moduleFileName)),
-				);
+			// Load modules in parallel for better performance
+			await Promise.all(
+				validDirectories.map(async (dir) => {
+					try {
+						// Check if we're already loading this module
+						if (this.moduleLoadPromises.has(dir)) {
+							await this.moduleLoadPromises.get(dir);
+							return;
+						}
 
-				try {
-					if (this.moduleLoadPromises.has(dir)) {
-						return this.moduleLoadPromises.get(dir);
+						// Determine file extension based on environment
+						const isDevMode = process.env.NODE_ENV === "development";
+						const moduleFileName = `module.${isDevMode ? "ts" : "js"}`;
+						const modulePath = String(
+							pathToFileURL(path.join(this.modulesPath, dir, moduleFileName)),
+						);
+
+						// Create and store the loading promise
+						const loadPromise = this.loadModuleFromPath(modulePath, dir);
+						this.moduleLoadPromises.set(dir, loadPromise);
+
+						// Wait for module to load
+						const result = await loadPromise;
+
+						if (result === "loaded") {
+							loadedCount++;
+						} else if (result === "disabled") {
+							disabledCount++;
+						}
+					} catch (error) {
+						errorCount++;
+						this.logger.error({
+							message: `Failed to load module from ${dir}: ${error}`,
+							error,
+							moduleState: ModuleState.ERROR,
+						});
+						throw error;
 					}
+				}),
+			);
 
-					const loadPromise = this.loadModuleFromPath(modulePath, dir);
-					this.moduleLoadPromises.set(dir, loadPromise);
-
-					await loadPromise;
-					loadedCount++;
-				} catch (error) {
-					errorCount++;
-					this.logger.error({
-						message: `Failed to load module from ${dir}:`,
-						error,
-						moduleState: ModuleState.ERROR,
-					});
-				}
-			});
-
-			await Promise.all(loadPromises);
-
+			const elapsedTime = (performance.now() - this.startupTimestamp).toFixed(
+				2,
+			);
 			this.logger.info({
-				message: `Module discovery: ${loadedCount} loaded, ${disabledCount} disabled, ${errorCount} failed`,
-				moduleState:
-					loadedCount > 0 ? ModuleState.INITIALIZED : ModuleState.ERROR,
+				message: `Module discovery completed in ${elapsedTime}ms: ${loadedCount} loaded, ${disabledCount} disabled, ${errorCount} failed`,
+				moduleState: loadedCount > 0 ? ModuleState.STARTING : ModuleState.ERROR,
 			});
 
 			// Validate dependencies
@@ -128,11 +176,12 @@ export class ModuleManager extends EventEmitter {
 
 	/**
 	 * Load a module from a specific path
+	 * @returns "loaded" if module was loaded, "disabled" if module was disabled
 	 */
 	private async loadModuleFromPath(
 		modulePath: string,
 		dir: string,
-	): Promise<void> {
+	): Promise<"loaded" | "disabled"> {
 		try {
 			const moduleImport = await import(modulePath);
 			const ModuleClass = moduleImport.default;
@@ -142,20 +191,27 @@ export class ModuleManager extends EventEmitter {
 					message: `Invalid module in ${dir}: Module class must extend the base Module class`,
 					moduleState: ModuleState.WARNING,
 				});
-				return;
+				throw new Error(`Invalid module in ${dir}: Not a Module subclass`);
 			}
 
 			const module = new ModuleClass();
 
-			// Check if module is disabled in config
+			// Важно: устанавливаем ссылку на ModuleManager сразу после создания модуля
+			module.setModuleManager(this);
+
+			// Check if module is disabled in config or metadata
 			const moduleConfig = this.config.getConfig(module.name);
 			const isDisabled = module.disabled || moduleConfig.disabled === true;
 
 			if (isDisabled) {
-				return;
+				if (process.env.LOG_LEVEL === "debug") {
+					this.logger.debug(`Module ${module.name} is disabled, skipping`);
+				}
+				return "disabled";
 			}
 
 			await this.registerModule(module);
+			return "loaded";
 		} catch (error) {
 			this.logger.error({
 				message: `Error loading module from ${modulePath}:`,
@@ -200,6 +256,9 @@ export class ModuleManager extends EventEmitter {
 				}
 			},
 		);
+
+		// Важно: устанавливаем ссылку на ModuleManager еще раз для гарантии
+		module.setModuleManager(this);
 
 		this.modules.set(module.name, module);
 
@@ -248,7 +307,7 @@ export class ModuleManager extends EventEmitter {
 
 		this.logger.info({
 			message: "Initializing modules...",
-			moduleState: ModuleState.INITIALIZING,
+			moduleState: ModuleState.INITIALIZED,
 		});
 
 		const sortedModules = this.sortModulesByDependencies();
@@ -256,6 +315,7 @@ export class ModuleManager extends EventEmitter {
 		let initializedCount = 0;
 		let errorCount = 0;
 
+		// Initialize modules sequentially in dependency order
 		for (const module of sortedModules) {
 			try {
 				const currentState = module.getState();
@@ -264,26 +324,29 @@ export class ModuleManager extends EventEmitter {
 					continue;
 				}
 
+				// Track initialization performance
+				this.health.trackStart(module, "initialize");
 				await module.initialize();
+				this.health.trackEnd(
+					module,
+					"initialize",
+					module.getState() === ModuleState.INITIALIZED,
+				);
+
 				initializedCount++;
 			} catch (error) {
 				errorCount++;
 				this.logger.error({
-					message: `Failed to initialize module: ${module.name.toUpperCase()}`,
+					message: `Failed to initialize module: ${module.name}`,
 					moduleState: ModuleState.ERROR,
 					error,
 				});
-				this.emit(
-					"moduleError",
-					error,
-					module.name.toUpperCase(),
-					"initialization",
-				);
+				this.emit("moduleError", error, module.name, "initialization");
 			}
 		}
 
 		this.initialized = true;
-		const elapsedTime = Date.now() - this.startupTimestamp;
+		const elapsedTime = (performance.now() - this.startupTimestamp).toFixed(2);
 		this.logger.info({
 			message: `Module initialization completed in ${elapsedTime}ms: ${initializedCount}/${totalModules} initialized`,
 			moduleState: ModuleState.INITIALIZED,
@@ -294,6 +357,21 @@ export class ModuleManager extends EventEmitter {
 				message: `${errorCount} modules failed to initialize`,
 				moduleState: ModuleState.WARNING,
 			});
+		}
+
+		// Запустить инспектор памяти после инициализации модулей
+		if (!this.memoryInspector.isRunning()) {
+			this.memoryInspector.start();
+			if (process.env.LOG_LEVEL === "debug") {
+				this.logger.debug(
+					"Module memory inspector started after initialization",
+				);
+			}
+		}
+
+		// Auto-start modules if configured
+		if (this.autoStart) {
+			await this.startModules();
 		}
 	}
 
@@ -352,19 +430,21 @@ export class ModuleManager extends EventEmitter {
 			} catch (error) {
 				errorCount++;
 				this.logger.error({
-					message: `Failed to start module: ${module.name.toUpperCase()}`,
+					message: `Failed to start module: ${module.name}`,
 					moduleState: ModuleState.ERROR,
 					error,
 				});
-				this.emit("moduleError", error, module.name.toUpperCase(), "start");
+				this.emit("moduleError", error, module.name, "start");
 			}
 		}
 
-		const elapsedTime = Date.now() - this.startupTimestamp;
+		const elapsedTime = (performance.now() - this.startupTimestamp).toFixed(2);
 		this.logger.info({
 			message: `Module startup completed in ${elapsedTime}ms: ${startedCount}/${totalModules} started`,
 			moduleState:
-				startedCount === totalModules ? ModuleState.RUNNING : ModuleState.ERROR,
+				startedCount === totalModules
+					? ModuleState.STARTING
+					: ModuleState.ERROR,
 		});
 
 		if (errorCount > 0) {
@@ -381,13 +461,26 @@ export class ModuleManager extends EventEmitter {
 	 * Stop all modules in reverse dependency order
 	 */
 	public async stopModules(): Promise<void> {
+		// Остановить инспектор памяти перед остановкой модулей
+		if (this.memoryInspector.isRunning()) {
+			this.memoryInspector.stop();
+			if (process.env.LOG_LEVEL === "debug") {
+				this.logger.debug(
+					"Module memory inspector stopped before module shutdown",
+				);
+			}
+		}
+
 		// Reverse the order to stop modules in the correct order
 		const sortedModules = this.sortModulesByDependencies().reverse();
 		const totalModules = sortedModules.length;
 		let stoppedCount = 0;
 		let errorCount = 0;
 
-		this.logger.info("Stopping modules...");
+		this.logger.info({
+			message: "Stopping modules...",
+			moduleState: ModuleState.STOPPING,
+		});
 
 		for (const module of sortedModules) {
 			try {
@@ -401,10 +494,7 @@ export class ModuleManager extends EventEmitter {
 
 				// Track stop operation
 				this.health.trackStart(module, "stop");
-
 				await module.stop();
-
-				// Track end of stop operation
 				this.health.trackEnd(
 					module,
 					"stop",
@@ -418,20 +508,21 @@ export class ModuleManager extends EventEmitter {
 			} catch (error) {
 				errorCount++;
 				this.logger.error({
-					message: `Failed to stop module: ${module.name.toUpperCase()}`,
+					message: `Failed to stop module: ${module.name}`,
 					moduleState: ModuleState.ERROR,
 					error,
 				});
 
 				// Continue with other modules instead of throwing
-				this.emit("moduleError", error, module.name.toUpperCase(), "stop");
+				this.emit("moduleError", error, module.name, "stop");
 			}
 		}
 
 		this.initialized = false;
-		this.logger.info(
-			`Module shutdown completed: ${stoppedCount} stopped, ${errorCount} failed`,
-		);
+		this.logger.info({
+			message: `Module shutdown completed: ${stoppedCount} stopped, ${errorCount} failed`,
+			moduleState: ModuleState.STOPPED,
+		});
 	}
 
 	/**
@@ -482,6 +573,7 @@ export class ModuleManager extends EventEmitter {
 
 	/**
 	 * Get a module by name with type safety
+	 * @example getModule<typeof import("../modules/bot/module.js").default>("bot")
 	 */
 	public getModule<T extends Module>(name: string): T | undefined {
 		return this.modules.get(name) as T | undefined;
@@ -514,7 +606,7 @@ export class ModuleManager extends EventEmitter {
 				disabled: module.disabled,
 				dependencies: module.dependencies,
 				version: module.version,
-				hasError: module.getError() !== null,
+				hasError: module.hasError(),
 				metrics: metrics
 					? {
 							initTime:
@@ -535,27 +627,12 @@ export class ModuleManager extends EventEmitter {
 	}
 
 	/**
-	 * Get exports from a module
+	 * Get exports from a module with type safety
+	 * @example getModuleExports<typeof import("../modules/bot/module.js").default["exports"]>("bot")
 	 */
-	public getModuleExports<T = unknown>(moduleName: string): T | undefined {
+	public getModuleExports<T>(moduleName: string): T | undefined {
 		const module = this.modules.get(moduleName);
-		if (!module) {
-			this.logger.warn(
-				`Attempted to get exports from non-existent module: ${moduleName}`,
-			);
-			return undefined;
-		}
-
-		if (
-			module.getState() !== ModuleState.RUNNING &&
-			module.getState() !== ModuleState.INITIALIZED
-		) {
-			this.logger.warn(
-				`Attempted to get exports from module ${moduleName} in state ${module.getState()}`,
-			);
-		}
-
-		return module.exports as T;
+		return module ? (module.exports as T) : undefined;
 	}
 
 	/**
@@ -570,21 +647,6 @@ export class ModuleManager extends EventEmitter {
 			`ModuleManager error${moduleName ? ` in module ${moduleName}` : ""}${operation ? ` during ${operation}` : ""}:`,
 			error,
 		);
-	}
-
-	/**
-	 * Handle process shutdown signals
-	 */
-	private async handleShutdown(signal: string): Promise<void> {
-		this.logger.info(`Received ${signal} signal, shutting down...`);
-		try {
-			await this.stopModules();
-			this.logger.info("Shutdown complete");
-			process.exit(0);
-		} catch (error) {
-			this.logger.error("Error during shutdown:", error);
-			process.exit(1);
-		}
 	}
 
 	/**
@@ -683,7 +745,9 @@ export class ModuleManager extends EventEmitter {
 	/**
 	 * Get module configuration
 	 */
-	public getModuleConfig<T = Record<string, any>>(moduleName: string): T {
+	public getModuleConfig<T extends ModuleConfigData = ModuleConfigData>(
+		moduleName: string,
+	): T {
 		return this.config.getConfig<T>(moduleName);
 	}
 
@@ -692,8 +756,86 @@ export class ModuleManager extends EventEmitter {
 	 */
 	public async updateModuleConfig(
 		moduleName: string,
-		updates: Record<string, any>,
-	): Promise<Record<string, any>> {
+		updates: Record<string, unknown>,
+	): Promise<Record<string, unknown>> {
 		return this.config.updateConfig(moduleName, updates);
+	}
+
+	/**
+	 * Get the path to a module's directory
+	 */
+	public getModulePath(moduleName: string): string | undefined {
+		// Возвращаем путь к директории модуля
+		return path.join(this.modulesPath, moduleName);
+	}
+
+	/**
+	 * Получает инспектор памяти модулей
+	 */
+	public getMemoryInspector(): ModuleMemoryInspector {
+		return this.memoryInspector;
+	}
+
+	/**
+	 * Запустить анализ памяти и вернуть результаты
+	 */
+	public async analyzeMemory(): Promise<{
+		leaks: Array<{
+			moduleName: string;
+			severity: "low" | "medium" | "high";
+			growthRate: number;
+			recommendation: string;
+		}>;
+		report: {
+			totalHeapUsed: number;
+			totalHeapTotal: number;
+			moduleStats: Array<{
+				moduleName: string;
+				heapGrowth: number;
+				growthRate: number;
+				leakProbability: "none" | "low" | "medium" | "high";
+			}>;
+		};
+	}> {
+		// Убедимся, что инспектор запущен
+		if (!this.memoryInspector.isRunning()) {
+			this.memoryInspector.start();
+		}
+
+		// Сделать снимок
+		this.memoryInspector.takeSnapshot();
+
+		// Подождать немного для более точных результатов
+		await new Promise((resolve) => setTimeout(resolve, 5000));
+
+		// Сделать еще один снимок
+		this.memoryInspector.takeSnapshot();
+
+		// Проанализировать использование памяти
+		const leaks = this.memoryInspector.analyzeMemoryUsage();
+
+		// Сгенерировать отчет
+		const report = this.memoryInspector.generateMemoryReport();
+
+		return {
+			leaks: leaks.map((leak) => ({
+				moduleName: leak.moduleName,
+				severity: leak.severity,
+				growthRate: leak.growthRate,
+				recommendation: leak.recommendation,
+			})),
+			report: {
+				totalHeapUsed: report.totalHeapUsed,
+				totalHeapTotal: report.totalHeapTotal,
+				moduleStats: report.moduleStats,
+			},
+		};
+	}
+
+	/**
+	 * Очистить все снимки памяти
+	 */
+	public clearMemorySnapshots(): void {
+		this.memoryInspector.clearSnapshots();
 	}
 }

@@ -52,7 +52,7 @@ export interface BaseModule {
 	readonly exports?: Record<string, unknown>;
 	readonly state: ModuleState;
 	readonly logger: Logger;
-	readonly locale: I18n;
+	// readonly locale: I18n;
 
 	initialize(): Promise<void>;
 	start(): Promise<void>;
@@ -96,7 +96,7 @@ export interface ModuleConfig {
 /**
  * Options for internationalization
  */
-export interface I18nOptions<T = any> {
+export interface I18nOptions<T = undefined> {
 	category: keyof T;
 	params?: Record<string, string | number>;
 }
@@ -106,7 +106,7 @@ export interface I18nOptions<T = any> {
  */
 export interface ModuleTranslations {
 	[category: string]: {
-		[key: string]: any;
+		[key: string]: undefined;
 	};
 }
 

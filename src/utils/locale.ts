@@ -1,8 +1,8 @@
-import fs from "fs/promises";
 import path from "path";
 import { dirname } from "dirname-filename-esm";
 import { createLogger } from "./logger.js";
-
+import { ModuleState } from "../types/index.js";
+import fs from "fs/promises";
 const __dirname = dirname(import.meta);
 const logger = createLogger("locale");
 
@@ -27,7 +27,7 @@ type DotPaths<T> = T extends object
 /**
  * Public localization interface
  */
-export interface Locale<T = any> {
+export interface Locale<T = undefined> {
 	t(key: DotPaths<T>, params?: TranslationParams): string;
 }
 
@@ -35,9 +35,10 @@ export interface Locale<T = any> {
  * Private localization interface with additional methods
  * Приватный интерфейс локализации
  */
-interface LocalePrivate<T = any> extends Locale<T> {
+interface LocalePrivate<T = undefined> extends Locale<T> {
 	load(language?: string): Promise<void>;
 	setLanguage(language: string): Promise<void>;
+	setTranslations(translations: T): void;
 }
 
 /**
@@ -45,7 +46,7 @@ interface LocalePrivate<T = any> extends Locale<T> {
  * @param moduleName - Name of the module to create localization for
  * @returns Localization instance with load, setLanguage and translation methods
  */
-export function createLocale<T extends Record<string, any>>(
+export function createLocale<T extends Record<string, unknown>>(
 	moduleName: string,
 ): LocalePrivate<T> {
 	// Map to store loaded translations
@@ -66,7 +67,13 @@ export function createLocale<T extends Record<string, any>>(
 				"locales",
 				`${language}.json`,
 			);
-			const content = await fs.readFile(filePath, "utf-8");
+			let content = "";
+			if (typeof Bun !== "undefined") {
+				content = await Bun.file(filePath).text();
+			} else {
+				content = await fs.readFile(filePath, "utf-8");
+			}
+
 			translations.set(language, JSON.parse(content));
 		} catch (error) {
 			// If failed to load requested language and it's not English
@@ -79,16 +86,22 @@ export function createLocale<T extends Record<string, any>>(
 						moduleName,
 						"locales/en.json",
 					);
-					const defaultContent = await fs.readFile(defaultPath, "utf-8");
+					const defaultContent = await Bun.file(defaultPath).text();
 					translations.set("en", JSON.parse(defaultContent));
 					currentLanguage = "en";
 				} catch (fallbackError) {
-					logger.error(
-						`Failed to load both '${language}' and fallback English translations for ${moduleName}`,
-					);
+					logger.error({
+						message: `Failed to load both '${language}' and fallback English translations for ${moduleName}`,
+						moduleState: ModuleState.ERROR,
+						error: fallbackError,
+					});
 				}
 			} else {
-				logger.error(`Failed to load English translations for ${moduleName}`);
+				logger.error({
+					message: `Failed to load English translations for ${moduleName}`,
+					moduleState: ModuleState.ERROR,
+					error,
+				});
 			}
 		}
 	}
@@ -126,7 +139,12 @@ export function createLocale<T extends Record<string, any>>(
 
 		const value = String(key)
 			.split(".")
-			.reduce<any>((obj: any, k: string) => obj?.[k], trans);
+			.reduce<unknown>((obj: unknown, k: string) => {
+				if (obj && typeof obj === "object") {
+					return (obj as Record<string, unknown>)[k];
+				}
+				return undefined;
+			}, trans);
 		if (typeof value !== "string") return key;
 
 		if (!params) return value;
@@ -135,10 +153,14 @@ export function createLocale<T extends Record<string, any>>(
 			(_, k) => params[k]?.toString() ?? `{${k}}`,
 		);
 	}
+	function setTranslations(newTranslations: T): void {
+		translations.set(currentLanguage, newTranslations);
+	}
 
 	return {
 		load,
 		setLanguage,
 		t,
+		setTranslations,
 	};
 }

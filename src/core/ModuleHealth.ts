@@ -3,6 +3,32 @@ import type { ModuleState } from "../types/index.js";
 import { createLogger } from "../utils/logger.js";
 
 /**
+ * Metrics for a module operation
+ */
+export interface OperationMetrics {
+	count: number;
+	totalDuration: number;
+	failures: number;
+	lastDuration?: number;
+	avgDuration?: number;
+}
+
+/**
+ * Metrics for a module
+ */
+export interface ModuleMetrics {
+	name: string;
+	operations: {
+		initialize: OperationMetrics;
+		start: OperationMetrics;
+		stop: OperationMetrics;
+	};
+	lastState: ModuleState;
+	errorCount: number;
+	lastErrorTime?: number;
+}
+
+/**
  * Tracks health metrics for modules
  */
 export class ModuleHealth {
@@ -54,26 +80,23 @@ export class ModuleHealth {
 		// Get or create metrics for this module
 		let moduleMetrics = this.metrics.get(module.name);
 		if (!moduleMetrics) {
-			moduleMetrics = {
-				name: module.name,
-				operations: {
-					initialize: { count: 0, totalDuration: 0, failures: 0 },
-					start: { count: 0, totalDuration: 0, failures: 0 },
-					stop: { count: 0, totalDuration: 0, failures: 0 },
-				},
-				lastState: module.getState(),
-				errorCount: 0,
-			};
+			moduleMetrics = this.createDefaultMetrics(module);
 			this.metrics.set(module.name, moduleMetrics);
 		}
 
 		// Update metrics
-		moduleMetrics.operations[operation].count++;
-		moduleMetrics.operations[operation].totalDuration += duration;
+		const opMetrics = moduleMetrics.operations[operation];
+		opMetrics.count++;
+		opMetrics.totalDuration += duration;
+		opMetrics.lastDuration = duration;
+		opMetrics.avgDuration = opMetrics.totalDuration / opMetrics.count;
+
 		if (!success) {
-			moduleMetrics.operations[operation].failures++;
+			opMetrics.failures++;
 			moduleMetrics.errorCount++;
+			moduleMetrics.lastErrorTime = Date.now();
 		}
+
 		moduleMetrics.lastState = module.getState();
 
 		// Log slow operations only if they're significantly slow (over 1 second)
@@ -94,21 +117,29 @@ export class ModuleHealth {
 	public trackError(module: Module): void {
 		let moduleMetrics = this.metrics.get(module.name);
 		if (!moduleMetrics) {
-			moduleMetrics = {
-				name: module.name,
-				operations: {
-					initialize: { count: 0, totalDuration: 0, failures: 0 },
-					start: { count: 0, totalDuration: 0, failures: 0 },
-					stop: { count: 0, totalDuration: 0, failures: 0 },
-				},
-				lastState: module.getState(),
-				errorCount: 0,
-			};
+			moduleMetrics = this.createDefaultMetrics(module);
 			this.metrics.set(module.name, moduleMetrics);
 		}
 
 		moduleMetrics.errorCount++;
+		moduleMetrics.lastErrorTime = Date.now();
 		moduleMetrics.lastState = module.getState();
+	}
+
+	/**
+	 * Create default metrics for a module
+	 */
+	private createDefaultMetrics(module: Module): ModuleMetrics {
+		return {
+			name: module.name,
+			operations: {
+				initialize: { count: 0, totalDuration: 0, failures: 0 },
+				start: { count: 0, totalDuration: 0, failures: 0 },
+				stop: { count: 0, totalDuration: 0, failures: 0 },
+			},
+			lastState: module.getState(),
+			errorCount: 0,
+		};
 	}
 
 	/**
@@ -148,27 +179,63 @@ export class ModuleHealth {
 			.filter((m) => m.errorCount > 0)
 			.sort((a, b) => b.errorCount - a.errorCount);
 	}
-}
 
-/**
- * Metrics for a module
- */
-export interface ModuleMetrics {
-	name: string;
-	operations: {
-		initialize: OperationMetrics;
-		start: OperationMetrics;
-		stop: OperationMetrics;
-	};
-	lastState: ModuleState;
-	errorCount: number;
-}
+	/**
+	 * Get overall system health status
+	 */
+	public getSystemHealth(): {
+		healthy: boolean;
+		errorCount: number;
+		slowModules: number;
+		metrics: {
+			totalModules: number;
+			totalErrors: number;
+			avgInitTime: number;
+			avgStartTime: number;
+		};
+	} {
+		const metrics = this.getMetrics();
+		const totalModules = metrics.length;
+		const totalErrors = metrics.reduce((sum, m) => sum + m.errorCount, 0);
 
-/**
- * Metrics for a module operation
- */
-export interface OperationMetrics {
-	count: number;
-	totalDuration: number;
-	failures: number;
+		let totalInitTime = 0;
+		let initCount = 0;
+		let totalStartTime = 0;
+		let startCount = 0;
+
+		metrics.forEach((m) => {
+			if (m.operations.initialize.count > 0) {
+				totalInitTime += m.operations.initialize.totalDuration;
+				initCount += m.operations.initialize.count;
+			}
+
+			if (m.operations.start.count > 0) {
+				totalStartTime += m.operations.start.totalDuration;
+				startCount += m.operations.start.count;
+			}
+		});
+
+		const avgInitTime = initCount > 0 ? totalInitTime / initCount : 0;
+		const avgStartTime = startCount > 0 ? totalStartTime / startCount : 0;
+
+		// Count modules that are significantly slower than average
+		const slowThreshold = avgInitTime * 2;
+		const slowModules = metrics.filter(
+			(m) =>
+				m.operations.initialize.avgDuration &&
+				m.operations.initialize.avgDuration > slowThreshold,
+		).length;
+
+		return {
+			healthy: totalErrors === 0,
+			errorCount: totalErrors,
+			slowModules,
+			metrics: {
+				totalModules,
+				totalErrors,
+				avgInitTime,
+				avgStartTime,
+			},
+		};
+	}
 }

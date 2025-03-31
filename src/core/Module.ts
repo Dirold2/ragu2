@@ -2,27 +2,27 @@ import { EventEmitter } from "events";
 import type { BaseModule, ModuleMetadata } from "../types/index.js";
 import { ModuleState } from "../types/index.js";
 import { createLogger, createLocale } from "../utils/index.js";
+import path from "path";
+import fs from "node:fs";
+import type { ModuleManager } from "./ModuleManager.js";
 
 /**
  * Abstract base class for all modules in the application.
  * Provides lifecycle management, dependency injection, and error handling.
- *
- * @template TExports - Type of exports this module provides
- * @template TImports - Type of imports this module requires
  */
-export abstract class Module<
-		TExports extends Record<string, unknown> = Record<string, unknown>,
-		TImports extends Record<string, unknown> = Record<string, unknown>,
-	>
-	extends EventEmitter
-	implements BaseModule
-{
+export abstract class Module extends EventEmitter implements BaseModule {
 	protected _state: ModuleState = ModuleState.UNINITIALIZED;
 	protected _error: Error | null = null;
-	protected _imports: TImports = {} as TImports;
 	protected _logger: ReturnType<typeof createLogger>;
 	protected _locale: ReturnType<typeof createLocale>;
+	protected _localeImport?: Record<string, unknown>;
 	private _moduleInitialized = false;
+	private _startTime = 0;
+
+	/**
+	 * Reference to the ModuleManager for inter-module communication
+	 */
+	protected moduleManager?: ModuleManager;
 
 	/**
 	 * Module metadata must be defined by all concrete module implementations
@@ -32,7 +32,7 @@ export abstract class Module<
 	/**
 	 * Optional exports that this module provides to other modules
 	 */
-	public readonly exports?: TExports;
+	public readonly exports: Record<string, unknown> = {};
 
 	constructor() {
 		super();
@@ -55,18 +55,102 @@ export abstract class Module<
 	}
 
 	/**
+	 * Set the ModuleManager reference for inter-module communication
+	 */
+	public setModuleManager(manager: ModuleManager): void {
+		this.moduleManager = manager;
+
+		// Добавим логирование для отладки
+		if (process.env.LOG_LEVEL === "debug") {
+			this.logger.debug(
+				`ModuleManager reference set for module ${this.name || "unknown"}`,
+			);
+		}
+	}
+
+	/**
+	 * Get a module instance by name with type safety using typeof import
+	 * @example getModuleInstance<typeof import("../modules/bot/module.js").default>("bot")
+	 */
+	protected getModuleInstance<T extends Module>(
+		moduleName: string,
+	): T | undefined {
+		if (!this.moduleManager) {
+			this.logger.warn(
+				`ModuleManager not available in ${this.name}, cannot get module ${moduleName}`,
+			);
+			return undefined;
+		}
+		return this.moduleManager.getModule<T>(moduleName);
+	}
+
+	/**
+	 * Get exports from another module by name with type safety
+	 * @example getExportsFromModule<typeof import("../modules/bot/module.js").default["exports"]>("bot")
+	 */
+	protected getExportsFromModule<T = unknown>(
+		moduleName: string,
+	): T | undefined {
+		if (!this.moduleManager) {
+			this.logger.warn(
+				`ModuleManager not available in ${this.name}, cannot get exports from module ${moduleName}`,
+			);
+			return undefined;
+		}
+		return this.moduleManager.getModuleExports<T>(moduleName);
+	}
+
+	/**
 	 * Extracts the module name from the stack trace
 	 * This is a fallback method used before metadata is available
 	 */
 	private getModuleName(): string {
 		try {
-			const stack = new Error().stack?.split("\n");
-			const modulePath = stack
-				?.find((line) => line.includes("/modules/"))
-				?.match(/\/modules\/([^/]+)\//)?.[1];
+			// Получаем путь к директории модулей
+			let modulesDir: string;
 
-			return modulePath || "unknown-module";
+			if (typeof Bun !== "undefined") {
+				// Bun environment
+				modulesDir = path.resolve(
+					path.dirname(Bun.fileURLToPath(import.meta.url)),
+					"../modules",
+				);
+			} else {
+				// Node environment
+				modulesDir = path.resolve(
+					path.dirname(new URL(import.meta.url).pathname),
+					"../modules",
+				);
+			}
+
+			// Получаем стек вызовов для определения вызывающего файла
+			const stack = new Error().stack || "";
+			const stackLines = stack.split("\n");
+
+			// Ищем в стеке путь, который содержит /modules/
+			for (const line of stackLines) {
+				const match = line.match(/\/modules\/([^\/]+)/);
+				if (match && match[1]) {
+					return match[1];
+				}
+			}
+
+			// Если не удалось найти по стеку, пробуем по списку модулей
+			if (fs.existsSync(modulesDir)) {
+				const moduleFolders = fs
+					.readdirSync(modulesDir, { withFileTypes: true })
+					.filter((dirent) => dirent.isDirectory())
+					.map((dirent) => dirent.name);
+
+				// Если есть только один модуль, возвращаем его
+				if (moduleFolders.length === 1) {
+					return moduleFolders[0];
+				}
+			}
+
+			return "unknown-module";
 		} catch (error) {
+			console.error("Error extracting module name from file path:", error);
 			return "unknown-module";
 		}
 	}
@@ -82,28 +166,35 @@ export abstract class Module<
 		return this._logger;
 	}
 
-	/**
-	 * Localization helper for this module
-	 */
-	public get locale() {
-		if (!this._moduleInitialized && this.metadata?.name) {
-			this._locale = createLocale(this.metadata.name);
-			this._moduleInitialized = true;
-		}
-		return this._locale;
-	}
+	// /**
+	//  * Localization helper for this module
+	//  */
+	// public get locale() {
+	// 	if (!this._moduleInitialized && this.metadata?.name) {
+	// 		type mm = this.moduleManager?.getModulePath(this.metadata.name)!;
+	// 		const localePath = path.join(mm || "", "locales", "en.json");
 
-	// Metadata accessors
+	// 		this.logger.info(localePath);
+
+	// 		// Создаем локализацию с именем модуля
+	// 		// TODO: Добавить автоматическую загрузку локализаций из директории модуля
+	// 		this._locale = createLocale<typeof import(`${mm as string}`)>(this.metadata.name);
+	// 		this._moduleInitialized = true;
+	// 	}
+	// 	return this._locale;
+	// }
+
+	// Metadata accessors with defaults for safety
 	public get name(): string {
-		return this.metadata.name;
+		return this.metadata.name || "unnamed-module";
 	}
 
 	public get description(): string {
-		return this.metadata.description;
+		return this.metadata.description || "";
 	}
 
 	public get version(): string {
-		return this.metadata.version;
+		return this.metadata.version || "0.0.0";
 	}
 
 	public get dependencies(): string[] {
@@ -115,7 +206,7 @@ export abstract class Module<
 	}
 
 	public get priority(): number {
-		return this.metadata.priority || 50;
+		return this.metadata.priority ?? 50; // Default priority is 50
 	}
 
 	public get state(): ModuleState {
@@ -134,6 +225,8 @@ export abstract class Module<
 			return;
 		}
 
+		this._startTime = performance.now();
+
 		try {
 			this.setState(ModuleState.INITIALIZING);
 
@@ -146,7 +239,12 @@ export abstract class Module<
 			await this.onInitialize();
 
 			this.setState(ModuleState.INITIALIZED);
-			this.logger.info(`Module ${this.name} initialized`);
+
+			const initTime = performance.now() - this._startTime;
+			this.logger.info({
+				message: `Module ${this.name} initialized in ${initTime.toFixed(2)}ms`,
+				moduleState: ModuleState.INITIALIZED,
+			});
 		} catch (error) {
 			this.handleError("initialization", error);
 			throw error;
@@ -168,6 +266,8 @@ export abstract class Module<
 			return;
 		}
 
+		this._startTime = performance.now();
+
 		try {
 			this.setState(ModuleState.STARTING);
 
@@ -180,10 +280,15 @@ export abstract class Module<
 			await this.onStart();
 
 			this.setState(ModuleState.RUNNING);
-			this.logger.info(`Module ${this.name} started`);
+
+			const startTime = performance.now() - this._startTime;
+			this.logger.info({
+				message: `Module ${this.name} started in ${startTime.toFixed(2)}ms`,
+				moduleState: ModuleState.STARTING,
+			});
 		} catch (error) {
 			this.handleError("start", error);
-			throw error;	
+			throw error;
 		}
 	}
 
@@ -199,6 +304,8 @@ export abstract class Module<
 			return;
 		}
 
+		this._startTime = performance.now();
+
 		try {
 			this.setState(ModuleState.STOPPING);
 
@@ -211,7 +318,11 @@ export abstract class Module<
 			await this.onStop();
 
 			this.setState(ModuleState.STOPPED);
-			this.logger.info(`Module ${this.name} stopped`);
+
+			const stopTime = performance.now() - this._startTime;
+			this.logger.info(
+				`Module ${this.name} stopped in ${stopTime.toFixed(2)}ms`,
+			);
 		} catch (error) {
 			this.handleError("stop", error);
 			throw error;
@@ -225,7 +336,7 @@ export abstract class Module<
 		this.logger.info(`Restarting module ${this.name}...`);
 		await this.stop();
 		await this.start();
-		// Remove redundant log
+		this.logger.info(`Module ${this.name} restarted successfully`);
 	}
 
 	/**
@@ -256,53 +367,6 @@ export abstract class Module<
 	}
 
 	/**
-	 * Get exports from a dependency module
-	 * @throws Error if the module is not found in imports
-	 */
-	protected getModuleExports<T>(moduleName: string): T {
-		const moduleExports = this._imports[moduleName];
-	
-		if (!moduleExports) {
-			const errorMessage = `Модуль ${moduleName.toUpperCase()} не найден в импортах. Проверьте, что он указан в зависимостях.`;
-			
-			// Log detailed error information
-			this.logger.error({
-				message: errorMessage,
-				moduleState: ModuleState.ERROR,
-				error: new Error(errorMessage),
-			});
-			
-			// Дополнительные проверки и логирование
-			if (!this.metadata?.dependencies?.includes(moduleName)) {
-				this.logger.warn({
-					message: `Модуль ${moduleName.toUpperCase()} не указан в зависимостях ${this.metadata?.name?.toUpperCase()}.`,
-					moduleState: ModuleState.WARNING,
-				});
-			}
-	
-			if (Object.keys(this._imports).length === 0) {
-				this.logger.warn({
-					message: `В ${this.metadata.name.toUpperCase()} не было импортировано ни одного модуля.`,
-					moduleState: ModuleState.WARNING,
-				});
-			}
-			
-			// Исключение выбрасывается только один раз
-			throw new Error(errorMessage);
-		}
-	
-		return moduleExports as T;
-	}
-
-	/**
-	 * Set the imports for this module
-	 * This is called by the ModuleManager during initialization
-	 */
-	protected setImports(imports: TImports): void {
-		this._imports = imports;
-	}
-
-	/**
 	 * Handle an error that occurred during module lifecycle
 	 */
 	protected handleError(operation: string, error: unknown): void {
@@ -311,7 +375,7 @@ export abstract class Module<
 
 		// Log detailed error information
 		this.logger.error({
-			message: `Error during module ${operation} in ${this.name.toUpperCase()}:`,
+			message: `Error during module ${operation} in ${this.name}:`,
 			operation,
 			error: this._error,
 			stack: this._error.stack,
@@ -351,6 +415,16 @@ export abstract class Module<
 	 */
 	public hasError(): boolean {
 		return this._state === ModuleState.ERROR || this._error !== null;
+	}
+
+	/**
+	 * Get uptime of the module in milliseconds
+	 */
+	public getUptime(): number {
+		if (this._state !== ModuleState.RUNNING) {
+			return 0;
+		}
+		return this._startTime > 0 ? performance.now() - this._startTime : 0;
 	}
 
 	// Abstract methods to be implemented by concrete modules

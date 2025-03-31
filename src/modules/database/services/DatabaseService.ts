@@ -1,5 +1,8 @@
-import { PrismaClient } from "@prisma/client";
-import type { DatabaseExports } from "../types/index.js";
+import { PrismaClient } from "#prisma/default.js";
+
+type DatabaseExports = {
+	getPrismaClient: () => PrismaClient;
+};
 
 export class DatabaseService implements DatabaseExports {
 	private static instance: DatabaseService;

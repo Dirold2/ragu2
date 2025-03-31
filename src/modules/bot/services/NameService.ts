@@ -14,20 +14,25 @@ import { trackPlayCounter } from "../utils/index.js";
 import type {
 	PlayerManager,
 	PluginManager,
-	QueueService,
 	SearchTrackResult,
 	Track,
 } from "./index.js";
 import { bot } from "../bot.js";
 
+// Улучшенная схема валидации с использованием Zod
 const TrackUrlSchema = z.string().url();
+
+// Константы вынесены для лучшей читаемости
 const BATCH_SIZE = 5;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
 
+/**
+ * Сервис для поиска и обработки музыкальных треков
+ */
 export default class NameService {
 	constructor(
-		private readonly queueService: QueueService,
+		private readonly queueService = bot.queueService,
 		private readonly playerManager: PlayerManager,
 		private readonly pluginManager: PluginManager,
 	) {}
@@ -36,10 +41,7 @@ export default class NameService {
 	private readonly locale = bot.locale;
 
 	/**
-	 * @en Searches for a track or URL
-	 * @ru Ищет трек или URL
-	 * @param {string} trackName - Track name or URL
-	 * @returns {Promise<SearchTrackResult[]>} Array of search results
+	 * Ищет трек или URL
 	 */
 	async searchName(trackName: string): Promise<SearchTrackResult[]> {
 		this.logger.debug(
@@ -50,17 +52,14 @@ export default class NameService {
 		const trimmedName = trackName.trim();
 		if (!trimmedName) return [];
 
+		// Используем Zod для валидации URL
 		return TrackUrlSchema.safeParse(trimmedName).success
 			? this.searchAndProcessURL(trimmedName)
 			: this.searchAcrossPlugins(trimmedName);
 	}
 
 	/**
-	 * @en Processes track and URL
-	 * @ru Обрабатывает трек и URL
-	 * @param {string} url - URL for search
-	 * @param {SearchTrackResult[]} track - Search results
-	 * @param {CommandInteraction} interaction - Discord command interaction
+	 * Обрабатывает трек и URL
 	 */
 	async trackAndUrl(
 		url: string,
@@ -77,18 +76,21 @@ export default class NameService {
 			return;
 		}
 
-		if (plugin.includesUrl && (await plugin.includesUrl(url))) {
-			await bot.nameService.processPlaylist(url, interaction);
+		// Исправляем условие для проверки includesUrl
+		if (plugin.includesUrl) {
+			const includesUrl = await plugin.includesUrl(url);
+			if (includesUrl) {
+				await this.processPlaylist(url, interaction);
+			} else {
+				await this.processTrackSelection(track[0], interaction);
+			}
 		} else {
-			await bot.nameService.processTrackSelection(track[0], interaction);
+			await this.processTrackSelection(track[0], interaction);
 		}
 	}
 
 	/**
-	 * @en Processes track selection and adds it to the queue
-	 * @ru Обрабатывает выбор трека и добавляет его в очередь
-	 * @param {SearchTrackResult} selectedTrack - Selected track information
-	 * @param {CommandInteraction} interaction - Discord command interaction
+	 * Обрабатывает выбор трека и добавляет его в очередь
 	 */
 	async processTrackSelection(
 		selectedTrack: SearchTrackResult,
@@ -120,11 +122,7 @@ export default class NameService {
 	}
 
 	/**
-	 * @en Adds a track to the queue
-	 * @ru Добавляет трек в очередь
-	 * @param {Track} track - Track information
-	 * @param {string} guildId - Guild ID
-	 * @param {CommandInteraction} interaction - Discord command interaction
+	 * Добавляет трек в очередь
 	 */
 	private async addTrackToQueue(
 		track: Track,
@@ -138,6 +136,7 @@ export default class NameService {
 			}),
 		);
 
+		// Используем Promise.all для параллельного выполнения
 		await Promise.all([
 			this.playerManager.playOrQueueTrack(guildId, track),
 			this.queueService.getLastTrackID(guildId),
@@ -146,11 +145,7 @@ export default class NameService {
 	}
 
 	/**
-	 * @en Processes a playlist URL and adds its tracks to the queue
-	 * @ru Обрабатывает URL плейлиста и добавляет его треки в очередь
-	 * @param {string} url - Playlist URL
-	 * @param {CommandInteraction} interaction - Discord command interaction
-	 * @returns {Promise<SearchTrackResult[] | void>} Array of tracks or void if an error occurs
+	 * Обрабатывает URL плейлиста и добавляет его треки в очередь
 	 */
 	async processPlaylist(
 		url: string,
@@ -169,14 +164,13 @@ export default class NameService {
 				bot.locale.t("messages.nameService.success.playlist_added"),
 			);
 
-			await Promise.all([
-				this.addPlaylistTracksToQueue(
-					tracks,
-					guildId,
-					interaction.user.id,
-					interaction,
-				),
-			]);
+			// Используем Promise.all для параллельного выполнения
+			await this.addPlaylistTracksToQueue(
+				tracks,
+				guildId,
+				interaction.user.id,
+				interaction,
+			);
 
 			return tracks;
 		} catch (error) {
@@ -185,28 +179,30 @@ export default class NameService {
 	}
 
 	/**
-	 * @en Searches across all plugins for a track
-	 * @ru Ищет трек во всех плагинах
-	 * @param {string} trackName - Track name
-	 * @returns {Promise<SearchTrackResult[]>} Array of search results
+	 * Ищет трек во всех плагинах
 	 */
 	private async searchAcrossPlugins(
 		trackName: string,
 	): Promise<SearchTrackResult[]> {
-		const results = await Promise.all(
+		// Используем Promise.allSettled для обработки ошибок отдельных плагинов
+		const results = await Promise.allSettled(
 			this.pluginManager
 				.getAllPlugins()
 				.map((plugin) => this.searchWithPlugin(plugin, trackName)),
 		);
-		return results.flat().filter(Boolean);
+
+		// Обрабатываем результаты, игнорируя отклоненные промисы
+		return results
+			.filter(
+				(result): result is PromiseFulfilledResult<SearchTrackResult[]> =>
+					result.status === "fulfilled",
+			)
+			.flatMap((result) => result.value)
+			.filter(Boolean);
 	}
 
 	/**
-	 * @en Searches with a specific plugin for a track
-	 * @ru Ищет трек с помощью определенного плагина
-	 * @param {MusicServicePlugin} plugin - Plugin to search with
-	 * @param {string} trackName - Track name
-	 * @returns {Promise<SearchTrackResult[]>} Array of search results
+	 * Ищет трек с помощью определенного плагина
 	 */
 	private async searchWithPlugin(
 		plugin: MusicServicePlugin,
@@ -226,10 +222,7 @@ export default class NameService {
 	}
 
 	/**
-	 * @en Searches and processes a URL
-	 * @ru Ищет и обрабатывает URL
-	 * @param {string} url - URL to search
-	 * @returns {Promise<SearchTrackResult[]>} Array of search results
+	 * Ищет и обрабатывает URL
 	 */
 	private async searchAndProcessURL(url: string): Promise<SearchTrackResult[]> {
 		const plugin = this.pluginManager.getPluginForUrl(url);
@@ -250,12 +243,7 @@ export default class NameService {
 	}
 
 	/**
-	 * @en Adds playlist tracks to the queue
-	 * @ru Добавляет треки плейлиста в очередь
-	 * @param {SearchTrackResult[]} tracks - Array of tracks
-	 * @param {string} guildId - Guild ID
-	 * @param {string} requestedBy - Requested by user ID
-	 * @param {CommandInteraction} interaction - Discord command interaction
+	 * Добавляет треки плейлиста в очередь с использованием setTimeout
 	 */
 	private async addPlaylistTracksToQueue(
 		tracks: SearchTrackResult[],
@@ -263,6 +251,7 @@ export default class NameService {
 		requestedBy?: string,
 		interaction?: CommandInteraction,
 	): Promise<void> {
+		// Используем chunking для обработки больших плейлистов
 		for (let i = 0; i < tracks.length; i += BATCH_SIZE) {
 			await Promise.all(
 				tracks
@@ -271,19 +260,16 @@ export default class NameService {
 						this.processPlaylistTrack(track, guildId, requestedBy),
 					),
 			);
+			// Используем setTimeout вместо Bun.sleep
 			await new Promise((resolve) => setTimeout(resolve, 500));
 		}
 		if (interaction) {
-			this.playerManager.joinChannel(interaction);
+			await this.playerManager.joinChannel(interaction);
 		}
 	}
 
 	/**
-	 * @en Processes a playlist track and adds it to the queue
-	 * @ru Обрабатывает трек плейлиста и добавляет его в очередь
-	 * @param {SearchTrackResult} track - Track information
-	 * @param {string} guildId - Guild ID
-	 * @param {string} requestedBy - Requested by user ID
+	 * Обрабатывает трек плейлиста и добавляет его в очередь
 	 */
 	private async processPlaylistTrack(
 		track: SearchTrackResult,
@@ -301,6 +287,7 @@ export default class NameService {
 			...(requestedBy && { requestedBy }),
 		};
 
+		// Используем retry с экспоненциальной задержкой
 		for (let retries = 0; retries < MAX_RETRIES; retries++) {
 			try {
 				await this.queueService.setTrack(guildId, trackInfo);
@@ -315,27 +302,24 @@ export default class NameService {
 						}),
 					);
 				} else {
-					await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
+					// Используем setTimeout с экспоненциальной задержкой
+					await new Promise((resolve) =>
+						setTimeout(resolve, RETRY_DELAY * Math.pow(2, retries)),
+					);
 				}
 			}
 		}
 	}
 
 	/**
-	 * @en Formats track information
-	 * @ru Форматирует информацию о треке
-	 * @param {SearchTrackResult} track - Track information
-	 * @returns {string} Formatted track information
+	 * Форматирует информацию о треке
 	 */
 	private formatTrackInfo(track: SearchTrackResult): string {
 		return `${track.artists.map((a) => a.name).join(", ")} - ${track.title}`;
 	}
 
 	/**
-	 * @en Retrieves voice channel information from an interaction
-	 * @ru Извлекает информацию о голосовом канале из взаимодействия
-	 * @param {CommandInteraction} interaction - Discord command interaction
-	 * @returns {Object} Voice channel information
+	 * Извлекает информацию о голосовом канале из взаимодействия
 	 */
 	private getVoiceChannelInfo(interaction: CommandInteraction): {
 		channelId: string;
@@ -353,17 +337,12 @@ export default class NameService {
 	}
 
 	/**
-	 * @en Creates track information
-	 * @ru Создает информацию о треке
-	 * @param {SearchTrackResult} track - Track information
-	 * @param {CommandInteraction} interaction - Discord command interaction
-	 * @param {boolean} isPriority - Whether the track is priority
-	 * @returns {Track} Track information
+	 * Создает информацию о треке
 	 */
 	private createTrackInfo(
 		track: SearchTrackResult,
 		interaction: CommandInteraction,
-		isPriority: boolean = false,
+		isPriority = false,
 	): Track {
 		return {
 			trackId: track.id,
@@ -375,10 +354,7 @@ export default class NameService {
 	}
 
 	/**
-	 * @en Handles an error
-	 * @ru Обрабатывает ошибку
-	 * @param {unknown} error - Error
-	 * @param {CommandInteraction} interaction - Discord command interaction
+	 * Обрабатывает ошибку
 	 */
 	private async handleError(
 		error: unknown,
@@ -394,10 +370,7 @@ export default class NameService {
 	}
 
 	/**
-	 * @en Retrieves an error message
-	 * @ru Извлекает сообщение об ошибке
-	 * @param {unknown} error - Error
-	 * @returns {string} Error message
+	 * Извлекает сообщение об ошибке
 	 */
 	private getErrorMessage(error: unknown): string {
 		if (error instanceof UserNotInVoiceChannelError)

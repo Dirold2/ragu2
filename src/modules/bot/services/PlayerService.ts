@@ -27,7 +27,7 @@ import {
 	EMPTY_CHANNEL_CHECK_INTERVAL,
 	RECONNECTION_TIMEOUT,
 } from "../config.js";
-import type { CommandService, QueueService, Track } from "./index.js";
+import type { CommandService, Track } from "./index.js";
 
 import { getAudioDurationInSeconds } from "get-audio-duration";
 import pathToFfmpeg from "ffmpeg-ffprobe-static";
@@ -39,9 +39,9 @@ import { EventEmitter } from "events";
  * @ru Интерфейс для таймеров плеера.
  */
 interface PlayerTimers {
-	emptyChannelInterval: NodeJS.Timeout | null;
-	emptyChannelTimeout: NodeJS.Timeout | null;
-	fadeOut: NodeJS.Timeout | null;
+	emptyChannelInterval: ReturnType<typeof setTimeout> | null;
+	emptyChannelTimeout: ReturnType<typeof setTimeout> | null;
+	fadeOut: ReturnType<typeof setTimeout> | null;
 }
 
 @Discord()
@@ -60,7 +60,6 @@ export default class PlayerService extends EventEmitter {
 	private disconnectHandler: ((...args: any[]) => void) | null = null;
 
 	constructor(
-		private readonly queueService: QueueService,
 		private readonly commandService: CommandService,
 		public readonly guildId: string,
 	) {
@@ -112,10 +111,10 @@ export default class PlayerService extends EventEmitter {
 		>,
 	): Promise<void> {
 		const getters = {
-			loop: () => this.queueService.getLoop(this.guildId),
-			wave: () => this.queueService.getWave(this.guildId),
-			volume: () => this.queueService.getVolume(this.guildId),
-			currentTrack: () => this.queueService.getTrack(this.guildId),
+			loop: () => bot.queueService.getLoop(this.guildId),
+			wave: () => bot.queueService.getWave(this.guildId),
+			volume: () => bot.queueService.getVolume(this.guildId),
+			currentTrack: () => bot.queueService.getTrack(this.guildId),
 		};
 
 		let value: Track | boolean | number | null = await getters[property]();
@@ -126,7 +125,7 @@ export default class PlayerService extends EventEmitter {
 
 		if (property === "volume") {
 			this.state[property] = value as number;
-			await this.queueService.setVolume(this.guildId, value as number);
+			await bot.queueService.setVolume(this.guildId, value as number);
 		} else if (property === "currentTrack") {
 			this.state[property] = value as Track;
 		} else {
@@ -160,23 +159,10 @@ export default class PlayerService extends EventEmitter {
 	/**
 	 * @en Skips the current track.
 	 * @ru Пропускает текущий трек.
-	 * @param {CommandInteraction} interaction - Discord command interaction
 	 */
-	public async skip(interaction: CommandInteraction): Promise<void> {
-		if (!this.state.currentTrack) {
-			await this.commandService.reply(
-				interaction,
-				bot.locale.t("player.nothingPlaying"),
-			);
-			return;
-		}
-
-		await this.commandService.reply(
-			interaction,
-			bot.locale.t("player.skipped"),
-		);
+	public async skip(): Promise<void> {
 		this.state.loop = false;
-		await this.queueService.setLoop(this.guildId, false);
+		await bot.queueService.setLoop(this.guildId, false);
 		await this.smoothVolumeChange(0, 1500);
 		await new Promise((r) => setTimeout(r, 1000));
 		await this.playNextTrack();
@@ -221,7 +207,7 @@ export default class PlayerService extends EventEmitter {
 	public async setVolume(volume: number): Promise<void> {
 		if (this.player.state.status === AudioPlayerStatus.Playing) {
 			await this.smoothVolumeChange(volume / 100, 2000);
-			await this.queueService.setVolume(this.guildId, volume);
+			await bot.queueService.setVolume(this.guildId, volume);
 		}
 	}
 
@@ -249,7 +235,7 @@ export default class PlayerService extends EventEmitter {
 				interaction,
 			);
 
-			const track = await this.queueService.getTrack(this.guildId);
+			const track = await bot.queueService.getTrack(this.guildId);
 			if (track) await this.playOrQueueTrack(track);
 
 			await Promise.all([this.initialize("volume"), this.initialize("wave")]);
@@ -319,45 +305,50 @@ export default class PlayerService extends EventEmitter {
 		memorize: boolean = true,
 		zero: boolean = false,
 	): Promise<void> {
-		return new Promise((resolve, reject) => {
-			let animationFrameId: NodeJS.Timeout | null = null;
+		if (!this.state.resource?.volume) {
+			return Promise.resolve();
+		}
 
-			const cleanup = () => {
-				if (animationFrameId) {
-					clearTimeout(animationFrameId);
-					animationFrameId = null;
+		return new Promise((resolve) => {
+			let animationFrameId: ReturnType<typeof setTimeout> | null = null;
+
+			const start = zero ? 0 : this.state.volume / 100 || 0;
+			const diff = target - start;
+			const startTime = Date.now();
+
+			if (memorize) this.state.volume = target * 100;
+
+			// Если изменение незначительное или длительность 0, применяем сразу
+			if (Math.abs(diff) < 0.01 || duration <= 0) {
+				this.state.resource?.volume?.setVolumeLogarithmic(
+					Math.max(0, Math.min(1, target)),
+				);
+				return resolve();
+			}
+
+			const animate = () => {
+				if (!this.state.resource?.volume) {
+					if (animationFrameId) clearTimeout(animationFrameId);
+					return resolve();
+				}
+
+				const elapsed = Date.now() - startTime;
+				const progress = Math.min(elapsed / duration, 1);
+
+				const vol = start + diff * progress;
+				this.state.resource.volume.setVolumeLogarithmic(
+					Math.max(0, Math.min(1, vol)),
+				);
+
+				if (progress < 1) {
+					animationFrameId = setTimeout(animate, 16);
+				} else {
+					if (animationFrameId) clearTimeout(animationFrameId);
+					resolve();
 				}
 			};
 
-			try {
-				const start = zero ? 0 : this.state.volume / 100 || 0;
-				const diff = target - start;
-				const startTime = Date.now();
-
-				if (memorize) this.state.volume = target * 100;
-
-				const animate = () => {
-					const elapsed = Date.now() - startTime;
-					const progress = Math.min(elapsed / duration, 1);
-
-					const vol = start + diff * progress;
-					this.state.resource?.volume?.setVolumeLogarithmic(
-						Math.max(0, Math.min(1, vol)),
-					);
-
-					if (progress < 1) {
-						animationFrameId = setTimeout(animate, 16);
-					} else {
-						cleanup();
-						resolve();
-					}
-				};
-
-				animate();
-			} catch (error) {
-				cleanup();
-				reject(error);
-			}
+			animate();
 		});
 	}
 
@@ -422,19 +413,15 @@ export default class PlayerService extends EventEmitter {
 
 		this.state.currentTrack = track;
 		if (track.source === "yandex") {
-			this.state.lastTrack = this.state.lastTrack || track;
-			await this.queueService.setLastTrackID(this.guildId, track.trackId);
+			this.state.lastTrack = track;
+			await bot.queueService.setLastTrackID(this.guildId, track.trackId);
 		}
 
 		await Promise.all([this.initialize("volume"), this.initialize("wave")]);
 
 		const trackUrl = await this.getTrackUrl(track.trackId, track.source);
 		if (!trackUrl) {
-			bot.logger.error(
-				bot.locale.t("errors.track_url_not_found", {
-					trackId: track.trackId || "unknown",
-				}),
-			);
+			await this.playNextTrack();
 			return;
 		}
 
@@ -448,7 +435,7 @@ export default class PlayerService extends EventEmitter {
 		this.player.play(resource);
 
 		if (!this.state.loop) {
-			await this.queueService.logTrackPlay(
+			await bot.queueService.logTrackPlay(
 				track.requestedBy!,
 				track.trackId,
 				track.info,
@@ -456,7 +443,6 @@ export default class PlayerService extends EventEmitter {
 		}
 
 		this.state.isPlaying = true;
-
 		this.updateActivity(track.info);
 
 		await this.setupTrackEndFade({ ...track, url: trackUrl });
@@ -467,14 +453,43 @@ export default class PlayerService extends EventEmitter {
 	 * @ru Получает URL трека.
 	 * @param {string} trackId - Track ID
 	 * @param {string} source - Source of the track
-	 * @returns {Promise<string>} URL of the track
+	 * @returns {Promise<string | null>} URL of the track or null if not found
 	 */
-	private async getTrackUrl(trackId: string, source: string): Promise<string> {
-		if (source === "url") {
-			return trackId;
+	private async getTrackUrl(
+		trackId: string,
+		source: string,
+	): Promise<string | null> {
+		try {
+			if (source === "url") {
+				return trackId;
+			}
+
+			const plugin = bot.pluginManager.getPlugin(source);
+			if (!plugin?.getTrackUrl) {
+				bot.logger.error(
+					bot.locale.t("player.error.plugin_not_found", { source }),
+				);
+				return null;
+			}
+
+			const url = await plugin.getTrackUrl(trackId);
+			if (!url) {
+				bot.logger.error(
+					bot.locale.t("errors.track_url_not_found", { trackId }),
+				);
+				return null;
+			}
+
+			return url;
+		} catch (error) {
+			bot.logger.error(
+				bot.locale.t("player.error.get_track_url", {
+					trackId,
+					error: error instanceof Error ? error.message : String(error),
+				}),
+			);
+			return null;
 		}
-		const plugin = bot.pluginManager.getPlugin(source);
-		return plugin?.getTrackUrl ? await plugin.getTrackUrl(trackId) : "";
 	}
 
 	/**
@@ -549,7 +564,7 @@ export default class PlayerService extends EventEmitter {
 		try {
 			return await getAudioDurationInSeconds(
 				url,
-				pathToFfmpeg.ffprobePath || undefined,
+				process.env.FFPROBE_PATH || pathToFfmpeg.ffprobePath || undefined,
 			);
 		} catch (error) {
 			bot.logger.error(`Failed to get audio duration for ${url}: ${error}`);
@@ -564,7 +579,7 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private async queueTrack(track: Track): Promise<void> {
 		if (this.guildId) {
-			await this.queueService.setTrack(this.guildId, track);
+			await bot.queueService.setTrack(this.guildId, track);
 		}
 	}
 
@@ -574,7 +589,7 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private async loadNextTrack(): Promise<void> {
 		if (this.guildId) {
-			this.state.nextTrack = await this.queueService.getTrack(this.guildId);
+			this.state.nextTrack = await bot.queueService.getTrack(this.guildId);
 		}
 	}
 
@@ -583,19 +598,26 @@ export default class PlayerService extends EventEmitter {
 	 * @ru Проигрывает следующий трек.
 	 */
 	private async playNextTrack(): Promise<void> {
-		if (this.state.loop && this.state.lastTrack) {
-			await this.playTrack(this.state.lastTrack);
+		if (this.state.loop && this.state.currentTrack) {
+			await this.playTrack(this.state.currentTrack);
 		} else if (this.state.nextTrack) {
 			await this.playTrack(this.state.nextTrack);
 			if (!this.state.loop) {
 				this.state.nextTrack = null;
 				await this.loadNextTrack();
 			}
-		} else if (this.state.wave || (this.state.lastTrack && this.state.lastTrack.source === "yandex")) {
-			if (this.state.lastTrack) {
-				const recommendations = await this.getRecommendations(this.state.lastTrack.trackId);
+		} else if (this.state.wave && this.state.lastTrack?.trackId) {
+			if (this.state.lastTrack.source === "yandex") {
+				const recommendations = await this.getRecommendations(
+					this.state.lastTrack.trackId,
+				);
 				if (recommendations.length > 0) {
 					await this.playTrack(recommendations[0]);
+					await bot.queueService.setLastTrackID(
+						this.guildId,
+						recommendations[0].trackId,
+					);
+					this.state.lastTrack = recommendations[0];
 				} else {
 					this.reset();
 					this.updateActivity();
@@ -637,12 +659,20 @@ export default class PlayerService extends EventEmitter {
 	 * @ru Устанавливает обработчик отключения.
 	 */
 	private setupDisconnectHandler(): void {
-		this.state.connection?.removeAllListeners(
-			VoiceConnectionStatus.Disconnected,
-		);
+		if (!this.state.connection) return;
+
+		// Удаляем предыдущий обработчик, если он существует
+		if (this.disconnectHandler) {
+			this.state.connection.off(
+				VoiceConnectionStatus.Disconnected,
+				this.disconnectHandler,
+			);
+			this.disconnectHandler = null;
+		}
 
 		this.disconnectHandler = async () => {
 			try {
+				// Пытаемся переподключиться
 				await Promise.race([
 					entersState(
 						this.state.connection!,
@@ -655,12 +685,22 @@ export default class PlayerService extends EventEmitter {
 						RECONNECTION_TIMEOUT,
 					),
 				]);
-			} catch {
+
+				// Если успешно переподключились, восстанавливаем воспроизведение
+				if (this.state.currentTrack && !this.state.isPlaying) {
+					await this.playTrack(this.state.currentTrack);
+				}
+			} catch (error) {
+				bot.logger.error(
+					bot.locale.t("player.error.reconnection_failed", {
+						error: error instanceof Error ? error.message : String(error),
+					}),
+				);
 				this.handleDisconnect();
 			}
 		};
 
-		this.state.connection?.on(
+		this.state.connection.on(
 			VoiceConnectionStatus.Disconnected,
 			this.disconnectHandler,
 		);
@@ -769,21 +809,28 @@ export default class PlayerService extends EventEmitter {
 	};
 
 	/**
-	 * @en Resets the player state.
-	 * @ru Сбрасывает состояние плеера.
+	 * @en Clears all timers.
+	 * @ru Очищает все таймеры.
 	 */
-	private reset(): void {
-		// Clear all timers
+	private clearAllTimers(): void {
 		for (const key in this.timers) {
 			if (this.timers.hasOwnProperty(key)) {
 				const timer = this.timers[key as keyof PlayerTimers];
 				if (timer) {
 					clearTimeout(timer);
 					clearInterval(timer as NodeJS.Timeout);
-					this.timers[key as keyof PlayerTimers] = null; // Correctly reset timer properties
+					this.timers[key as keyof PlayerTimers] = null;
 				}
 			}
 		}
+	}
+
+	/**
+	 * @en Resets the player state.
+	 * @ru Сбрасывает состояние плеера.
+	 */
+	private reset(): void {
+		this.clearAllTimers();
 
 		// Reset the state
 		this.state = {
@@ -804,17 +851,7 @@ export default class PlayerService extends EventEmitter {
 			this.player.stop();
 			this.removeAllListeners();
 
-			// Clear all timers
-			for (const key in this.timers) {
-				if (this.timers.hasOwnProperty(key)) {
-					const timer = this.timers[key as keyof PlayerTimers];
-					if (timer) {
-						clearTimeout(timer);
-						clearInterval(timer as NodeJS.Timeout);
-						this.timers[key as keyof PlayerTimers] = null; // Correctly reset timer properties
-					}
-				}
-			}
+			this.clearAllTimers();
 
 			// Cleanup disconnect handler
 			if (this.disconnectHandler && this.state.connection) {

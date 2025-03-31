@@ -20,7 +20,7 @@ export class OtherCommand {
 		interaction: CommandInteraction,
 	): Promise<void> {
 		switch (command) {
-			case "history":
+			case "history": {
 				const userId = interaction.user.id;
 				const tracks = await bot.queueService.getLastPlayedTracks(userId);
 
@@ -33,15 +33,16 @@ export class OtherCommand {
 				}
 
 				const trackList = tracks
-					.map((track, index) => `${index + 1}. ${track.info}`)
+					.map((track: any, index: number) => `${index + 1}. ${track.info}`)
 					.join("\n");
 				await bot.commandService.reply(
 					interaction,
 					`${bot.locale.t("commands.other.recently_played_tracks")}:\n${trackList}`,
 				);
 				break;
+			}
 
-			case "top":
+			case "top": {
 				const topTracks = await bot.queueService.getTopPlayedTracks();
 
 				if (topTracks.length === 0) {
@@ -53,15 +54,16 @@ export class OtherCommand {
 				}
 
 				const topTrackList = topTracks
-					.map((track, index) => `${index + 1}. ${track.info}`)
+					.map((track: any, index: number) => `${index + 1}. ${track.info}`)
 					.join("\n");
 				await bot.commandService.reply(
 					interaction,
 					`${bot.locale.t("commands.other.popular_tracks")}:\n${topTrackList}`,
 				);
 				break;
+			}
 
-			case "queuedel":
+			case "queuedel": {
 				const member = interaction.member as GuildMember;
 				if (!member.voice?.channel) {
 					await bot.commandService.reply(
@@ -88,6 +90,7 @@ export class OtherCommand {
 					bot.locale.t("commands.queue.cleared"),
 				);
 				break;
+			}
 		}
 	}
 }

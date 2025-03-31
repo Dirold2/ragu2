@@ -3,6 +3,7 @@
     "target": "ES2022",
     "module": "NodeNext",
     "lib": ["ES2022", "DOM"],
+    "types": ["bun-types"],
     "moduleResolution": "NodeNext",
     "rootDir": "./src",
     "outDir": "build",
@@ -32,7 +33,14 @@
       "@service/*": ["src/services/*"],
       "@commands/*": ["src/commands/*"],
       "@plugins/*": ["src/plugins/*"],
-      ".prisma/*": ["src/modules/database/.prisma/*"]
+      "#prisma/*": [".prisma/*"],
+      "#*": [
+        "./src/*",
+        "./src/*.ts",
+        "./src/*.tsx",
+        "./src/*.js",
+        "./src/*.jsx"
+      ]
     },
     "resolveJsonModule": true,
     "isolatedModules": true
