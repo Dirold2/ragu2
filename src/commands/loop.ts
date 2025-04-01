@@ -2,18 +2,20 @@ import { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 import { bot } from "../bot.js";
-import logger from "../utils/logger.js";
 
 @Discord()
 export class LoopCommand {
-	@Slash({ name: "loop", description: `Toggle track loop` })
+	@Slash({
+		name: "loop",
+		description: bot.locale.t("commands.loop.description"),
+	})
 	async toggleLoop(interaction: CommandInteraction) {
 		try {
 			const player = bot.playerManager.getPlayer(interaction.guildId!);
 			if (!player) {
 				return await bot.commandService.reply(
 					interaction,
-					`${bot.messages.PLAYER_NOT_FOUND}`,
+					bot.locale.t("errors.player.not_found"),
 				);
 			}
 
@@ -23,13 +25,24 @@ export class LoopCommand {
 
 			return await bot.commandService.reply(
 				interaction,
-				`${player.state.loop ? bot.messages.LOOP_TRACK_ON(player.state.currentTrack?.info) : bot.messages.LOOP_TRACK_OFF}`,
+				bot.locale.t(
+					player.state.loop ? "player.loop.enabled" : "player.loop.disabled",
+					player.state.loop
+						? { track: player.state.currentTrack?.info || "" }
+						: undefined,
+				),
 			);
 		} catch (error) {
-			logger.error(`Error toggling track loop:`, error);
+			bot.logger.error(
+				bot.locale.t("errors.track.playback", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
+			);
 			return await bot.commandService.reply(
 				interaction,
-				`${bot.messages.LOOP_TRACK_ERROR}`,
+				bot.locale.t("errors.track.playback", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 		}
 	}

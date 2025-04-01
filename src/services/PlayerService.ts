@@ -27,33 +27,49 @@ import {
 	EMPTY_CHANNEL_CHECK_INTERVAL,
 	RECONNECTION_TIMEOUT,
 } from "../config.js";
-import logger from "../utils/logger.js";
-import type { CommandService, QueueService, Track } from "./index.js";
+import type { CommandService, Track } from "./index.js";
 
 import { getAudioDurationInSeconds } from "get-audio-duration";
 import pathToFfmpeg from "ffmpeg-ffprobe-static";
 import type { PlayerState } from "../types/index.js";
+import { EventEmitter } from "events";
+
+/**
+ * @en Interface for player timers.
+ * @ru Интерфейс для таймеров плеера.
+ */
+interface PlayerTimers {
+	emptyChannelInterval: ReturnType<typeof setTimeout> | null;
+	emptyChannelTimeout: ReturnType<typeof setTimeout> | null;
+	fadeOut: ReturnType<typeof setTimeout> | null;
+}
 
 @Discord()
-export default class PlayerService {
-	private readonly player: AudioPlayer;
-	public state: PlayerState;
-	private timers: Record<string, NodeJS.Timeout | null> = {};
+export default class PlayerService extends EventEmitter {
+	private readonly player: AudioPlayer = createAudioPlayer({
+		behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
+	});
+
+	private timers: PlayerTimers = {
+		emptyChannelInterval: null,
+		emptyChannelTimeout: null,
+		fadeOut: null,
+	};
+
+	public state: PlayerState = this.getInitialState();
+	private disconnectHandler: ((...args: any[]) => void) | null = null;
 
 	constructor(
-		private readonly queueService: QueueService,
 		private readonly commandService: CommandService,
 		public readonly guildId: string,
 	) {
-		this.player = createAudioPlayer({
-			behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
-		});
-		this.state = this.getInitialState();
+		super();
 		this.setupPlayerEvents();
 	}
 
 	/**
-	 * Gets the initial state of the player
+	 * @en Gets the initial state of the player.
+	 * @ru Возвращает начальное состояние плеера.
 	 * @returns {PlayerState} Initial state
 	 */
 	private getInitialState(): PlayerState {
@@ -72,18 +88,20 @@ export default class PlayerService {
 	}
 
 	/**
-	 * Sets up player events
+	 * @en Sets up player events.
+	 * @ru Устанавливает события плеера.
 	 */
 	private setupPlayerEvents(): void {
 		this.player.on("error", (error) => {
-			logger.error(`${bot.loggerMessages.PLAYER_ERROR}: ${error.message}`);
-			this.handleTrackEnd();
+			bot.logger.error(bot.locale.t("player.status.error"), error);
+			void this.handleTrackEnd();
 		});
-		this.player.on(AudioPlayerStatus.Idle, () => this.handleTrackEnd());
+		this.player.on(AudioPlayerStatus.Idle, () => void this.handleTrackEnd());
 	}
 
 	/**
-	 * Initializes player properties
+	 * @en Initializes player properties.
+	 * @ru Инициализирует свойства плеера.
 	 * @param {keyof Pick<PlayerState, "loop" | "wave" | "volume" | "currentTrack">} property - Property to initialize
 	 */
 	public async initialize(
@@ -93,21 +111,21 @@ export default class PlayerService {
 		>,
 	): Promise<void> {
 		const getters = {
-			loop: () => this.queueService.getLoop(this.guildId),
-			wave: () => this.queueService.getWaveStatus(this.guildId),
-			volume: () => this.queueService.getVolume(this.guildId),
-			currentTrack: () => this.queueService.getTrack(this.guildId),
+			loop: () => bot.queueService.getLoop(this.guildId),
+			wave: () => bot.queueService.getWave(this.guildId),
+			volume: () => bot.queueService.getVolume(this.guildId),
+			currentTrack: () => bot.queueService.getTrack(this.guildId),
 		};
 
-		const value =
-			(await getters[property]()) ??
-			(property === "volume"
-				? DEFAULT_VOLUME
-				: this.queueService.getVolume(this.guildId));
+		let value: Track | boolean | number | null = await getters[property]();
+
+		if (value === null && property === "volume") {
+			value = DEFAULT_VOLUME;
+		}
 
 		if (property === "volume") {
 			this.state[property] = value as number;
-			await this.queueService.setVolume(this.guildId, value as number);
+			await bot.queueService.setVolume(this.guildId, value as number);
 		} else if (property === "currentTrack") {
 			this.state[property] = value as Track;
 		} else {
@@ -116,92 +134,86 @@ export default class PlayerService {
 	}
 
 	/**
-	 * Plays or queues a track
+	 * @en Plays or queues a track.
+	 * @ru Проигрывает или добавляет трек в очередь.
 	 * @param {Track} track - Track to play or queue
 	 */
 	public async playOrQueueTrack(track: Track): Promise<void> {
 		try {
-			await (this.state.isPlaying
-				? this.queueTrack(track)
-				: this.playTrack(track));
-			if (!this.state.nextTrack) await this.loadNextTrack();
+			if (this.state.isPlaying) {
+				await this.queueTrack(track);
+			} else {
+				await this.playTrack(track);
+			}
+
+			if (!this.state.nextTrack) {
+				await this.loadNextTrack();
+			}
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.FAILED_TO_PLAY_QUEUE_TRACK}: ${error}`,
+			bot.logger.error(
+				`${bot.locale.t("errors.failed_to_play_queue_track")}: ${error}`,
 			);
 		}
 	}
 
 	/**
-	 * Skips the current track
-	 * @param {CommandInteraction} interaction - Discord command interaction
+	 * @en Skips the current track.
+	 * @ru Пропускает текущий трек.
 	 */
-	public async skip(interaction: CommandInteraction): Promise<void> {
-		if (!this.state.connection) {
-			await this.commandService.reply(
-				interaction,
-				bot.messages.NOT_CONNECTED_TO_VOICE,
-			);
-			return;
-		}
-
-		if (this.player.state.status === AudioPlayerStatus.Playing) {
-			await this.smoothVolumeChange(0, 1000, false);
-		}
-
-		this.state.lastTrack = this.state.currentTrack;
-		await this.commandService.reply(
-			interaction,
-			`${bot.messages.SKIP_TRACK}: ${this.state.nextTrack?.info || bot.messages.SKIP_NO_TRACK}`,
-		);
+	public async skip(): Promise<void> {
 		this.state.loop = false;
-		await this.queueService.setLoop(this.guildId, false);
+		await bot.queueService.setLoop(this.guildId, false);
+		await this.smoothVolumeChange(0, 1500);
 		await new Promise((r) => setTimeout(r, 1000));
 		await this.playNextTrack();
 	}
 
 	/**
-	 * Toggles the pause state of the player
+	 * @en Toggles the pause state of the player.
+	 * @ru Переключает состояние паузы плеера.
 	 * @param {CommandInteraction} interaction - Discord command interaction
 	 */
 	public async togglePause(interaction: CommandInteraction): Promise<void> {
 		if (!this.state.connection) return;
 
 		const status = this.player.state.status;
-		const actions = {
-			[AudioPlayerStatus.Playing]: {
-				action: () => this.player.pause(),
-				message: bot.messages.PAUSE_TRACK,
-				isPlaying: false,
-			},
-			[AudioPlayerStatus.Paused]: {
-				action: () => this.player.unpause(),
-				message: bot.messages.RESUME_TRACK,
-				isPlaying: true,
-			},
-		} as const;
+		let message: string | undefined;
+		let isPlaying: boolean | undefined;
 
-		const currentAction = actions[status as keyof typeof actions];
-		if (currentAction) {
-			currentAction.action();
-			this.state.isPlaying = currentAction.isPlaying;
-			await this.commandService.reply(interaction, currentAction.message);
+		switch (status) {
+			case AudioPlayerStatus.Playing:
+				this.player.pause();
+				message = bot.locale.t("player.paused");
+				isPlaying = false;
+				break;
+			case AudioPlayerStatus.Paused:
+				this.player.unpause();
+				message = bot.locale.t("player.resumed");
+				isPlaying = true;
+				break;
+		}
+
+		if (message && isPlaying !== undefined) {
+			this.state.isPlaying = isPlaying;
+			await this.commandService.reply(interaction, message);
 		}
 	}
 
 	/**
-	 * Sets the volume of the player
+	 * @en Sets the volume of the player.
+	 * @ru Устанавливает громкость плеера.
 	 * @param {number} volume - Volume to set
 	 */
 	public async setVolume(volume: number): Promise<void> {
 		if (this.player.state.status === AudioPlayerStatus.Playing) {
 			await this.smoothVolumeChange(volume / 100, 2000);
-			await this.queueService.setVolume(this.guildId, volume);
+			await bot.queueService.setVolume(this.guildId, volume);
 		}
 	}
 
 	/**
-	 * Joins a voice channel
+	 * @en Joins a voice channel.
+	 * @ru Присоединяется к голосовому каналу.
 	 * @param {CommandInteraction} interaction - Discord command interaction
 	 */
 	public async joinChannel(interaction: CommandInteraction): Promise<void> {
@@ -211,9 +223,7 @@ export default class PlayerService {
 		if (!voiceChannelId || !this.hasVoiceAccess(member)) {
 			await this.commandService.reply(
 				interaction,
-				!voiceChannelId
-					? bot.messages.NOT_IN_VOICE_CHANNEL
-					: bot.messages.NO_ACCESS_TO_VOICE_CHANNEL,
+				bot.locale.t("errors.notInVoiceChannel"),
 			);
 			return;
 		}
@@ -225,26 +235,27 @@ export default class PlayerService {
 				interaction,
 			);
 
-			const track = await this.queueService.getTrack(this.guildId);
+			const track = await bot.queueService.getTrack(this.guildId);
 			if (track) await this.playOrQueueTrack(track);
 
 			await Promise.all([this.initialize("volume"), this.initialize("wave")]);
 			this.setupDisconnectHandler();
 			this.startEmptyCheck();
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_CONNECTING_TO_CHANNEL}: ${error}`,
+			bot.logger.error(
+				bot.locale.t("errors.voice_connection", { error: String(error) }),
 			);
 			await this.commandService.reply(
 				interaction,
-				bot.messages.ERROR_OCCURRED_WHILE_CONNECTING_TO_CHANNEL,
+				bot.locale.t("errors.joinError"),
 			);
 			this.reset();
 		}
 	}
 
 	/**
-	 * Establishes a voice connection
+	 * @en Establishes a voice connection.
+	 * @ru Устанавливает голосовое соединение.
 	 * @param {string} channelId - Discord channel ID
 	 * @param {CommandInteraction} interaction - Discord command interaction
 	 * @returns {Promise<VoiceConnection>} Voice connection
@@ -253,14 +264,14 @@ export default class PlayerService {
 		channelId: string,
 		interaction: CommandInteraction,
 	): Promise<VoiceConnection> {
-		const existingConnection = getVoiceConnection(this.guildId);
-		if (existingConnection) return existingConnection;
+		let connection = getVoiceConnection(this.guildId);
+		if (connection) return connection;
 
 		if (!interaction.guild) {
-			throw new Error(bot.loggerMessages.GUILD_NOT_FOUND);
+			throw new Error(bot.locale.t("errors.guild_not_found"));
 		}
 
-		const connection = joinVoiceChannel({
+		connection = joinVoiceChannel({
 			channelId,
 			guildId: this.guildId,
 			adapterCreator: interaction.guild
@@ -280,7 +291,8 @@ export default class PlayerService {
 	}
 
 	/**
-	 * Smoothly changes the volume of the player
+	 * @en Smoothly changes the volume of the player.
+	 * @ru Плавно изменяет громкость плеера.
 	 * @param {number} target - Target volume
 	 * @param {number} duration - Duration of the volume change
 	 * @param {boolean} memorize - Whether to memorize the volume
@@ -293,11 +305,12 @@ export default class PlayerService {
 		memorize: boolean = true,
 		zero: boolean = false,
 	): Promise<void> {
+		if (!this.state.resource?.volume) {
+			return Promise.resolve();
+		}
+
 		return new Promise((resolve) => {
-			if (this.timers.volumeChange) {
-				clearTimeout(this.timers.volumeChange);
-				this.timers.volumeChange = null;
-			}
+			let animationFrameId: ReturnType<typeof setTimeout> | null = null;
 
 			const start = zero ? 0 : this.state.volume / 100 || 0;
 			const diff = target - start;
@@ -305,19 +318,32 @@ export default class PlayerService {
 
 			if (memorize) this.state.volume = target * 100;
 
+			// Если изменение незначительное или длительность 0, применяем сразу
+			if (Math.abs(diff) < 0.01 || duration <= 0) {
+				this.state.resource?.volume?.setVolumeLogarithmic(
+					Math.max(0, Math.min(1, target)),
+				);
+				return resolve();
+			}
+
 			const animate = () => {
+				if (!this.state.resource?.volume) {
+					if (animationFrameId) clearTimeout(animationFrameId);
+					return resolve();
+				}
+
 				const elapsed = Date.now() - startTime;
 				const progress = Math.min(elapsed / duration, 1);
 
 				const vol = start + diff * progress;
-				this.state.resource?.volume?.setVolumeLogarithmic(
+				this.state.resource.volume.setVolumeLogarithmic(
 					Math.max(0, Math.min(1, vol)),
 				);
 
 				if (progress < 1) {
-					this.timers.volumeChange = setTimeout(animate, 16);
+					animationFrameId = setTimeout(animate, 16);
 				} else {
-					this.timers.volumeChange = null;
+					if (animationFrameId) clearTimeout(animationFrameId);
 					resolve();
 				}
 			};
@@ -327,20 +353,22 @@ export default class PlayerService {
 	}
 
 	/**
-	 * Checks if a member has voice access
+	 * @en Checks if a member has voice access.
+	 * @ru Проверяет, есть ли у участника доступ к голосовому каналу.
 	 * @param {GuildMember} member - Guild member
 	 * @returns {boolean} Whether the member has voice access
 	 */
 	private hasVoiceAccess(member: GuildMember): boolean {
+		const voiceChannel = member.voice.channel;
 		return !!(
-			member.voice.channel
-				?.permissionsFor(member)
-				?.has(PermissionFlagsBits.Connect) && member.voice.channel?.id
+			voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) &&
+			voiceChannel.id
 		);
 	}
 
 	/**
-	 * Leaves the voice channel
+	 * @en Leaves the voice channel.
+	 * @ru Покидает голосовой канал.
 	 */
 	public leaveChannel(): void {
 		if (this.state.connection) {
@@ -351,81 +379,122 @@ export default class PlayerService {
 	}
 
 	/**
-	 * Updates the activity of the bot
+	 * @en Updates the activity of the bot.
+	 * @ru Обновляет активность бота.
 	 * @param {string} activity - Activity to set
 	 */
 	private updateActivity(activity?: string) {
-		if (bot.client.user) {
-			bot.client.user.setActivity(activity || "");
-		}
+		bot.client.user?.setActivity(activity || "");
 	}
 
 	/**
-	 * Plays a track
+	 * @en Plays a track.
+	 * @ru Проигрывает трек.
 	 * @param {Track} track - Track to play
 	 */
 	private async playTrack(track: Track): Promise<void> {
-		try {
-			this.manageFadeOutTimeout();
+		if (!track) {
+			bot.logger.error(bot.locale.t("errors.invalid_track"));
+			return;
+		}
 
-			this.state.currentTrack = track;
-			if (track.source === "yandex") {
-				this.state.lastTrack = this.state.lastTrack || track;
-				this.queueService.setLastTrackID(this.guildId, track.trackId);
-			}
-
-			await Promise.all([this.initialize("volume"), this.initialize("wave")]);
-
-			const trackUrl = await this.getTrackUrl(track.trackId, track.source);
-			if (!trackUrl) {
-				logger.error(
-					`${bot.loggerMessages.FAILED_TO_GET_URL_FOR_TRACK}: ${track.trackId}`,
-				);
+		if (track.source === "url") {
+			if (!track.url) {
+				bot.logger.error(bot.locale.t("errors.invalid_track_url"));
 				return;
 			}
+			track.trackId = track.url;
+		} else if (!track.trackId) {
+			bot.logger.error(bot.locale.t("errors.invalid_track"));
+			return;
+		}
 
-			const resource = this.createTrackResource({
-				...track,
-				url: trackUrl,
-			});
-			this.setupFadeEffects();
+		this.manageFadeOutTimeout();
 
-			await new Promise((resolve) => setTimeout(resolve, 1000));
-			this.player.play(resource);
+		this.state.currentTrack = track;
+		if (track.source === "yandex") {
+			this.state.lastTrack = track;
+			await bot.queueService.setLastTrackID(this.guildId, track.trackId);
+		}
 
-			if (!this.state.loop) {
-				await this.queueService.logTrackPlay(
-					track.requestedBy!,
-					track.trackId,
-					track.info,
-				);
+		await Promise.all([this.initialize("volume"), this.initialize("wave")]);
+
+		const trackUrl = await this.getTrackUrl(track.trackId, track.source);
+		if (!trackUrl) {
+			await this.playNextTrack();
+			return;
+		}
+
+		const resource = this.createTrackResource({
+			...track,
+			url: trackUrl,
+		});
+		this.setupFadeEffects();
+
+		await new Promise((resolve) => setTimeout(resolve, 1000));
+		this.player.play(resource);
+
+		if (!this.state.loop) {
+			await bot.queueService.logTrackPlay(
+				track.requestedBy!,
+				track.trackId,
+				track.info,
+			);
+		}
+
+		this.state.isPlaying = true;
+		this.updateActivity(track.info);
+
+		await this.setupTrackEndFade({ ...track, url: trackUrl });
+	}
+
+	/**
+	 * @en Gets the URL of a track.
+	 * @ru Получает URL трека.
+	 * @param {string} trackId - Track ID
+	 * @param {string} source - Source of the track
+	 * @returns {Promise<string | null>} URL of the track or null if not found
+	 */
+	private async getTrackUrl(
+		trackId: string,
+		source: string,
+	): Promise<string | null> {
+		try {
+			if (source === "url") {
+				return trackId;
 			}
 
-			this.state.isPlaying = true;
+			const plugin = bot.pluginManager.getPlugin(source);
+			if (!plugin?.getTrackUrl) {
+				bot.logger.error(
+					bot.locale.t("player.error.plugin_not_found", { source }),
+				);
+				return null;
+			}
 
-			this.updateActivity(track.info);
+			const url = await plugin.getTrackUrl(trackId);
+			if (!url) {
+				bot.logger.error(
+					bot.locale.t("errors.track_url_not_found", { trackId }),
+				);
+				return null;
+			}
 
-			await this.setupTrackEndFade({ ...track, url: trackUrl });
+			return url;
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.PLAYBACK_ERROR}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("player.error.get_track_url", {
+					trackId,
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
+			return null;
 		}
 	}
 
 	/**
-	 * Gets the URL of a track
-	 * @param {string} trackId - Track ID
-	 * @param {string} source - Source of the track
-	 * @returns {Promise<string>} URL of the track
-	 */
-	private async getTrackUrl(trackId: string, source: string): Promise<string> {
-		const plugin = bot.pluginManager.getPlugin(source);
-		return plugin?.getTrackUrl ? await plugin.getTrackUrl(trackId) : "";
-	}
-
-	/**
-	 * Creates a track resource
+	 * @en Creates a track resource.
+	 * @ru Создает ресурс трека.
 	 * @param {Track & { url: string }} track - Track with URL
 	 * @returns {AudioResource} Track resource
 	 */
@@ -441,39 +510,41 @@ export default class PlayerService {
 	}
 
 	/**
-	 * Sets up fade effects
+	 * @en Sets up fade effects.
+	 * @ru Устанавливает эффекты затухания.
 	 */
 	private setupFadeEffects(): void {
 		if (this.timers.fadeOut) clearTimeout(this.timers.fadeOut);
-		setTimeout(
-			() => this.smoothVolumeChange(this.state.volume / 100, 3000, true, true),
+		this.timers.fadeOut = setTimeout(
+			() =>
+				void this.smoothVolumeChange(this.state.volume / 100, 3000, true, true),
 			500,
 		);
 	}
 
 	/**
-	 * Manages the fade out timeout
+	 * @en Manages the fade out timeout.
+	 * @ru Управляет таймаутом затухания.
 	 * @param {number} duration - Duration of the fade out
 	 */
 	private manageFadeOutTimeout(duration?: number): void {
 		if (this.timers.fadeOut) {
 			clearTimeout(this.timers.fadeOut);
 			this.timers.fadeOut = null;
-			logger.info(`${bot.loggerMessages.CLEARED_EXISTING_FADEOUT_TIMEOUT}`);
+			bot.logger.debug(bot.locale.t("player.fadeout_cleared"));
 		}
 
 		if (duration && duration > 0) {
 			this.timers.fadeOut = setTimeout(() => {
-				this.smoothVolumeChange(0, 6000, false);
+				void this.smoothVolumeChange(0, 6000, false);
 			}, duration);
-			logger.info(
-				`${bot.loggerMessages.SET_NEW_FADEOUT_TIMEOUT_FOR_DURATION(duration)}`,
-			);
+			bot.logger.debug(bot.locale.t("player.fadeout_set", { duration }));
 		}
 	}
 
 	/**
-	 * Sets up the track end fade
+	 * @en Sets up the track end fade.
+	 * @ru Устанавливает затухание в конце трека.
 	 * @param {Track & { url: string }} track - Track with URL
 	 */
 	private async setupTrackEndFade(
@@ -484,47 +555,76 @@ export default class PlayerService {
 	}
 
 	/**
-	 * Gets the duration of a track
+	 * @en Gets the duration of a track.
+	 * @ru Получает продолжительность трека.
 	 * @param {string} url - URL of the track
 	 * @returns {Promise<number>} Duration of the track
 	 */
 	private async getDuration(url: string): Promise<number> {
-		return await getAudioDurationInSeconds(
-			url,
-			pathToFfmpeg.ffprobePath || undefined,
-		);
+		try {
+			return await getAudioDurationInSeconds(
+				url,
+				process.env.FFPROBE_PATH || pathToFfmpeg.ffprobePath || undefined,
+			);
+		} catch (error) {
+			bot.logger.error(`Failed to get audio duration for ${url}: ${error}`);
+			return 0;
+		}
 	}
 
 	/**
-	 * Queues a track
+	 * @en Queues a track.
+	 * @ru Добавляет трек в очередь.
 	 * @param {Track} track - Track to queue
 	 */
 	private async queueTrack(track: Track): Promise<void> {
 		if (this.guildId) {
-			await this.queueService.setTrack(this.guildId, track);
+			await bot.queueService.setTrack(this.guildId, track);
 		}
 	}
 
 	/**
-	 * Loads the next track
+	 * @en Loads the next track.
+	 * @ru Загружает следующий трек.
 	 */
 	private async loadNextTrack(): Promise<void> {
 		if (this.guildId) {
-			this.state.nextTrack = await this.queueService.getTrack(this.guildId);
+			this.state.nextTrack = await bot.queueService.getTrack(this.guildId);
 		}
 	}
 
 	/**
-	 * Plays the next track
+	 * @en Plays the next track.
+	 * @ru Проигрывает следующий трек.
 	 */
 	private async playNextTrack(): Promise<void> {
-		if (this.state.loop) {
-			await this.playTrack(this.state.lastTrack!);
+		if (this.state.loop && this.state.currentTrack) {
+			await this.playTrack(this.state.currentTrack);
 		} else if (this.state.nextTrack) {
 			await this.playTrack(this.state.nextTrack);
 			if (!this.state.loop) {
 				this.state.nextTrack = null;
 				await this.loadNextTrack();
+			}
+		} else if (this.state.wave && this.state.lastTrack?.trackId) {
+			if (this.state.lastTrack.source === "yandex") {
+				const recommendations = await this.getRecommendations(
+					this.state.lastTrack.trackId,
+				);
+				if (recommendations.length > 0) {
+					await this.playTrack(recommendations[0]);
+					await bot.queueService.setLastTrackID(
+						this.guildId,
+						recommendations[0].trackId,
+					);
+					this.state.lastTrack = recommendations[0];
+				} else {
+					this.reset();
+					this.updateActivity();
+				}
+			} else {
+				this.reset();
+				this.updateActivity();
 			}
 		} else {
 			this.reset();
@@ -533,11 +633,48 @@ export default class PlayerService {
 	}
 
 	/**
-	 * Sets up the disconnect handler
+	 * @en Gets recommendations for a track.
+	 * @ru Получает рекомендации для трека.
+	 * @param {string} trackId - Track ID
+	 * @returns {Promise<Track[]>} Recommendations
+	 */
+	private async getRecommendations(trackId: string): Promise<Track[]> {
+		const plugin = bot.pluginManager.getPlugin(
+			this.state.lastTrack?.source || "",
+		);
+		const recommendations = plugin?.getRecommendations
+			? await plugin.getRecommendations(trackId)
+			: [];
+
+		return recommendations.map(
+			(rec: { id: string; title: string; artists: any[] }) => ({
+				source: "yandex",
+				trackId: rec.id,
+				info: `${rec.title} - ${rec.artists.map((a: { name: string }) => a.name).join(", ")}`,
+				requestedBy: this.state.lastTrack?.requestedBy,
+			}),
+		);
+	}
+
+	/**
+	 * @en Sets up the disconnect handler.
+	 * @ru Устанавливает обработчик отключения.
 	 */
 	private setupDisconnectHandler(): void {
-		this.state.connection?.on(VoiceConnectionStatus.Disconnected, async () => {
+		if (!this.state.connection) return;
+
+		// Удаляем предыдущий обработчик, если он существует
+		if (this.disconnectHandler) {
+			this.state.connection.off(
+				VoiceConnectionStatus.Disconnected,
+				this.disconnectHandler,
+			);
+			this.disconnectHandler = null;
+		}
+
+		this.disconnectHandler = async () => {
 			try {
+				// Пытаемся переподключиться
 				await Promise.race([
 					entersState(
 						this.state.connection!,
@@ -550,38 +687,60 @@ export default class PlayerService {
 						RECONNECTION_TIMEOUT,
 					),
 				]);
-			} catch {
+
+				// Если успешно переподключились, восстанавливаем воспроизведение
+				if (this.state.currentTrack && !this.state.isPlaying) {
+					await this.playTrack(this.state.currentTrack);
+				}
+			} catch (error) {
+				bot.logger.error(
+					bot.locale.t("player.error.reconnection_failed", {
+						error: error instanceof Error ? error.message : String(error),
+					}),
+				);
 				this.handleDisconnect();
 			}
-		});
+		};
+
+		this.state.connection.on(
+			VoiceConnectionStatus.Disconnected,
+			this.disconnectHandler,
+		);
 	}
 
 	/**
-	 * Handles the disconnect event
+	 * @en Handles the disconnect event.
+	 * @ru Обрабатывает событие отключения.
 	 */
 	private handleDisconnect(): void {
 		if (this.state.connection) {
 			this.state.connection.removeAllListeners();
 			this.state.connection.destroy();
+			this.state.connection = null;
 		}
 		this.reset();
 		this.updateActivity();
 	}
 
 	/**
-	 * Starts the empty channel check
+	 * @en Starts the empty channel check.
+	 * @ru Запускает проверку пустого канала.
 	 */
 	private startEmptyCheck(): void {
-		if (this.timers.emptyChannelCheck)
-			clearInterval(this.timers.emptyChannelCheck);
-		this.timers.emptyChannelCheck = setInterval(
-			() => this.checkEmpty(),
+		if (this.timers.emptyChannelInterval) {
+			clearInterval(this.timers.emptyChannelInterval);
+			this.timers.emptyChannelInterval = null;
+		}
+
+		this.timers.emptyChannelInterval = setInterval(
+			() => void this.checkEmpty(),
 			EMPTY_CHANNEL_CHECK_INTERVAL,
 		);
 	}
 
 	/**
-	 * Checks if the voice channel is empty
+	 * @en Checks if the voice channel is empty.
+	 * @ru Проверяет, пустой ли голосовой канал.
 	 */
 	private async checkEmpty(): Promise<void> {
 		if (!this.state.connection || !this.state.channelId) return;
@@ -597,39 +756,52 @@ export default class PlayerService {
 			const membersCount = channel.members.filter((m) => !m.user.bot).size;
 
 			if (membersCount === 0) {
-				if (!this.timers.emptyChannel) {
-					this.timers.emptyChannel = setTimeout(() => {
+				if (!this.timers.emptyChannelTimeout) {
+					this.timers.emptyChannelTimeout = setTimeout(() => {
 						this.leaveChannel();
-						this.timers.emptyChannel = null;
+						this.timers.emptyChannelTimeout = null;
 					}, 30000);
 				}
-			} else if (this.timers.emptyChannel) {
-				clearTimeout(this.timers.emptyChannel);
-				this.timers.emptyChannel = null;
+			} else {
+				if (this.timers.emptyChannelTimeout) {
+					clearTimeout(this.timers.emptyChannelTimeout);
+					this.timers.emptyChannelTimeout = null;
+				}
 			}
 		} catch (error) {
-			logger.error(`${bot.loggerMessages.EMPTY_CHECK_ERROR}: ${error}`);
+			bot.logger.error(
+				bot.locale.t("errors.empty_check", { error: String(error) }),
+			);
 			this.handleDisconnect();
 		}
 	}
 
 	/**
-	 * Gets the voice channel
+	 * @en Gets the voice channel.
+	 * @ru Получает голосовой канал.
 	 * @returns {Promise<VoiceChannel | null>} Voice channel or null
 	 */
 	private async getVoiceChannel(): Promise<VoiceChannel | null> {
 		if (!this.state.channelId) {
-			logger.error(`${bot.loggerMessages.CHANNEL_ID_IS_NULL}`);
+			bot.logger.error(bot.locale.t("errors.channel_id_null"));
 			return null;
 		}
 
-		const guild = await bot.client.guilds.fetch(this.guildId);
-		const channel = await guild.channels.fetch(this.state.channelId);
-		return channel as VoiceChannel;
+		try {
+			const guild = await bot.client.guilds.fetch(this.guildId);
+			const channel = (await guild.channels.fetch(
+				this.state.channelId,
+			)) as VoiceChannel;
+			return channel;
+		} catch (error) {
+			bot.logger.error(`Failed to fetch voice channel: ${error}`);
+			return null;
+		}
 	}
 
 	/**
-	 * Handles the track end event
+	 * @en Handles the track end event.
+	 * @ru Обрабатывает событие окончания трека.
 	 */
 	private handleTrackEnd = async (): Promise<void> => {
 		this.state.lastTrack = this.state.currentTrack;
@@ -639,17 +811,93 @@ export default class PlayerService {
 	};
 
 	/**
-	 * Resets the player state
+	 * @en Clears all timers.
+	 * @ru Очищает все таймеры.
+	 */
+	private clearAllTimers(): void {
+		for (const key in this.timers) {
+			if (this.timers.hasOwnProperty(key)) {
+				const timer = this.timers[key as keyof PlayerTimers];
+				if (timer) {
+					clearTimeout(timer);
+					clearInterval(timer as NodeJS.Timeout);
+					this.timers[key as keyof PlayerTimers] = null;
+				}
+			}
+		}
+	}
+
+	/**
+	 * @en Resets the player state.
+	 * @ru Сбрасывает состояние плеера.
 	 */
 	private reset(): void {
-		this.manageFadeOutTimeout();
-		this.state.connection = null;
-		this.state.currentTrack = this.state.nextTrack = null;
-		this.state.isPlaying = false;
+		this.clearAllTimers();
 
-		Object.values(this.timers).forEach((timer) => {
-			if (timer) clearTimeout(timer);
-		});
-		this.timers = {};
+		// Reset the state
+		this.state = {
+			...this.state,
+			isPlaying: false,
+			currentTrack: null,
+			nextTrack: null,
+			resource: null,
+		};
+	}
+
+	/**
+	 * @en Destroys the player.
+	 * @ru Уничтожает плеер.
+	 */
+	public async destroy(): Promise<void> {
+		try {
+			this.player.stop();
+			this.removeAllListeners();
+
+			this.clearAllTimers();
+
+			// Cleanup disconnect handler
+			if (this.disconnectHandler && this.state.connection) {
+				this.state.connection.off(
+					VoiceConnectionStatus.Disconnected,
+					this.disconnectHandler,
+				);
+				this.disconnectHandler = null;
+			}
+
+			this.reset();
+		} catch (error) {
+			bot.logger.error(
+				bot.locale.t("errors.player.destroy", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
+			);
+		}
+	}
+
+	/**
+	 * @en Sets the fade out timer.
+	 * @ru Устанавливает таймер затухания.
+	 * @param {() => void} callback - Callback function
+	 * @param {number} duration - Duration in milliseconds
+	 */
+	protected setFadeOutTimer(callback: () => void, duration: number): void {
+		if (this.timers.fadeOut) {
+			clearTimeout(this.timers.fadeOut);
+		}
+		this.timers.fadeOut = setTimeout(callback, duration);
+	}
+
+	/**
+	 * @en Sets the empty channel timer.
+	 * @ru Устанавливает таймер пустого канала.
+	 * @param {() => void} callback - Callback function
+	 * @param {number} duration - Duration in milliseconds
+	 */
+	protected setEmptyChannelTimer(callback: () => void, duration: number): void {
+		if (this.timers.emptyChannelInterval) {
+			clearInterval(this.timers.emptyChannelInterval);
+			this.timers.emptyChannelInterval = null;
+		}
+		this.timers.emptyChannelInterval = setTimeout(callback, duration);
 	}
 }

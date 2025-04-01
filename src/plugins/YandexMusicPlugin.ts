@@ -15,7 +15,6 @@ import {
 	type SearchTrackResult,
 	TrackResultSchema,
 } from "../types/index.js";
-import { logger } from "../utils/index.js";
 import { bot } from "../bot.js";
 
 const CACHE_TTL = 600; // 10 minutes
@@ -38,6 +37,8 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	private cache = new NodeCache({
 		stdTTL: CACHE_TTL,
 		checkperiod: CACHE_CHECK_PERIOD,
+		maxKeys: 1000,
+		deleteOnExpire: true,
 	});
 	private initialized = false;
 
@@ -104,8 +105,11 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 			return [];
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_PROCESSING_URL(url)}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("errors.plugin.url_processing", {
+					name: this.name,
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return [];
 		}
@@ -138,10 +142,13 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				)) || ""
 			);
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_GETTING_TRACK_URL(trackId)}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("errors.track.url_not_found", {
+					trackId,
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
-			return "";
+			throw error;
 		}
 	}
 
@@ -161,9 +168,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				playlistName,
 			);
 			if (!playlistInfo?.tracks) {
-				logger.warn(
-					`${bot.loggerMessages.PLAYLIST_NOT_FOUND_OR_EMPTY(playlistId)}`,
-				);
+				bot.logger.warn(bot.locale.t("errors.playlist.not_found"));
 				return [];
 			}
 
@@ -182,8 +187,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_FETCHING_PLAYLIST_TRACKS(playlistId)}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("errors.playlist.processing", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return [];
 		}
@@ -204,8 +211,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_FETCHING_ALBUM_TRACKS(albumId)}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("errors.track.processing", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return [];
 		}
@@ -221,7 +230,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		try {
 			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
 			if (!similarTracks?.similarTracks) {
-				logger.warn(`${bot.loggerMessages.NO_SIMILAR_TRACKS_FOUND(trackId)}`);
+				bot.logger.warn(
+					bot.locale.t("plugins.yandex.no_similar_tracks_found", { trackId }),
+				);
 				return [];
 			}
 
@@ -230,8 +241,8 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_FETCHING_SIMILAR_TRACKS(trackId)}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				`${bot.locale.t("plugins.yandex.error_fetching_similar_tracks", { trackId })}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 			return [];
 		}
@@ -305,8 +316,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	): SearchTrackResult | null {
 		const validation = TrackResultSchema.safeParse(searchResult);
 		if (!validation.success) {
-			logger.warn(
-				`${bot.loggerMessages.INVALID_TRACK_DATA(JSON.stringify(validation.error))}`,
+			bot.logger.warn(
+				bot.locale.t("errors.track.invalid_data", {
+					error: JSON.stringify(validation.error),
+				}),
 			);
 			return null;
 		}
@@ -322,7 +335,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		const uid = Number(process.env.YM_USER_ID);
 
 		if (!access_token || isNaN(uid)) {
-			throw new Error(bot.loggerMessages.MISSING_REQUIRED_PARAMETERS);
+			throw new Error(bot.locale.t("errors.plugin.missing_config"));
 		}
 
 		const config = { access_token, uid };
@@ -330,9 +343,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 		if (!validation.success) {
 			throw new Error(
-				bot.loggerMessages.INVALID_CONFIGURATION(
-					validation.error.errors.map((err) => err.message).join(", "),
-				),
+				bot.locale.t("errors.plugin.invalid_config", {
+					errors: validation.error.errors.map((err) => err.message).join(", "),
+				}),
 			);
 		}
 
@@ -351,10 +364,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			await Promise.all([this.wrapper.init(config), this.api.init(config)]);
 			this.initialized = true;
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_INITIALIZING_YANDEX_SERVICE}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				`${bot.locale.t("plugins.yandex.error_initializing_service")}: ${error instanceof Error ? error.message : String(error)}`,
 			);
-			throw new Error(bot.loggerMessages.FAILED_TO_INITIALIZE_YANDEX_SERVICE);
+			throw new Error(bot.locale.t("plugins.yandex.failed_to_initialize"));
 		}
 	}
 
@@ -372,8 +385,8 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			const result = await retry(() => this.api.searchTracks(trackName), {
 				retries: MAX_RETRIES,
 				onRetry: (error: Error) =>
-					logger.warn(
-						`${bot.loggerMessages.RETRYING_SEARCH_FOR_TRACK(trackName)}: ${error.message}`,
+					bot.logger.warn(
+						`${bot.locale.t("plugins.yandex.retrying_search", { trackName })}: ${error.message}`,
 					),
 			});
 
@@ -396,8 +409,11 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 			return validatedTracks;
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_TRACK_SEARCH(trackName)}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("errors.track.search", {
+					query: trackName,
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			return [];
 		}
@@ -417,5 +433,33 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			.toString()
 			.padStart(2, "0");
 		return `${minutes}:${seconds}`;
+	}
+
+	public async destroy(): Promise<void> {
+		this.results = [];
+		this.cache.flushAll();
+
+		// Очищаем API клиентов через их методы
+		if (this.wrapper) {
+			this.wrapper = new WrappedYMApi();
+		}
+		if (this.api) {
+			this.api = new YMApi();
+		}
+
+		this.initialized = false;
+	}
+
+	private startCacheCleanup(): void {
+		setInterval(() => {
+			const stats = this.cache.getStats();
+			if (stats.keys > 800) {
+				this.cache.flushAll();
+			}
+		}, CACHE_CHECK_PERIOD * 1000);
+	}
+
+	constructor() {
+		this.startCacheCleanup();
 	}
 }

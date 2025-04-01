@@ -1,13 +1,14 @@
 import chokidar from "chokidar";
 import { dirname } from "dirname-filename-esm";
 import { DIService, MetadataStorage } from "discordx";
-import dotenv from "dotenv";
+import { config } from "dotenv";
 import { resolve } from "@discordx/importer";
 import { bot } from "./bot.js";
-import logger from "./utils/logger.js";
+import { resolve as r } from "path";
 
 const __dirname = dirname(import.meta);
-dotenv.config();
+
+config({ path: r(dirname(import.meta), ".env") });
 
 /** Timeout constants */
 const CONSTANTS = {
@@ -48,16 +49,16 @@ async function loadFiles(src: string): Promise<void> {
 		await Promise.all(
 			files.map((file) =>
 				import(file).catch((error) =>
-					logger.error(
-						`${bot.loggerMessages.DEV_FAILDE_TO_IMPORT_FILE(file)}`,
+					bot.logger.error(
+						// `${bot.loggerMessages.DEV_FAILDE_TO_IMPORT_FILE(file)}`,
 						error,
 					),
 				),
 			),
 		);
 	} catch (error) {
-		logger.error(
-			`${bot.loggerMessages.DEV_FAILDE_TO_LOAD_FILE_FROM(src)}`,
+		bot.logger.error(
+			// `${bot.loggerMessages.DEV_FAILDE_TO_LOAD_FILE_FROM(src)}`,
 			error,
 		);
 	}
@@ -81,9 +82,9 @@ async function reload(): Promise<void> {
 		bot.removeEvents();
 		bot.initEvents();
 
-		logger.info(`${bot.loggerMessages.RELOAD_SUCCESS}`);
+		// bot.logger.info();
 	} catch (error) {
-		logger.error(`${bot.loggerMessages.RELOAD_ERROR}`, error);
+		bot.logger.error(error);
 	}
 }
 
@@ -92,6 +93,8 @@ async function reload(): Promise<void> {
  */
 async function run(): Promise<void> {
 	try {
+		await bot.initialize()
+
 		await Promise.all([
 			loadFiles(patterns.commands),
 			loadFiles(patterns.events),
@@ -101,7 +104,7 @@ async function run(): Promise<void> {
 
 		const token = process.env.DISCORD_TOKEN;
 		if (!token) {
-			throw new Error(bot.messages.BOT_TOKEN_ERROR);
+			throw new Error(`token error`);
 		}
 
 		await bot.start(token);
@@ -127,7 +130,7 @@ async function run(): Promise<void> {
 				.on("unlink", debouncedReload());
 		}
 	} catch (error) {
-		logger.error(`${bot.loggerMessages.BOT_START_ERROR}`, error);
+		bot.logger.error(error);
 		process.exit(1);
 	}
 }

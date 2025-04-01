@@ -31,3 +31,4 @@ node_modules
 node_modules
 logs
 prisma/migrations
+.prisma

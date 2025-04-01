@@ -1,86 +1,123 @@
-import NodeCache from "node-cache";
-import { MusicServicePlugin } from "../interfaces/index.js";
-import logger from "../utils/logger.js";
+import type { MusicServicePlugin } from "../interfaces/index.js";
 import { bot } from "../bot.js";
 
+/**
+ * Manages music service plugins with improved caching and performance
+ */
 export default class PluginManager {
-	private plugins: Map<string, MusicServicePlugin> = new Map();
-	private urlCache: NodeCache = new NodeCache({
-		stdTTL: 3600,
-		checkperiod: 600,
-	});
+	private readonly plugins: Map<string, MusicServicePlugin> = new Map();
+	private readonly urlCache: Map<string, string> = new Map();
+	private readonly logger = bot.logger;
+	private readonly locale = bot.locale;
 
 	/**
-	 * Registers a new plugin.
-	 * @param plugin - The plugin to register.
+	 * Registers a new plugin with proper validation and error handling
 	 */
-	registerPlugin(plugin: MusicServicePlugin): void {
+	registerPlugin(plugin: MusicServicePlugin): boolean {
 		try {
+			if (!plugin?.name) {
+				this.logger.error("Plugin name is required");
+			}
+
+			if (this.plugins.has(plugin.name)) {
+				this.logger.warn(`Plugin "${plugin.name}" is already registered`);
+				return false;
+			}
+
 			this.plugins.set(plugin.name, plugin);
-			logger.info(
-				`${bot.loggerMessages.PLUGIN_REGISTERED_SUCCESSFULLY(plugin.name)}`,
-			);
+
+			return true;
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.FAILED_TO_REGISTER_PLUGIN(plugin.name)}:`,
+			this.handleError(
+				"registerPlugin",
 				error,
+				`Failed to register plugin: ${plugin?.name || "unknown"}`,
 			);
+			return false;
 		}
 	}
 
 	/**
-	 * Retrieves a plugin by its name.
-	 * @param name - The name of the plugin.
-	 * @returns The plugin if found, otherwise undefined.
+	 * Gets plugin by name with type safety
 	 */
 	getPlugin(name: string): MusicServicePlugin | undefined {
 		return this.plugins.get(name);
 	}
 
 	/**
-	 * Retrieves all registered plugins.
-	 * @returns An array of all plugins.
+	 * Returns all registered plugins as an array
 	 */
-	getAllPlugins(): MusicServicePlugin[] {
+	getAllPlugins(): readonly MusicServicePlugin[] {
 		return Array.from(this.plugins.values());
 	}
 
 	/**
-	 * Finds a plugin that matches a given URL.
-	 * @param url - The URL to match against plugin patterns.
-	 * @returns The matching plugin if found, otherwise undefined.
+	 * Finds a plugin that matches the URL with cache optimization
 	 */
 	getPluginForUrl(url: string): MusicServicePlugin | undefined {
 		try {
-			const cachedPluginName = this.urlCache.get<string>(url);
-			if (cachedPluginName) {
-				logger.debug(
-					`${bot.loggerMessages.CACHE_HIT_FOR_URL(url)}:`,
-					cachedPluginName,
-				);
-				return this.plugins.get(cachedPluginName);
+			if (typeof url !== "string") {
+				throw new Error("URL must be a string");
 			}
 
-			const plugin = this.getAllPlugins().find((plugin) =>
-				plugin.urlPatterns.some((pattern) => pattern.test(url)),
+			// Check cache first
+			const cachedPluginName = this.urlCache.get(url);
+			if (cachedPluginName) {
+				const plugin = this.plugins.get(cachedPluginName);
+				if (plugin) {
+					this.logger.debug(this.locale.t("logger.plugin.cache.hit"), {
+						plugin: plugin.name,
+					});
+					return plugin;
+				}
+			}
+
+			// Find matching plugin
+			const plugin = this.getAllPlugins().find((p) =>
+				p.urlPatterns?.some((pattern) => pattern.test(url)),
 			);
 
 			if (plugin) {
 				this.urlCache.set(url, plugin.name);
-				logger.debug(
-					`${bot.loggerMessages.PLUGIN_FOUND_FOR_URL(url, plugin.name)}`,
-				);
+				this.logger.debug("Plugin found for URL", {
+					url,
+					plugin: plugin.name,
+				});
 			} else {
-				logger.debug(`${bot.loggerMessages.PLUGIN_NOT_FOUND_FOR_URL(url)}`);
+				this.logger.debug(this.locale.t("logger.plugin.not_found"), { url });
 			}
 
 			return plugin;
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.PLUGIN_NOT_FOUND_FOR_URL(url)}:`,
+			this.handleError(
+				"getPluginForUrl",
 				error,
+				`Error finding plugin for URL: ${url}`,
 			);
 			return undefined;
 		}
+	}
+
+	/**
+	 * Clears the URL cache
+	 */
+	clearCache(): void {
+		const cacheSize = this.urlCache.size;
+		this.urlCache.clear();
+		this.logger.debug("URL cache cleared", { previousSize: cacheSize });
+	}
+
+	/**
+	 * Unified error handling
+	 */
+	private handleError(context: string, error: unknown, message?: string): void {
+		const errorMessage = message || `Error in ${context}`;
+		const errorObj = error instanceof Error ? error : new Error(String(error));
+
+		console.error(errorMessage, {
+			error: errorObj.message,
+			stack: errorObj.stack,
+			context,
+		});
 	}
 }

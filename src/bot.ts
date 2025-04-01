@@ -1,40 +1,48 @@
-import { dirname } from "dirname-filename-esm";
-import { IntentsBitField, type Interaction, type Message } from "discord.js";
+import {
+	type ClientEvents,
+	IntentsBitField,
+	type Interaction,
+	type Message,
+} from "discord.js";
 import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
-import dotenv from "dotenv";
 
 import {
+	CacheQueueService,
 	CommandService,
 	NameService,
 	PlayerManager,
 	PluginManager,
-	QueueService,
-	ProxyService,
 } from "./services/index.js";
-import logger from "./utils/logger.js";
-import { startServer } from "./server.js";
-import {
-	initializeLanguage,
-	type LocaleMessages,
-	type LoggerMessages,
-} from "./locales/index.js";
 
-const __dirname = dirname(import.meta);
-dotenv.config();
+import { config } from "dotenv";
+import { dirname } from "dirname-filename-esm";
+import { resolve } from "path";
+import translations from "./locales/en.json" with { type: "json" };
+import { createLogger, createLocale } from "./utils/index.js";
 
-class Bot {
+config({ path: resolve(dirname(import.meta), "../.env") });
+
+/**
+ * Bot class
+ */
+export class Bot {
 	public readonly client: Client;
 	public nameService!: NameService;
-	public queueService!: QueueService;
+	public queueService: any;
+	public databaseModule: any;
 	public playerManager!: PlayerManager;
 	public commandService!: CommandService;
-	public proxyService!: ProxyService;
 	public pluginManager!: PluginManager;
-	public messages!: LocaleMessages;
-	public loggerMessages!: LoggerMessages;
+	public logger = createLogger(`ragu2`);
+	public locale = createLocale<typeof translations>(`ragu2`);
+	private eventHandlers: Map<
+		string,
+		(event: Interaction | Message<boolean>) => void
+	> = new Map();
+
 	constructor() {
 		this.client = new Client({
 			intents: [
@@ -45,159 +53,175 @@ class Bot {
 				IntentsBitField.Flags.GuildVoiceStates,
 				IntentsBitField.Flags.MessageContent,
 			],
-			silent: false,
-			simpleCommand: {
-				prefix: "!",
-			},
+			silent: true,
+			simpleCommand: { prefix: "!" },
 		});
-
-		this.initializeServices()
-			.then(() => this.setupEventListeners())
-			.catch((error) =>
-				logger.error(this.messages.ERROR_INITIALIZATION, error),
-			);
 	}
 
 	/**
-	 * Initializes services
-	 * @returns {Promise<void>}
+	 * Initialize bot
 	 */
-	private async initializeServices(): Promise<void> {
+	public async initialize(): Promise<void> {
 		try {
-			this.messages = (await initializeLanguage()).messages;
-			this.loggerMessages = (await initializeLanguage()).loggerMessages;
+			await this.locale.load();
+			await this.locale.setLanguage(process.env.BOT_LOCALE || "en");
+
+			this.setupEvents();
+			await this.initServices();
+
+			this.logger.info(this.locale.t("bot.status.initialized"));
+		} catch (error) {
+			this.logger.error(this.locale.t("bot.status.init_failed"));
+			throw error;
+		}
+	}
+
+	/**
+	 * Initialize services
+	 */
+	private async initServices(): Promise<void> {
+		try {
 			this.commandService = new CommandService();
 			this.pluginManager = new PluginManager();
-			await this.registerPlugins();
+			this.loadPlugins();
+			
+			if (!this.queueService && this.databaseModule) {
+				this.queueService = this.databaseModule.exports.getQueueService();
+			} else {
+				this.queueService = new CacheQueueService();;
+			}
 
-			this.queueService = new QueueService();
 			this.playerManager = new PlayerManager(
 				this.queueService,
 				this.commandService,
 			);
+
 			this.nameService = new NameService(
 				this.queueService,
 				this.playerManager,
 				this.pluginManager,
 			);
 		} catch (error) {
-			logger.error(
-				`${this.loggerMessages.BOT_FAILED_INITIALIZATION_SERVICES}`,
-				error,
-			);
+			this.logger.error(this.locale.t("messages.bot.initialization.failed"));
 			throw error;
 		}
 	}
 
 	/**
-	 * Registers plugins
-	 * @returns {Promise<void>}
+	 * Load plugins
 	 */
-	private async registerPlugins(): Promise<void> {
-		const pluginsDir = path.resolve(__dirname, "plugins");
+	private async loadPlugins(): Promise<void> {
+		const pluginsDir = path.resolve(dirname(import.meta), "plugins");
 
 		try {
 			const files = await fs.promises.readdir(pluginsDir);
+			const pluginFiles = files.filter(
+				(file) => file.endsWith(".ts") || file.endsWith(".js"),
+			);
+
 			await Promise.all(
-				files
-					.filter((file) => file.endsWith(".ts") || file.endsWith(".js"))
-					.map(async (file) => {
+				pluginFiles.map(async (file) => {
+					try {
 						const pluginPath = String(
 							pathToFileURL(path.join(pluginsDir, file)),
 						);
-						try {
-							const { default: Plugin } = await import(pluginPath);
-							this.pluginManager.registerPlugin(new Plugin());
-						} catch (error) {
-							logger.error(
-								`${this.loggerMessages.PLUGIN_REGISTRATION_FAILED(file)}`,
-								error,
-							);
-						}
-					}),
+						const { default: Plugin } = await import(pluginPath);
+						const plugin = new Plugin();
+						this.pluginManager.registerPlugin(plugin);
+						this.logger.debug(`Plugin loaded: ${file}`);
+					} catch (error) {
+						this.logger.error(
+							this.locale.t("logger.plugin.register_error", { file }),
+							error,
+						);
+					}
+				}),
 			);
 		} catch (error) {
-			logger.error(
-				`${this.loggerMessages.PLUGIN_REGISTRATION_FAILED_FATAL}`,
-				error,
-			);
+			this.logger.error(this.locale.t("logger.plugin.register_error"));
 			throw error;
 		}
 	}
 
 	/**
-	 * Sets up event listeners
+	 * Setup events
 	 */
-	private setupEventListeners(): void {
-		this.client.once("ready", this.handleReady.bind(this));
-		this.client.on("interactionCreate", this.handleInteraction.bind(this));
-		this.client.on("messageCreate", this.handleMessage.bind(this));
+	private setupEvents(): void {
+		const readyHandler = async () => {
+			try {
+				await this.client.initApplicationCommands();
+			} catch (error) {
+				this.logger.error(this.locale.t("bot.status.init_failed"), error);
+			}
+		};
+
+		const interactionHandler = (interaction: Interaction) => {
+			this.client.executeInteraction(interaction);
+		};
+
+		const messageHandler = (message: Message<boolean>) => {
+			void this.client.executeCommand(message);
+		};
+
+		this.eventHandlers.set("ready", readyHandler);
+		this.eventHandlers.set(
+			"interactionCreate",
+			interactionHandler as (...args: unknown[]) => void,
+		);
+		this.eventHandlers.set(
+			"messageCreate",
+			messageHandler as (...args: unknown[]) => void,
+		);
+
+		this.client.once("ready", readyHandler);
+		this.client.on("interactionCreate", interactionHandler);
+		this.client.on("messageCreate", messageHandler);
+
+		this.logger.debug("Discord client events are set");
 	}
 
 	/**
-	 * Handles the bot being ready
-	 * @returns {Promise<void>}
-	 */
-	private async handleReady(): Promise<void> {
-		try {
-			await this.client.initApplicationCommands();
-			logger.info(`${this.loggerMessages.BOT_INITIALIZED}`);
-
-			await startServer();
-			logger.info(`${this.loggerMessages.API_SERVER_STARTED_SUCCESSFULLY}`);
-		} catch (error) {
-			logger.error(`${this.loggerMessages.BOT_INITIALIZATION_FAILED}`, error);
-		}
-	}
-
-	/**
-	 * Handles interactions
-	 * @param {Interaction} interaction - The interaction to handle
-	 */
-	private handleInteraction(interaction: Interaction): void {
-		this.client.executeInteraction(interaction);
-	}
-
-	/**
-	 * Handles messages
-	 * @param {Message} message - The message to handle
-	 */
-	private handleMessage(message: Message): void {
-		void this.client.executeCommand(message);
-	}
-
-	/**
-	 * Starts the bot
-	 * @param {string} token - The bot token
-	 * @returns {Promise<void>}
+	 * Start bot
 	 */
 	public async start(token: string): Promise<void> {
 		try {
-			await initializeLanguage();
 			await this.client.login(token);
-			logger.info(`${this.loggerMessages.BOT_STARTED_SUCCESSFULLY}`);
+			this.logger.info(this.locale.t("messages.bot.start.success"));
 		} catch (error) {
-			logger.error(`${this.loggerMessages.BOT_START_ERROR}:`, error);
+			this.logger.error(this.locale.t("messages.bot.start.error"));
 			throw error;
 		}
 	}
 
 	/**
-	 * Removes all event listeners
+	 * Remove events
 	 */
 	public removeEvents(): void {
-		this.client.removeAllListeners();
+		for (const [event, handler] of this.eventHandlers) {
+			this.client.off(
+				event as keyof ClientEvents,
+				handler as (...args: unknown[]) => void,
+			);
+		}
+		this.eventHandlers.clear();
 	}
 
 	/**
-	 * Initializes event listeners
+	 * Initialize events
 	 */
 	public initEvents(): void {
-		this.setupEventListeners();
+		this.setupEvents();
+	}
+
+	/**
+	 * Destroy bot
+	 */
+	public async destroy(): Promise<void> {
+		this.removeEvents();
+		await this.client.destroy();
 	}
 }
 
-/**
- * The main bot instance
- */
 export const bot = new Bot();
+
+export const createBot = () => new Bot();

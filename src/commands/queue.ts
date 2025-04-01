@@ -3,11 +3,11 @@ import {
 	GuildMember,
 	Message,
 	PermissionsBitField,
+	ReactionCollector,
 } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 import { bot } from "../bot.js";
-import logger from "../utils/logger.js";
 
 interface Track {
 	url: string;
@@ -31,18 +31,26 @@ export class QueueCommand {
 	private currentPage = 0;
 	private pages: string[] = [];
 	private message: Message | null = null;
+	private currentCollector: ReactionCollector | null = null;
 
-	@Slash({ description: `View queue`, name: "queue" })
+	@Slash({
+		name: "queue",
+		description: bot.locale.t("commands.queue.description"),
+	})
 	async queue(interaction: CommandInteraction): Promise<void> {
 		try {
 			await this.handleQueueCommand(interaction);
 		} catch (error) {
-			logger.error(`Error retrieving queue:`, error);
+			bot.logger.error(
+				bot.locale.t("errors.unexpected", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
+			);
 			await bot.commandService.reply(
 				interaction,
-				error instanceof Error
-					? `${bot.loggerMessages.ERROR_RETRIEVING_QUEUE}: ${error.message}`
-					: `${bot.loggerMessages.CRITICAL_ERROR_RETRIEVING_QUEUE}`,
+				bot.locale.t("errors.unexpected", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 		}
 	}
@@ -54,7 +62,7 @@ export class QueueCommand {
 		if (!(member instanceof GuildMember) || !member.voice.channelId) {
 			await bot.commandService.reply(
 				interaction,
-				`${bot.messages.QUEUE_ERROR_NOT_IN_VOICE_CHANNEL}`,
+				bot.locale.t("errors.voice.not_in_channel"),
 			);
 			return;
 		}
@@ -63,7 +71,7 @@ export class QueueCommand {
 		if (queue.tracks.length === 0) {
 			await bot.commandService.reply(
 				interaction,
-				`${bot.messages.QUEUE_EMPTY}`,
+				bot.locale.t("player.queue.empty"),
 			);
 			return;
 		}
@@ -98,16 +106,27 @@ export class QueueCommand {
 			}
 			this.createReactionCollector(message, interaction);
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_SETTING_UP_REACTIONS}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("errors.unexpected", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 		}
 	}
 
-	private createReactionCollector(
+	private async cleanupCollector(): Promise<void> {
+		if (this.currentCollector) {
+			this.currentCollector.stop();
+			this.currentCollector = null;
+		}
+	}
+
+	private async createReactionCollector(
 		message: Message,
 		interaction: CommandInteraction,
-	): void {
+	): Promise<void> {
+		await this.cleanupCollector();
+
 		const collector = message.createReactionCollector({
 			filter: (reaction, user) => {
 				const emoji = reaction.emoji.name as string;
@@ -119,8 +138,13 @@ export class QueueCommand {
 			time: 300000,
 		});
 
+		this.currentCollector = collector;
+
 		collector.on("collect", async (reaction, user) => {
-			if (!this.message) return;
+			if (!this.message) {
+				await this.cleanupCollector();
+				return;
+			}
 
 			try {
 				await reaction.users.remove(user.id).catch(() => {});
@@ -148,22 +172,26 @@ export class QueueCommand {
 			} catch (error) {
 				if (
 					error instanceof Error &&
-					error.message.includes(`${bot.messages.UNKNOWN_MESSAGE}`)
+					error.message.includes(bot.locale.t("errors.message.unknown"))
 				) {
 					this.message = null;
 					collector.stop();
 				} else {
-					logger.error(
-						`${bot.loggerMessages.ERROR_RETRIEVING_QUEUE}: ${error instanceof Error ? error.message : String(error)}`,
+					bot.logger.error(
+						bot.locale.t("errors.unexpected", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
 					);
 				}
 			}
 		});
 
-		collector.on("end", () => {
+		collector.on("end", async () => {
 			if (this.message?.reactions) {
-				this.message.reactions.removeAll().catch(() => {});
+				await this.message.reactions.removeAll().catch(() => {});
 			}
+			this.message = null;
+			this.currentCollector = null;
 		});
 	}
 
@@ -175,7 +203,10 @@ export class QueueCommand {
 
 	private async createPageMessage(): Promise<string> {
 		return this.pages.length > 1
-			? `${bot.messages.QUEUE_PAGES(this.pages[this.currentPage])} ${this.currentPage + 1}/${this.pages.length}`
+			? bot.locale.t("player.queue.pages", {
+					current: this.currentPage + 1,
+					total: this.pages.length,
+				})
 			: this.pages[this.currentPage];
 	}
 
@@ -195,5 +226,16 @@ export class QueueCommand {
 
 		if (currentPage) pages.push(currentPage);
 		return pages;
+	}
+
+	// Добавляем метод очистки при уничтожении команды
+	public async destroy(): Promise<void> {
+		await this.cleanupCollector();
+		if (this.message) {
+			await this.message.delete().catch(() => {});
+			this.message = null;
+		}
+		this.pages = [];
+		this.currentPage = 0;
 	}
 }

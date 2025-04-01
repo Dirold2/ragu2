@@ -5,12 +5,11 @@ import {
 } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { bot } from "../bot.js";
-import logger from "../utils/logger.js";
 
 interface Track {
 	id: string;
 	title: string;
-	artists: { name: string }[];
+	artists?: { name: string }[];
 	source: string;
 	albums?: { title?: string }[];
 }
@@ -22,13 +21,16 @@ export class PlayCommand {
 	private static readonly MIN_QUERY_LENGTH = 2;
 	private static readonly MAX_CHOICE_LENGTH = 100;
 
-	@Slash({ description: `Play track`, name: "play" })
+	@Slash({
+		name: "play",
+		description: bot.locale.t("commands.play.description"),
+	})
 	async play(
 		@SlashOption({
-			description: `Track name or URL`,
 			name: "track",
-			required: false,
+			description: bot.locale.t("commands.play.option_track"),
 			type: ApplicationCommandOptionType.String,
+			required: false,
 			autocomplete: true,
 		})
 		trackName: string | undefined,
@@ -41,9 +43,11 @@ export class PlayCommand {
 			return;
 		}
 
-		interaction.isAutocomplete()
-			? await this.handleAutocomplete(interaction, query)
-			: await this.handlePlay(interaction as CommandInteraction, query);
+		if (interaction.isAutocomplete()) {
+			await this.handleAutocomplete(interaction, query);
+		} else {
+			await this.handlePlay(interaction as CommandInteraction, query);
+		}
 	}
 
 	/**
@@ -59,11 +63,23 @@ export class PlayCommand {
 		await player.initialize("currentTrack");
 
 		if (!player.state.currentTrack?.info) {
-			await bot.commandService.reply(interaction, bot.messages.PROVIDE_TRACK);
+			if (!interaction.replied && !interaction.deferred) {
+				await bot.commandService.reply(
+					interaction,
+					bot.locale.t("player.status.nothing_playing"),
+				);
+			}
 			return;
 		}
 
-		await bot.commandService.reply(interaction, bot.messages.STARTED_PLAYING);
+		if (!interaction.replied && !interaction.deferred) {
+			await bot.commandService.reply(
+				interaction,
+				bot.locale.t("success.track.started_playing", {
+					track: player.state.currentTrack?.info,
+				}),
+			);
+		}
 		await bot.playerManager.joinChannel(interaction);
 	}
 
@@ -78,27 +94,36 @@ export class PlayCommand {
 	): Promise<void> {
 		try {
 			if (query.length < PlayCommand.MIN_QUERY_LENGTH) {
-				await interaction.respond([]);
+				if (!interaction.responded) {
+					await interaction.respond([]);
+				}
 				return;
 			}
-
 			const results = await bot.nameService.searchName(query);
-			const choices = this.processAutocompleteResults(results, query);
+			const choices = this.processAutocompleteResults(
+				results as unknown as Track[],
+				query,
+			);
 
-			await interaction.respond(
-				choices.map((choice) => ({
-					name: choice.name,
-					value: this.truncateString(
-						choice.value,
-						PlayCommand.MAX_CHOICE_LENGTH,
-					),
-				})),
-			);
+			if (!interaction.responded) {
+				await interaction.respond(
+					choices.map((choice) => ({
+						name: choice.name,
+						value: this.truncateString(
+							choice.value,
+							PlayCommand.MAX_CHOICE_LENGTH,
+						),
+					})),
+				);
+			}
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_AUTOCOMPLETE}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("logger.track.searching", { query }),
+				error,
 			);
-			await interaction.respond([]);
+			if (!interaction.responded) {
+				await interaction.respond([]);
+			}
 		}
 	}
 
@@ -112,13 +137,32 @@ export class PlayCommand {
 		results: Track[],
 		query: string,
 	): { name: string; value: string }[] {
+		if (!Array.isArray(results)) {
+			bot.logger.warn(bot.locale.t("errors.track.invalid"));
+			return [];
+		}
+
 		return results
 			.slice(0, PlayCommand.MAX_RESULTS)
-			.map((track) => ({
-				...this.createAutocompleteChoice(track),
-				relevance: this.calculateRelevance(track, query),
-			}))
-			.filter((choice) => choice.relevance > 0)
+			.map((track) => {
+				try {
+					return {
+						...this.createAutocompleteChoice(track),
+						relevance: this.calculateRelevance(track, query),
+					};
+				} catch (error) {
+					bot.logger.warn(
+						bot.locale.t("errors.track.processing", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					);
+					return null;
+				}
+			})
+			.filter(
+				(choice): choice is NonNullable<typeof choice> =>
+					choice !== null && choice.relevance > 0,
+			)
 			.sort((a, b) => b.relevance - a.relevance)
 			.map(({ name, value }) => ({ name, value }));
 	}
@@ -131,9 +175,10 @@ export class PlayCommand {
 	 */
 	private calculateRelevance(track: Track, query: string): number {
 		const lowercaseQuery = query.toLowerCase();
-		const artistMatch = track.artists.some((artist) =>
-			artist.name.toLowerCase().includes(lowercaseQuery),
-		);
+		const artistMatch =
+			track.artists?.some((artist) =>
+				artist.name.toLowerCase().includes(lowercaseQuery),
+			) ?? false;
 		const titleMatch = track.title.toLowerCase().includes(lowercaseQuery);
 		return (artistMatch ? 2 : 0) + (titleMatch ? 1 : 0);
 	}
@@ -174,21 +219,30 @@ export class PlayCommand {
 		query: string,
 	): Promise<void> {
 		try {
+			await bot.commandService.reply(
+				interaction,
+				bot.locale.t("commands.play.searching", { query }),
+			);
+
 			const results = await bot.nameService.searchName(query);
 			if (!results.length) {
-				await bot.commandService.reply(
-					interaction,
-					bot.messages.NO_TRACKS_FOUND(query),
+				await interaction.editReply(
+					bot.locale.t("errors.track.search", { query }),
 				);
 				return;
 			}
 
 			await bot.nameService.trackAndUrl(query, results, interaction);
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_PLAYING_TRACK}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("errors.track.processing", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
-			await bot.commandService.reply(interaction, bot.messages.PLAY_ERROR);
+
+			if (interaction.deferred) {
+				await interaction.editReply(bot.locale.t("errors.track.processing"));
+			}
 		}
 	}
 
@@ -198,9 +252,12 @@ export class PlayCommand {
 	 * @returns {string} Formatted track name
 	 */
 	private formatTrackName(track: Track): string {
-		return `${track.artists.map((a) => a.name).join(", ")} - ${this.truncateString(
-			track.title,
+		const artists =
+			track.artists?.map((a) => a.name).join(", ") || "Unknown Artist";
+		const title = this.truncateString(
+			track.title || "Unknown Title",
 			PlayCommand.MAX_TITLE_LENGTH,
-		)}`;
+		);
+		return `${artists} - ${title}`;
 	}
 }

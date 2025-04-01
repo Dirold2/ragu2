@@ -1,26 +1,29 @@
 import {
-	AutocompleteInteraction,
-	CacheType,
-	CommandInteraction,
+	type AutocompleteInteraction,
+	type CacheType,
+	type CommandInteraction,
 	DiscordAPIError,
-	InteractionResponse,
-	Message,
+	type InteractionResponse,
+	type Message,
 	MessageFlags,
 } from "discord.js";
-import logger from "../utils/logger.js";
 import { bot } from "../bot.js";
-import { setLocaleMessages } from "../locales/index.js";
 
 /**
- * Service for handling Discord command interactions and messages
+ * Сервис для обработки взаимодействий и сообщений команд Discord
  */
 export default class CommandService {
+	private readonly logger = bot.logger;
+
+	// Добавляем кэш для оптимизации
+	private readonly interactionCache = new Map<
+		string,
+		{ content: string; timestamp: number }
+	>();
+	private readonly CACHE_TTL = 60000; // 1 минута
+
 	/**
-	 * Sends a response to a Discord interaction
-	 * @param interaction - The Discord interaction to respond to
-	 * @param message - The message content to send
-	 * @param ephemeral - Whether the message should be ephemeral (only visible to the command user)
-	 * @returns Promise resolving to the interaction response or void
+	 * Отправляет ответ на взаимодействие Discord
 	 */
 	public async send(
 		interaction:
@@ -29,89 +32,149 @@ export default class CommandService {
 		message: string,
 	): Promise<InteractionResponse<boolean> | Message<boolean> | void> {
 		if (!interaction.isRepliable()) return;
-		await setLocaleMessages(interaction);
 
 		try {
-			if (interaction.replied || interaction.deferred) {
-				logger.debug(
-					`${bot.loggerMessages.EDITING_REPLY_FOR_INTERACTION_ID(interaction.id)}`,
-				);
-				return interaction.editReply({ content: message });
+			// Проверяем кэш для предотвращения дублирования сообщений
+			const cacheKey = `${interaction.id}-${interaction.user.id}`;
+			const cachedResponse = this.interactionCache.get(cacheKey);
+
+			if (
+				cachedResponse &&
+				cachedResponse.content === message &&
+				Date.now() - cachedResponse.timestamp < this.CACHE_TTL
+			) {
+				this.logger.debug(`Cached response for interaction ${interaction.id}`);
+				return;
 			}
 
-			logger.debug(
-				`${bot.loggerMessages.SENDING_NEW_REPLY_FOR_INTERACTION_ID(interaction.id)}`,
-			);
-			return interaction.reply({
+			let response;
+			if (interaction.replied || interaction.deferred) {
+				this.logger.debug(
+					bot.locale.t("commands.interaction.editing_reply", {
+						id: interaction.id,
+					}),
+				);
+				response = await interaction.editReply({ content: message });
+			} else {
+				this.logger.debug(
+					bot.locale.t("commands.interaction.sending_reply", {
+						id: interaction.id,
+					}),
+				);
+				response = await interaction.reply({
+					content: message,
+					flags: MessageFlags.Ephemeral,
+				});
+			}
+
+			// Кэшируем ответ
+			this.interactionCache.set(cacheKey, {
 				content: message,
-				flags: MessageFlags.Ephemeral,
+				timestamp: Date.now(),
 			});
-		} catch (error) {
+
+			// Устанавливаем TTL для кэша
+			setTimeout(() => {
+				this.interactionCache.delete(cacheKey);
+			}, this.CACHE_TTL);
+
+			return response;
+		} catch (error: unknown) {
 			this.handleInteractionError(error, interaction);
 		}
 	}
 
 	/**
-	 * Deletes a Discord message
-	 * @param message - The message to delete
+	 * Удаляет сообщение Discord
 	 */
 	public async delete(message: Message): Promise<void> {
 		if (!message.deletable) {
-			logger.debug(`${bot.loggerMessages.MESSAGE_NOT_DELETABLE(message.id)}`);
+			this.logger.debug(
+				bot.locale.t("commands.message.not_deletable", { id: message.id }),
+			);
 			return;
 		}
 
 		try {
 			await message.delete();
-			logger.debug(`${bot.loggerMessages.MESSAGE_DELETED(message.id)}`);
+			this.logger.debug(
+				bot.locale.t("commands.message.deleted", { id: message.id }),
+			);
 		} catch (error) {
 			this.handleMessageError(error, message);
 		}
 	}
 
 	/**
-	 * Replies to a command interaction
-	 * @param interaction - The interaction to reply to
-	 * @param content - The content of the reply
+	 * Отвечает на взаимодействие команды
 	 */
 	public async reply(
 		interaction: CommandInteraction,
 		content: string,
 	): Promise<void> {
-		await setLocaleMessages(interaction);
+		if (!interaction.isRepliable()) {
+			this.logger.debug(
+				bot.locale.t("commands.interaction.not_repliable", {
+					id: interaction.id,
+				}),
+			);
+			return;
+		}
+
 		try {
-			if (!interaction.isRepliable()) {
-				logger.warn(
-					`${bot.loggerMessages.INTERACTION_NOT_REPLIABLE(interaction.id)}`,
-				);
+			// Проверяем кэш для предотвращения дублирования сообщений
+			const cacheKey = `${interaction.id}-${interaction.user.id}`;
+			const cachedResponse = this.interactionCache.get(cacheKey);
+
+			if (
+				cachedResponse &&
+				cachedResponse.content === content &&
+				Date.now() - cachedResponse.timestamp < this.CACHE_TTL
+			) {
+				this.logger.debug(`Cached response for interaction ${interaction.id}`);
 				return;
 			}
 
-			if (interaction.replied) {
-				logger.warn(
-					`${bot.loggerMessages.INTERACTION_ALREADY_REPLIED_TO(interaction.id)}`,
-				);
-				return;
+			if (!interaction.deferred && !interaction.replied) {
+				await interaction.deferReply({
+					flags: MessageFlags.Ephemeral,
+				});
 			}
 
-			await interaction[interaction.deferred ? "editReply" : "reply"]({
+			await interaction.editReply({ content });
+
+			// Кэшируем ответ
+			this.interactionCache.set(cacheKey, {
 				content,
-				flags: interaction.deferred ? undefined : MessageFlags.Ephemeral,
+				timestamp: Date.now(),
 			});
+
+			// Устанавливаем TTL для кэша
+			setTimeout(() => {
+				this.interactionCache.delete(cacheKey);
+			}, this.CACHE_TTL);
 		} catch (error) {
-			if (error instanceof DiscordAPIError && error.code === 10062) {
-				logger.warn(
-					`${bot.loggerMessages.INTERACTION_EXPIRED(interaction.id)}`,
-				);
-			} else {
-				logger.error(`${bot.loggerMessages.REPLY_ERROR}`, error);
+			if (error instanceof DiscordAPIError) {
+				if (error.code === 40060) {
+					this.logger.debug(
+						bot.locale.t("commands.interaction.already_acknowledged", {
+							id: interaction.id,
+						}),
+					);
+				} else {
+					this.logger.error(
+						bot.locale.t("errors.discord_api", {
+							code: error.code,
+							message: error.message,
+						}),
+					);
+				}
 			}
 		}
 	}
 
 	/**
-	 * Handles Discord API errors for interactions
-	 * @private
+	 * Обрабатывает ошибки API Discord для взаимодействий
 	 */
 	private handleInteractionError(
 		error: unknown,
@@ -123,42 +186,56 @@ export default class CommandService {
 				`interaction with ID: ${interaction.id}`,
 			);
 		} else {
-			logger.error(
-				`${bot.loggerMessages.UNKNOWN_ERROR_INTERACTING_WITH_ID(interaction.id)}`,
+			this.logger.error(
+				bot.locale.t("commands.interaction.unknown_error", {
+					id: interaction.id,
+				}),
 				error,
 			);
 		}
 	}
 
 	/**
-	 * Handles Discord API errors for messages
-	 * @private
+	 * Обрабатывает ошибки API Discord для сообщений
 	 */
 	private handleMessageError(error: unknown, message: Message): void {
 		if (error instanceof DiscordAPIError) {
 			this.handleDiscordAPIError(error, `message with ID: ${message.id}`);
 		} else {
-			logger.error(
-				`${bot.loggerMessages.UNKNOWN_ERROR_DELETING_MESSAGE_WITH_ID(message.id)}`,
+			this.logger.error(
+				bot.locale.t("commands.message.unknown_error", { id: message.id }),
 				error,
 			);
 		}
 	}
 
 	/**
-	 * Handles specific Discord API error codes
-	 * @private
+	 * Обрабатывает определенные коды ошибок API Discord
 	 */
 	private handleDiscordAPIError(error: DiscordAPIError, context: string): void {
 		const errorCode = Number(error.code);
 		const isExpiredInteraction = [10008, 10062].includes(errorCode);
 
 		if (isExpiredInteraction) {
-			logger.debug(`${bot.loggerMessages.INTERACTION_EXPIRED(context)}`);
+			this.logger.debug(
+				bot.locale.t("commands.interaction.expired", { context }),
+			);
 		} else {
-			logger.error(
-				`${bot.loggerMessages.DISCORD_API_ERROR(errorCode, context)}: ${error.message}`,
+			this.logger.error(
+				bot.locale.t("errors.discord_api", {
+					code: errorCode,
+					context,
+					message: error.message,
+				}),
 			);
 		}
+	}
+
+	/**
+	 * Очищает кэш взаимодействий
+	 */
+	public clearCache(): void {
+		this.interactionCache.clear();
+		this.logger.debug("Interaction cache cleared");
 	}
 }

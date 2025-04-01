@@ -20,53 +20,55 @@ export class OtherCommand {
 		interaction: CommandInteraction,
 	): Promise<void> {
 		switch (command) {
-			case "history":
+			case "history": {
 				const userId = interaction.user.id;
 				const tracks = await bot.queueService.getLastPlayedTracks(userId);
 
 				if (tracks.length === 0) {
 					await bot.commandService.reply(
 						interaction,
-						`${bot.messages.NO_RECENTLY_PLAYED_TRACKS}`,
+						bot.locale.t("commands.other.no_recently_played_tracks"),
 					);
 					return;
 				}
 
 				const trackList = tracks
-					.map((track, index) => `${index + 1}. ${track.info}`)
+					.map((track: any, index: number) => `${index + 1}. ${track.info}`)
 					.join("\n");
 				await bot.commandService.reply(
 					interaction,
-					`${bot.messages.RECENTLY_PLAYED_TRACKS}:\n${trackList}`,
+					`${bot.locale.t("commands.other.recently_played_tracks")}:\n${trackList}`,
 				);
 				break;
+			}
 
-			case "top":
+			case "top": {
 				const topTracks = await bot.queueService.getTopPlayedTracks();
 
 				if (topTracks.length === 0) {
 					await bot.commandService.reply(
 						interaction,
-						`${bot.messages.NO_POPULAR_TRACKS}`,
+						bot.locale.t("commands.other.no_popular_tracks"),
 					);
 					return;
 				}
 
 				const topTrackList = topTracks
-					.map((track, index) => `${index + 1}. ${track.info}`)
+					.map((track: any, index: number) => `${index + 1}. ${track.info}`)
 					.join("\n");
 				await bot.commandService.reply(
 					interaction,
-					`${bot.messages.POPULAR_TRACKS}:\n${topTrackList}`,
+					`${bot.locale.t("commands.other.popular_tracks")}:\n${topTrackList}`,
 				);
 				break;
+			}
 
-			case "queuedel":
+			case "queuedel": {
 				const member = interaction.member as GuildMember;
 				if (!member.voice?.channel) {
 					await bot.commandService.reply(
 						interaction,
-						`${bot.messages.QUEUE_ERROR_NOT_IN_VOICE_CHANNEL}`,
+						bot.locale.t("commands.queue.not_in_voice_channel"),
 					);
 					return;
 				}
@@ -77,7 +79,7 @@ export class OtherCommand {
 				if (queue.tracks.length === 0) {
 					await bot.commandService.reply(
 						interaction,
-						`${bot.messages.QUEUE_EMPTY}`,
+						bot.locale.t("commands.queue.empty"),
 					);
 					return;
 				}
@@ -85,9 +87,10 @@ export class OtherCommand {
 				await bot.queueService.clearQueue(channelId);
 				await bot.commandService.reply(
 					interaction,
-					`${bot.messages.QUEUE_CLEARED}`,
+					bot.locale.t("commands.queue.cleared"),
 				);
 				break;
+			}
 		}
 	}
 }

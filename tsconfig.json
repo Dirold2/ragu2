@@ -31,7 +31,20 @@
       "@api/*": ["src/api/*"], 
       "@service/*": ["src/services/*"],
       "@commands/*": ["src/commands/*"],
-      "@plugins/*": ["src/plugins/*"]
+      "@plugins/*": ["src/plugins/*"],
+      "#prisma/*": [".prisma/*"],
+      "#*": [
+        "./src/*",
+        "./src/*.ts",
+        "./src/*.tsx",
+        "./src/*.js",
+        "./src/*.jsx",
+        "./utils/*",
+        "./utils/*.ts",
+        "./utils/*.tsx",
+        "./utils/*.js",
+        "./utils/*.jsx"
+      ]
     },
     "resolveJsonModule": true,
     "isolatedModules": true

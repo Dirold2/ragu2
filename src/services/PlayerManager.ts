@@ -1,76 +1,131 @@
-import { CommandInteraction } from "discord.js";
+import type { CommandInteraction } from "discord.js";
 
-import { Track } from "../interfaces/index.js";
-import logger from "../utils/logger.js";
-import { CommandService, PlayerService, QueueService } from "./index.js";
+import type { Track } from "../interfaces/index.js";
+import { type CommandService, PlayerService } from "./index.js";
 import { bot } from "../bot.js";
 
 /**
- * Manages player instances for different Discord guilds
+ * Управляет экземплярами плеера для разных Discord-серверов
  */
 export default class PlayerManager {
 	private readonly players: Map<string, PlayerService> = new Map();
-	private readonly queueService: QueueService;
+	private readonly queueService = bot.queueService;
 	private readonly commandService: CommandService;
+	private readonly logger = bot.logger;
+
+	// Добавляем кэш для оптимизации
+	private readonly playerCache = new Map<
+		string,
+		{ lastUsed: number; player: PlayerService }
+	>();
+	private readonly CACHE_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 минут
 
 	/**
-	 * Creates a new PlayerManager instance
-	 * @param queueService - Service for managing track queues
-	 * @param commandService - Service for handling Discord commands
+	 * Создает новый экземпляр PlayerManager
 	 */
-	constructor(queueService: QueueService, commandService: CommandService) {
+	constructor(queueService = bot.queueService, commandService: CommandService) {
 		this.queueService = queueService;
 		this.commandService = commandService;
+
+		// Запускаем периодическую очистку кэша
+		this.startCacheCleanup();
 	}
 
 	/**
-	 * Validates that a command is executed within a server context
-	 * @param interaction - Discord command interaction
-	 * @returns Guild ID if command is valid, null otherwise
+	 * Запускает периодическую очистку кэша неиспользуемых плееров
+	 */
+	private startCacheCleanup(): void {
+		setInterval(() => {
+			const now = Date.now();
+			const expiredTime = now - 3600000; // 1 час неактивности
+
+			for (const [guildId, cacheEntry] of this.playerCache.entries()) {
+				if (cacheEntry.lastUsed < expiredTime) {
+					this.logger.debug(
+						`Removing inactive player for guild ${guildId} from cache`,
+					);
+					this.playerCache.delete(guildId);
+
+					// Если плеер не используется активно, уничтожаем его
+					if (!this.players.has(guildId)) {
+						cacheEntry.player.destroy();
+					}
+				}
+			}
+		}, this.CACHE_CLEANUP_INTERVAL);
+	}
+
+	/**
+	 * Проверяет, что команда выполняется в контексте сервера
 	 */
 	private async handleServerOnlyCommand(
 		interaction: CommandInteraction,
 	): Promise<{ guildId: string; channelId: string } | null> {
 		const { guildId, channelId } = interaction;
-		var handles = undefined;
+
 		if (!guildId) {
-			await this.commandService.send(interaction, bot.messages.SERVER_ERROR);
+			await this.commandService.send(
+				interaction,
+				bot.locale.t("errors.serverError"),
+			);
 			return null;
 		}
 		if (!channelId) {
-			await this.commandService.send(interaction, bot.messages.SERVER_ERROR);
+			await this.commandService.send(
+				interaction,
+				bot.locale.t("errors.serverError"),
+			);
 			return null;
 		}
-		handles = { guildId, channelId };
-		return handles;
+
+		return { guildId, channelId };
 	}
 
 	/**
-	 * Gets or creates a player instance for a guild
-	 * @param guildId - Discord guild ID
-	 * @returns PlayerService instance
+	 * Получает или создает экземпляр плеера для сервера
+	 * Оптимизировано с использованием кэша
 	 */
 	public getPlayer(guildId: string): PlayerService {
-		return (
-			this.players.get(guildId) ??
-			(() => {
-				logger.debug(
-					`${bot.loggerMessages.CREATING_NEW_PLAYER_SERVICE_FOR_GUILD(guildId)}`,
-				);
-				const newPlayer = new PlayerService(
-					this.queueService,
-					this.commandService,
-					guildId,
-				);
-				this.players.set(guildId, newPlayer);
-				return newPlayer;
-			})()
-		);
+		// Проверяем активные плееры
+		if (this.players.has(guildId)) {
+			const player = this.players.get(guildId)!;
+
+			// Обновляем время последнего использования в кэше
+			if (this.playerCache.has(guildId)) {
+				this.playerCache.get(guildId)!.lastUsed = Date.now();
+			}
+
+			return player;
+		}
+
+		// Проверяем кэш
+		if (this.playerCache.has(guildId)) {
+			const cacheEntry = this.playerCache.get(guildId)!;
+			cacheEntry.lastUsed = Date.now();
+
+			// Восстанавливаем плеер из кэша
+			this.players.set(guildId, cacheEntry.player);
+			this.logger.debug(`Restored player for guild ${guildId} from cache`);
+
+			return cacheEntry.player;
+		}
+
+		// Создаем новый плеер
+		this.logger.debug(bot.locale.t("player.playerCreated", { guildId }));
+		const newPlayer = new PlayerService(this.commandService, guildId);
+
+		// Сохраняем в активные плееры и кэш
+		this.players.set(guildId, newPlayer);
+		this.playerCache.set(guildId, {
+			player: newPlayer,
+			lastUsed: Date.now(),
+		});
+
+		return newPlayer;
 	}
 
 	/**
-	 * Joins a voice channel
-	 * @param interaction - Discord command interaction
+	 * Присоединяется к голосовому каналу
 	 */
 	public async joinChannel(interaction: CommandInteraction): Promise<void> {
 		const handles = await this.handleServerOnlyCommand(interaction);
@@ -81,28 +136,23 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Plays or queues a track in a guild
-	 * @param guildId - Discord guild ID
-	 * @param track - Track to play or queue
+	 * Воспроизводит или добавляет трек в очередь на сервере
 	 */
 	public async playOrQueueTrack(guildId: string, track: Track): Promise<void> {
 		await this.getPlayer(guildId).playOrQueueTrack(track);
 	}
 
 	/**
-	 * Skips the current track
-	 * @param interaction - Discord command interaction
+	 * Пропускает текущий трек
 	 */
-	public async skip(interaction: CommandInteraction): Promise<void> {
-		const handles = await this.handleServerOnlyCommand(interaction);
-		if (handles?.guildId) {
-			await this.getPlayer(handles.guildId).skip(interaction);
+	public async skip(guildId: string): Promise<void> {
+		if (guildId) {
+			await this.getPlayer(guildId).skip();
 		}
 	}
 
 	/**
-	 * Toggles playback pause state
-	 * @param interaction - Discord command interaction
+	 * Переключает состояние паузы воспроизведения
 	 */
 	public async togglePause(interaction: CommandInteraction): Promise<void> {
 		const handles = await this.handleServerOnlyCommand(interaction);
@@ -112,21 +162,24 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Sets player volume
-	 * @param guildId - Discord guild ID
-	 * @param volume - Volume level (0-100)
+	 * Устанавливает громкость плеера
 	 */
 	public async setVolume(guildId: string, volume: number): Promise<void> {
 		if (guildId) {
-			this.getPlayer(guildId).setVolume(volume);
+			try {
+				// Получаем плеер и ждем завершения установки громкости
+				await this.getPlayer(guildId).setVolume(volume);
+				this.logger.debug(`Volume for guild ${guildId} set to ${volume}%`);
+			} catch (error) {
+				this.logger.error(
+					`Failed to set volume for guild ${guildId}: ${error}`,
+				);
+			}
 		}
 	}
 
 	/**
-	 * Sets player loop state
-	 * @param guildId - Discord guild ID
-	 * @param channelId - Discord channel ID
-	 * @param loop - Loop state
+	 * Устанавливает состояние повтора плеера
 	 */
 	public async setLoop(guildId: string, loop: boolean): Promise<void> {
 		if (guildId) {
@@ -136,19 +189,58 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Disconnects from voice channel and removes player instance
-	 * @param guildId - Discord guild ID
+	 * Устанавливает состояние волны плеера
 	 */
-	public leaveChannel(guildId: string): void {
+	public async setWave(guildId: string, wave: boolean): Promise<void> {
+		if (guildId) {
+			this.getPlayer(guildId).state.wave = wave;
+			this.queueService.setWave(guildId, wave);
+		}
+	}
+
+	/**
+	 * Отключается от голосового канала и удаляет экземпляр плеера
+	 */
+	public async leaveChannel(guildId: string): Promise<void> {
 		const player = this.players.get(guildId);
 		if (!player) {
-			logger.warn(
-				`${bot.loggerMessages.ATTEMPTED_TO_LEAVE_CHANNEL_FOR_NON_EXISTENT_PLAYER_IN_GUILD(guildId)}`,
-			);
+			this.logger.warn(bot.locale.t("errors.playerNotFound", { guildId }));
 			return;
 		}
 
+		await player.destroy();
 		player.leaveChannel();
 		this.players.delete(guildId);
+
+		// Обновляем кэш, но не удаляем плеер из кэша
+		if (this.playerCache.has(guildId)) {
+			this.playerCache.get(guildId)!.lastUsed = Date.now();
+		}
+	}
+
+	/**
+	 * Уничтожает все экземпляры плеера и очищает карту
+	 */
+	public async destroyAll(): Promise<void> {
+		try {
+			// Используем Promise.allSettled для обработки ошибок отдельных плееров
+			await Promise.allSettled(
+				Array.from(this.players.values()).map((player) => player.destroy()),
+			);
+
+			// Отключаем все плееры
+			for (const player of this.players.values()) {
+				player.leaveChannel();
+			}
+
+			this.players.clear();
+
+			// Очищаем кэш
+			this.playerCache.clear();
+
+			this.logger.info("All players destroyed successfully");
+		} catch (error) {
+			this.logger.error("Error destroying players:", error);
+		}
 	}
 }

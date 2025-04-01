@@ -4,12 +4,12 @@ import { Discord, Slash } from "discordx";
 import { bot } from "../bot.js";
 
 @Discord()
-export class SkipCommand {
+export class WaveCommand {
 	@Slash({
-		name: "skip",
-		description: bot.locale.t("commands.skip.description"),
+		name: "wave",
+		description: bot.locale.t("commands.wave.description"),
 	})
-	async skip(interaction: CommandInteraction): Promise<void> {
+	async toggleWave(interaction: CommandInteraction) {
 		try {
 			const player = bot.playerManager.getPlayer(interaction.guildId!);
 			if (!player) {
@@ -19,10 +19,17 @@ export class SkipCommand {
 				);
 			}
 
-			await bot.playerManager.skip(interaction.guildId!);
-			await bot.commandService.reply(
+			player.state.wave = !player.state.wave;
+
+			await bot.playerManager.setWave(interaction.guildId!, player.state.wave);
+
+			return await bot.commandService.reply(
 				interaction,
-				bot.locale.t("player.status.skipped"),
+				bot.locale.t(
+					player.state.wave
+						? "commands.wave.enabled"
+						: "commands.wave.disabled",
+				),
 			);
 		} catch (error) {
 			bot.logger.error(
@@ -30,7 +37,7 @@ export class SkipCommand {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
-			await bot.commandService.reply(
+			return await bot.commandService.reply(
 				interaction,
 				bot.locale.t("errors.track.playback", {
 					error: error instanceof Error ? error.message : String(error),

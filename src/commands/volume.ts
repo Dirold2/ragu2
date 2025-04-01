@@ -2,16 +2,20 @@ import { ApplicationCommandOptionType, CommandInteraction } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 
 import { bot } from "../bot.js";
-import logger from "../utils/logger.js";
 import { MAX_VOLUME } from "../config.js";
 
 @Discord()
 export class VolumeCommand {
-	@Slash({ name: "volume", description: `Adjust volume` })
+	@Slash({
+		name: "volume",
+		description: bot.locale.t("commands.volume.description"),
+	})
 	async volume(
 		@SlashOption({
-			description: `0 - ${MAX_VOLUME}`,
 			name: "number",
+			description: bot.locale.t("commands.volume.option_number", {
+				max: MAX_VOLUME,
+			}),
 			type: ApplicationCommandOptionType.Number,
 			required: true,
 		})
@@ -21,7 +25,7 @@ export class VolumeCommand {
 		if (volume < 0 || volume > MAX_VOLUME) {
 			return bot.commandService.reply(
 				interaction,
-				`${bot.messages.VOLUME_ERROR_MAX_VOLUME(MAX_VOLUME)}`,
+				bot.locale.t("player.volume.error_max", { maxVolume: MAX_VOLUME }),
 			);
 		}
 
@@ -29,15 +33,19 @@ export class VolumeCommand {
 			await bot.playerManager.setVolume(interaction.guildId!, volume);
 			await bot.commandService.reply(
 				interaction,
-				`${bot.messages.VOLUME_SET(volume)}`,
+				bot.locale.t("player.volume.set", { volume }),
 			);
 		} catch (error) {
-			logger.error(
-				`${bot.loggerMessages.ERROR_ADJUSTING_VOLUME}: ${error instanceof Error ? error.message : String(error)}`,
+			bot.logger.error(
+				bot.locale.t("errors.track.playback", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 			await bot.commandService.reply(
 				interaction,
-				`${bot.messages.VOLUME_ERROR}`,
+				bot.locale.t("errors.track.playback", {
+					error: error instanceof Error ? error.message : String(error),
+				}),
 			);
 		}
 	}
