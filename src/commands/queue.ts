@@ -42,15 +42,15 @@ export class QueueCommand {
 			await this.handleQueueCommand(interaction);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.unexpected", {
+				bot.locale.t("commands.queue.errors.unexpected", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t("errors.unexpected", {
+				"commands.queue.errors.unexpected", {
 					error: error instanceof Error ? error.message : String(error),
-				}),
+				},
 			);
 		}
 	}
@@ -62,7 +62,7 @@ export class QueueCommand {
 		if (!(member instanceof GuildMember) || !member.voice.channelId) {
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t("errors.voice.not_in_channel"),
+				"commands.queue.errors.not_in_channel",
 			);
 			return;
 		}
@@ -71,7 +71,7 @@ export class QueueCommand {
 		if (queue.tracks.length === 0) {
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t("player.queue.empty"),
+				"commands.queue.empty",
 			);
 			return;
 		}
@@ -107,9 +107,9 @@ export class QueueCommand {
 			this.createReactionCollector(message, interaction);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.unexpected", {
+				bot.locale.t("commands.queue.errors.unexpected", {
 					error: error instanceof Error ? error.message : String(error),
-				}),
+				}, interaction.guild?.preferredLocale || 'en'),
 			);
 		}
 	}
@@ -172,15 +172,15 @@ export class QueueCommand {
 			} catch (error) {
 				if (
 					error instanceof Error &&
-					error.message.includes(bot.locale.t("errors.message.unknown"))
+					error.message.includes(bot.locale.t("commands.queue.errors.unknown", undefined, interaction.guild?.preferredLocale || 'en'))
 				) {
 					this.message = null;
 					collector.stop();
 				} else {
 					bot.logger.error(
-						bot.locale.t("errors.unexpected", {
+						bot.locale.t("commands.queue.errors.unexpected", {
 							error: error instanceof Error ? error.message : String(error),
-						}),
+						}, interaction.guild?.preferredLocale || 'en'),
 					);
 				}
 			}
@@ -203,7 +203,7 @@ export class QueueCommand {
 
 	private async createPageMessage(): Promise<string> {
 		return this.pages.length > 1
-			? bot.locale.t("player.queue.pages", {
+			? bot.locale.t("commands.queue.pages", {
 					current: this.currentPage + 1,
 					total: this.pages.length,
 				})

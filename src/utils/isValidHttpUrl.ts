@@ -10,7 +10,7 @@ export function isValidHttpUrl(string: string): boolean {
 		return url.protocol === "http:" || url.protocol === "https:";
 	} catch (error) {
 		bot.logger.debug(
-			`${bot.locale.t("errors.url_processing", { url: string })}: ${error instanceof Error ? error.message : String(error)}`,
+			`${bot.locale.t("utils.isValidHttpUrl.errors.url_processing", { url: string })}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 		return false;
 	}

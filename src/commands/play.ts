@@ -66,7 +66,7 @@ export class PlayCommand {
 			if (!interaction.replied && !interaction.deferred) {
 				await bot.commandService.reply(
 					interaction,
-					bot.locale.t("player.status.nothing_playing"),
+					"commands.play.player.status.nothing_playing",
 				);
 			}
 			return;
@@ -75,9 +75,9 @@ export class PlayCommand {
 		if (!interaction.replied && !interaction.deferred) {
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t("success.track.started_playing", {
+				"commands.play.started_playing", {
 					track: player.state.currentTrack?.info,
-				}),
+				},
 			);
 		}
 		await bot.playerManager.joinChannel(interaction);
@@ -118,7 +118,7 @@ export class PlayCommand {
 			}
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("logger.track.searching", { query }),
+				bot.locale.t("commands.play.searching", { query }, interaction.guild?.preferredLocale || 'en'),
 				error,
 			);
 			if (!interaction.responded) {
@@ -138,7 +138,7 @@ export class PlayCommand {
 		query: string,
 	): { name: string; value: string }[] {
 		if (!Array.isArray(results)) {
-			bot.logger.warn(bot.locale.t("errors.track.invalid"));
+			bot.logger.warn(bot.locale.t("commands.play.errors.invalid"));
 			return [];
 		}
 
@@ -152,7 +152,7 @@ export class PlayCommand {
 					};
 				} catch (error) {
 					bot.logger.warn(
-						bot.locale.t("errors.track.processing", {
+						bot.locale.t("commands.play.errors.processing", {
 							error: error instanceof Error ? error.message : String(error),
 						}),
 					);
@@ -221,13 +221,13 @@ export class PlayCommand {
 		try {
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t("commands.play.searching", { query }),
+				"commands.play.searching", { query },
 			);
 
 			const results = await bot.nameService.searchName(query);
 			if (!results.length) {
 				await interaction.editReply(
-					bot.locale.t("errors.track.search", { query }),
+					bot.locale.t("commands.play.errors.search", { query }, interaction.guild?.preferredLocale || 'en'),
 				);
 				return;
 			}
@@ -235,13 +235,15 @@ export class PlayCommand {
 			await bot.nameService.trackAndUrl(query, results, interaction);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.track.processing", {
+				bot.locale.t("commands.play.errors.processing", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
 
 			if (interaction.deferred) {
-				await interaction.editReply(bot.locale.t("errors.track.processing"));
+				await interaction.editReply(
+					bot.locale.t("commands.play.errors.processing", undefined, interaction.guild?.preferredLocale || 'en'),
+				);
 			}
 		}
 	}

@@ -31,7 +31,7 @@ config({ path: resolve(dirname(import.meta), "../.env") });
 export class Bot {
 	public readonly client: Client;
 	public nameService!: NameService;
-	public queueService: any;
+	public queueService!: CacheQueueService;
 	public databaseModule: any;
 	public playerManager!: PlayerManager;
 	public commandService!: CommandService;
@@ -69,9 +69,8 @@ export class Bot {
 			this.setupEvents();
 			await this.initServices();
 
-			this.logger.info(this.locale.t("bot.status.initialized"));
 		} catch (error) {
-			this.logger.error(this.locale.t("bot.status.init_failed"));
+			this.logger.error(this.locale.t("messages.bot.status.init_failed"));
 			throw error;
 		}
 	}
@@ -84,11 +83,11 @@ export class Bot {
 			this.commandService = new CommandService();
 			this.pluginManager = new PluginManager();
 			this.loadPlugins();
-			
-			if (!this.queueService && this.databaseModule) {
-				this.queueService = this.databaseModule.exports.getQueueService();
+
+			if (this.databaseModule?.exports?.getQueueService?.()) {
+				this.queueService = this.databaseModule?.exports?.getQueueService?.();
 			} else {
-				this.queueService = new CacheQueueService();;
+				this.queueService = new CacheQueueService();
 			}
 
 			this.playerManager = new PlayerManager(
@@ -131,14 +130,16 @@ export class Bot {
 						this.logger.debug(`Plugin loaded: ${file}`);
 					} catch (error) {
 						this.logger.error(
-							this.locale.t("logger.plugin.register_error", { file }),
+							this.locale.t("messages.bot.errors.register_error_files", {
+								file,
+							}),
 							error,
 						);
 					}
 				}),
 			);
 		} catch (error) {
-			this.logger.error(this.locale.t("logger.plugin.register_error"));
+			this.logger.error(this.locale.t("messages.bot.errors.register_error"));
 			throw error;
 		}
 	}
@@ -151,7 +152,10 @@ export class Bot {
 			try {
 				await this.client.initApplicationCommands();
 			} catch (error) {
-				this.logger.error(this.locale.t("bot.status.init_failed"), error);
+				this.logger.error(
+					this.locale.t("messages.bot.status.init_failed"),
+					error,
+				);
 			}
 		};
 
@@ -186,7 +190,6 @@ export class Bot {
 	public async start(token: string): Promise<void> {
 		try {
 			await this.client.login(token);
-			this.logger.info(this.locale.t("messages.bot.start.success"));
 		} catch (error) {
 			this.logger.error(this.locale.t("messages.bot.start.error"));
 			throw error;

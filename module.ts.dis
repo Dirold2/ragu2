@@ -61,9 +61,10 @@ export default class BotModule extends Module {
 			bot.logger = this.logger!;
 			bot.locale = this.locale!;
 
-			await bot.initialize();
 
 			this.connectToModule();
+			
+			await bot.initialize();
 		} catch (error: unknown) {
 			this.logger.error("Failed to initialize bot module:", error);
 			this.handleError("initialization", error);
@@ -131,6 +132,7 @@ export default class BotModule extends Module {
 			>("database");
 
 		if (this.databaseModule?.exports?.getQueueService?.()) {
+			bot!.databaseModule = this.databaseModule
 			bot!.queueService = this.databaseModule.exports.getQueueService();
 			this.logger.info({
 				message: "Модуль базы данных успешно подключен",

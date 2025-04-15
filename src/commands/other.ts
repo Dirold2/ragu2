@@ -27,7 +27,7 @@ export class OtherCommand {
 				if (tracks.length === 0) {
 					await bot.commandService.reply(
 						interaction,
-						bot.locale.t("commands.other.no_recently_played_tracks"),
+						"commands.other.no_recently_played_tracks",
 					);
 					return;
 				}
@@ -37,7 +37,7 @@ export class OtherCommand {
 					.join("\n");
 				await bot.commandService.reply(
 					interaction,
-					`${bot.locale.t("commands.other.recently_played_tracks")}:\n${trackList}`,
+					"commands.other.recently_played_tracks", {trackList},
 				);
 				break;
 			}
@@ -48,7 +48,7 @@ export class OtherCommand {
 				if (topTracks.length === 0) {
 					await bot.commandService.reply(
 						interaction,
-						bot.locale.t("commands.other.no_popular_tracks"),
+						"commands.other.no_popular_tracks",
 					);
 					return;
 				}
@@ -58,7 +58,7 @@ export class OtherCommand {
 					.join("\n");
 				await bot.commandService.reply(
 					interaction,
-					`${bot.locale.t("commands.other.popular_tracks")}:\n${topTrackList}`,
+					"commands.other.popular_tracks", {topTrackList},
 				);
 				break;
 			}
@@ -68,7 +68,7 @@ export class OtherCommand {
 				if (!member.voice?.channel) {
 					await bot.commandService.reply(
 						interaction,
-						bot.locale.t("commands.queue.not_in_voice_channel"),
+						"commands.queue.not_in_voice_channel",
 					);
 					return;
 				}
@@ -79,7 +79,7 @@ export class OtherCommand {
 				if (queue.tracks.length === 0) {
 					await bot.commandService.reply(
 						interaction,
-						bot.locale.t("commands.queue.empty"),
+						"commands.queue.empty",
 					);
 					return;
 				}
@@ -87,7 +87,7 @@ export class OtherCommand {
 				await bot.queueService.clearQueue(channelId);
 				await bot.commandService.reply(
 					interaction,
-					bot.locale.t("commands.queue.cleared"),
+					"commands.queue.cleared",
 				);
 				break;
 			}

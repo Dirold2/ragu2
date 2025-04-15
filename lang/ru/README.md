@@ -30,57 +30,31 @@ RAGU2 - это музыкальный бот для Discord, который по
 3. Создайте файл `.env` в корне проекта и добавьте ваш токен Discord:
 
    ```env
-   DISCORD_TOKEN=ваш_токен
-   DATABASE_URL=ваш_url_базы_данных
+   # discord_token
+   DISCORD_TOKEN="" #https://discord.com/developers/applications
+
+   # bot locale
+   BOT_LOCALE="" # default en
+
+   # ffprobe path
+   FFPROBE_PATH="" 
+
+   # yandex_api
+   YM_USER_ID="" # https://mail.yandex.ru/
+   YM_API_KEY="" # https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d
    ```
 
 ## Запуск
 
 Для запуска бота, выполните следующие шаги:
 
-1. Заполните файл `.env`
-
-   ```env
-   # discord
-   DISCORD_TOKEN=ваш_токен
-   # local postgresql database or (https://supabase.com/)
-   DATABASE_URL=""
-   DIRECT_URL=""
-   # yandex_api
-   YM_USER_ID="" # https://mail.yandex.ru/
-   YM_API_KEY="" # https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d
-   ```
-
-   Для yandex_api:
-
-   1. [YM_USER_ID](https://mail.yandex.ru/)
-   2. [YM_API_KEY](https://oauth.yandex.ru/client/23cabbbdc6cd418abb4b39c32c41195d)
-
-   ________________________
-
-2. Установите зависимости:
-
-   ```bash
-   pnpm i
-   ```
-
-   ________________________
-
-3. Сгенерируйте Prisma:
-
-   ```bash
-   pnpm prisma:generate
-   ```
-
-   ________________________
-
-4. Соберите проект:
+1. Соберите проект:
 
    ```bash
    pnpm build
    ```
 
-5. Запустите бот:
+2. Запустите бота:
 
    ```bash
    pnpm start
@@ -102,14 +76,16 @@ RAGU2 - это музыкальный бот для Discord, который по
 - `/pause` - Приостановить воспроизведение.
 - `/skip` - Пропустить текущий трек.
 - `/volume <уровень>` - Установить уровень громкости.
+- `/shuffle` - Перемешивает очередь.
+- `/wave` - Включает "Моя волна" по последнему треку.
 - `/queue` - Показать текущую очередь треков.
 - `/other` - Показать другие команды.
 
 ## Структура проекта
 
-- `config/` - Конфигурация бота.
 - `.env` - Переменные окружения.
 - `src/` - Исходный код бота.
+- `src/config/` - Конфигурация бота.
 - `src/commands/` - Команды бота.
 - `src/services/` - Сервисы для управления логикой бота.
 - `src/utils/` - Утилиты и вспомогательные функции.
@@ -122,9 +98,8 @@ RAGU2 - это музыкальный бот для Discord, который по
 Рабочий процесс:
 
 - [x] Добавить локализацию
-- [ ] Добавить прокси
-- [ ] Добавить API
-- [ ] Добавить "wave" для воспроизведения музыки без остановки
+- [x] Добавить "wave" для воспроизведения музыки без остановки
+- [ ] Оптимизация оперативной памяти (Max 270MB)
 
 Плагины:
 

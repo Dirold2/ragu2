@@ -15,26 +15,31 @@ export class SkipCommand {
 			if (!player) {
 				return await bot.commandService.reply(
 					interaction,
-					bot.locale.t("errors.player.not_found"),
+					"commands.skip.errors.not_found",
 				);
 			}
+
+			await bot.commandService.reply(
+				interaction,
+				"commands.skip.skipped",
+			);
 
 			await bot.playerManager.skip(interaction.guildId!);
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t("player.status.skipped"),
+				"commands.skip.skipped",
 			);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.track.playback", {
+				bot.locale.t("commands.skip.errors.playback", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
 			await bot.commandService.reply(
 				interaction,
-				bot.locale.t("errors.track.playback", {
+				"commands.skip.errors.playback", {
 					error: error instanceof Error ? error.message : String(error),
-				}),
+				},
 			);
 		}
 	}

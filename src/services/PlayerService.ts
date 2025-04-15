@@ -84,6 +84,7 @@ export default class PlayerService extends EventEmitter {
 			lastTrack: null,
 			loop: false,
 			wave: false,
+			pause: false,
 		};
 	}
 
@@ -93,7 +94,10 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private setupPlayerEvents(): void {
 		this.player.on("error", (error) => {
-			bot.logger.error(bot.locale.t("player.status.error"), error);
+			bot.logger.error(
+				bot.locale.t("messages.playerService.player.status.error"),
+				error,
+			);
 			void this.handleTrackEnd();
 		});
 		this.player.on(AudioPlayerStatus.Idle, () => void this.handleTrackEnd());
@@ -151,7 +155,7 @@ export default class PlayerService extends EventEmitter {
 			}
 		} catch (error) {
 			bot.logger.error(
-				`${bot.locale.t("errors.failed_to_play_queue_track")}: ${error}`,
+				`${bot.locale.t("messages.playerService.errors.failed_to_play_queue_track")}: ${error}`,
 			);
 		}
 	}
@@ -171,31 +175,30 @@ export default class PlayerService extends EventEmitter {
 	/**
 	 * @en Toggles the pause state of the player.
 	 * @ru Переключает состояние паузы плеера.
-	 * @param {CommandInteraction} interaction - Discord command interaction
 	 */
-	public async togglePause(interaction: CommandInteraction): Promise<void> {
+	public async togglePause(): Promise<void> {
 		if (!this.state.connection) return;
 
 		const status = this.player.state.status;
-		let message: string | undefined;
 		let isPlaying: boolean | undefined;
+		let pause: boolean | undefined;
 
 		switch (status) {
 			case AudioPlayerStatus.Playing:
 				this.player.pause();
-				message = bot.locale.t("player.paused");
+				pause = true
 				isPlaying = false;
 				break;
 			case AudioPlayerStatus.Paused:
 				this.player.unpause();
-				message = bot.locale.t("player.resumed");
+				pause = false
 				isPlaying = true;
 				break;
 		}
 
-		if (message && isPlaying !== undefined) {
+		if (isPlaying !== undefined && pause !== undefined) {
 			this.state.isPlaying = isPlaying;
-			await this.commandService.reply(interaction, message);
+			this.state.pause = pause;
 		}
 	}
 
@@ -223,7 +226,7 @@ export default class PlayerService extends EventEmitter {
 		if (!voiceChannelId || !this.hasVoiceAccess(member)) {
 			await this.commandService.reply(
 				interaction,
-				bot.locale.t("errors.notInVoiceChannel"),
+				"messages.playerService.errors.not_in_voice_channel",
 			);
 			return;
 		}
@@ -243,11 +246,9 @@ export default class PlayerService extends EventEmitter {
 			this.startEmptyCheck();
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.voice_connection", { error: String(error) }),
-			);
-			await this.commandService.reply(
-				interaction,
-				bot.locale.t("errors.joinError"),
+				bot.locale.t("messages.playerService.errors.voice_connection", {
+					error: String(error),
+				}),
 			);
 			this.reset();
 		}
@@ -268,7 +269,9 @@ export default class PlayerService extends EventEmitter {
 		if (connection) return connection;
 
 		if (!interaction.guild) {
-			throw new Error(bot.locale.t("errors.guild_not_found"));
+			throw new Error(
+				bot.locale.t("messages.playerService.errors.guild_not_found"),
+			);
 		}
 
 		connection = joinVoiceChannel({
@@ -394,18 +397,24 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private async playTrack(track: Track): Promise<void> {
 		if (!track) {
-			bot.logger.error(bot.locale.t("errors.invalid_track"));
+			bot.logger.error(
+				bot.locale.t("messages.playerService.errors.invalid_track"),
+			);
 			return;
 		}
 
 		if (track.source === "url") {
 			if (!track.url) {
-				bot.logger.error(bot.locale.t("errors.invalid_track_url"));
+				bot.logger.error(
+					bot.locale.t("messages.playerService.errors.invalid_track_url"),
+				);
 				return;
 			}
 			track.trackId = track.url;
 		} else if (!track.trackId) {
-			bot.logger.error(bot.locale.t("errors.invalid_track"));
+			bot.logger.error(
+				bot.locale.t("messages.playerService.errors.invalid_track"),
+			);
 			return;
 		}
 
@@ -467,7 +476,9 @@ export default class PlayerService extends EventEmitter {
 			const plugin = bot.pluginManager.getPlugin(source);
 			if (!plugin?.getTrackUrl) {
 				bot.logger.error(
-					bot.locale.t("player.error.plugin_not_found", { source }),
+					bot.locale.t("messages.playerService.player.error.plugin_not_found", {
+						source,
+					}),
 				);
 				return null;
 			}
@@ -475,7 +486,9 @@ export default class PlayerService extends EventEmitter {
 			const url = await plugin.getTrackUrl(trackId);
 			if (!url) {
 				bot.logger.error(
-					bot.locale.t("errors.track_url_not_found", { trackId }),
+					bot.locale.t("messages.playerService.errors.track_url_not_found", {
+						trackId,
+					}),
 				);
 				return null;
 			}
@@ -483,7 +496,7 @@ export default class PlayerService extends EventEmitter {
 			return url;
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("player.error.get_track_url", {
+				bot.locale.t("messages.playerService.player.error.get_track_url", {
 					trackId,
 					error: error instanceof Error ? error.message : String(error),
 				}),
@@ -531,14 +544,20 @@ export default class PlayerService extends EventEmitter {
 		if (this.timers.fadeOut) {
 			clearTimeout(this.timers.fadeOut);
 			this.timers.fadeOut = null;
-			bot.logger.debug(bot.locale.t("player.fadeout_cleared"));
+			bot.logger.debug(
+				bot.locale.t("messages.playerService.player.status.fadeout_cleared"),
+			);
 		}
 
 		if (duration && duration > 0) {
 			this.timers.fadeOut = setTimeout(() => {
 				void this.smoothVolumeChange(0, 6000, false);
 			}, duration);
-			bot.logger.debug(bot.locale.t("player.fadeout_set", { duration }));
+			bot.logger.debug(
+				bot.locale.t("messages.playerService.player.status.fadeout_set", {
+					duration,
+				}),
+			);
 		}
 	}
 
@@ -579,7 +598,8 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private async queueTrack(track: Track): Promise<void> {
 		if (this.guildId) {
-			await bot.queueService.setTrack(this.guildId, track);
+
+			await bot.queueService.setTrack(this.guildId, {...track, priority: true,});
 		}
 	}
 
@@ -694,9 +714,12 @@ export default class PlayerService extends EventEmitter {
 				}
 			} catch (error) {
 				bot.logger.error(
-					bot.locale.t("player.error.reconnection_failed", {
-						error: error instanceof Error ? error.message : String(error),
-					}),
+					bot.locale.t(
+						"messages.playerService.player.error.reconnection_failed",
+						{
+							error: error instanceof Error ? error.message : String(error),
+						},
+					),
 				);
 				this.handleDisconnect();
 			}
@@ -770,7 +793,9 @@ export default class PlayerService extends EventEmitter {
 			}
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.empty_check", { error: String(error) }),
+				bot.locale.t("messages.playerService.errors.empty_check", {
+					error: String(error),
+				}),
 			);
 			this.handleDisconnect();
 		}
@@ -783,7 +808,9 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private async getVoiceChannel(): Promise<VoiceChannel | null> {
 		if (!this.state.channelId) {
-			bot.logger.error(bot.locale.t("errors.channel_id_null"));
+			bot.logger.error(
+				bot.locale.t("messages.playerService.errors.channel_id_null"),
+			);
 			return null;
 		}
 
@@ -867,7 +894,7 @@ export default class PlayerService extends EventEmitter {
 			this.reset();
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.player.destroy", {
+				bot.locale.t("messages.playerService.player.error.destroy", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);

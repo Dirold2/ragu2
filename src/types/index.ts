@@ -62,6 +62,7 @@ export type PlayerState = {
 	lastTrack: Track | null;
 	loop: boolean;
 	wave: boolean;
+	pause: boolean;
 	preloadedResource?: AudioResource | null;
 	nextTrackMetadata?: Track & { url: string; duration: number };
 };

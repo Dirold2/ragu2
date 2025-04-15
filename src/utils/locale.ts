@@ -1,16 +1,16 @@
 import path from "path";
 import { dirname } from "dirname-filename-esm";
-import { createLogger, ModuleState } from "./logger.js";
+import { createLogger } from "./logger.js";
 import fs from "fs/promises";
 
 const __dirname = dirname(import.meta);
 const logger = createLogger("locale");
 
-type TranslationParams = {
+export type TranslationParams = {
 	[key: string]: string | number;
 };
 
-type DotPaths<T> = T extends object
+export type DotPaths<T> = T extends object
 	? {
 			[K in keyof T]: T[K] extends object
 				? `${K & string}` | `${K & string}.${DotPaths<T[K]> & string}`
@@ -18,23 +18,28 @@ type DotPaths<T> = T extends object
 		}[keyof T]
 	: never;
 
-export interface Locale<T = undefined> {
-	t(key: DotPaths<T>, params?: TranslationParams): string;
-}
-
 interface LocalePrivate<T = unknown> extends Locale<T> {
 	load(language?: string): Promise<void>;
+	setLanguageMessage(language: string): void;
 	setLanguage(language: string): Promise<void>;
 	setTranslations(translations: T): void;
 }
 
 export type LocaleType<T = unknown> = LocalePrivate<T>;
 
+export interface Locale<T = undefined> {
+    t(key: DotPaths<T>, params?: TranslationParams, lang?: string): string;
+}
+
 export function createLocale<T extends Record<string, unknown>>(
-	moduleName: string,
+    moduleName: string,
+    options: { fastLangSwitch?: boolean } = {}, // Добавляем опциональный параметр
 ): LocalePrivate<T> {
-	const translations = new Map<string, T>();
-	let currentLanguage = "en";
+    const translations = new Map<string, T>();
+    const loadedLanguages = new Set<string>(); // Для отслеживания уже загруженных языков
+    let currentLanguage = "en";
+	let messageLanguage = "en";
+    const { fastLangSwitch = false } = options; // По умолчанию false
 
 	/**
 	 * Finds the correct path to locales directory with multiple fallback options
@@ -81,56 +86,98 @@ export function createLocale<T extends Record<string, unknown>>(
 	}
 
 	async function load(language: string = "en") {
+		if (fastLangSwitch && loadedLanguages.has(language)) {
+			return;
+		}
+	
 		try {
 			const localesPath = await findLocalesPath();
 			if (!localesPath) {
 				logger.error(`Locales directory not found for module ${moduleName}`);
-				return
+				return;
 			}
-
+	
 			const filePath = path.join(localesPath, `${language}.json`);
 			logger.debug(`Loading translations from: ${filePath}`);
-
-			let content: string;
-			content = await fs.readFile(filePath, "utf-8");
-
+	
+			const content = await fs.readFile(filePath, "utf-8");
 			translations.set(language, JSON.parse(content));
+			loadedLanguages.add(language);
 		} catch (error) {
-			logger.error(
-				`Failed to load ${language} translations: ${error instanceof Error ? error.stack : String(error)}`,
-				{
-					moduleState: ModuleState.ERROR,
-					error: error instanceof Error ? error.stack : String(error),
-				},
+			logger.error(`Failed to load ${language} translations: ${error}`,
+				
 			);
-
-			if (language !== "en") {
-				await load("en");
-				currentLanguage = "en";
-			}
+			if (language !== "en") await load("en");
 		}
 	}
 
 	async function setLanguage(language: string) {
-		if (!translations.has(language)) await load(language);
+		if (fastLangSwitch && loadedLanguages.has(language)) {
+			currentLanguage = language;
+			return;
+		}
+	
+		if (!translations.has(language)) {
+			await load(language);
+		}
 		currentLanguage = translations.has(language) ? language : "en";
+		loadedLanguages.add(language);
 	}
+	
+	function setLanguageMessage(language: string): void {
+		if (fastLangSwitch && loadedLanguages.has(language)) {
+			currentLanguage = language;
+			return;
+		}
 
-	function t(key: DotPaths<T>, params?: TranslationParams): string {
-		const trans = translations.get(currentLanguage) || translations.get("en");
-		if (!trans) return key;
+        if (!translations.has(language)) {
+            logger.warn(`Language ${language} not loaded, falling back to en`);
+            language = "en";
+        }
+        messageLanguage = language;
+        logger.debug(`Message language set to: ${language}`);
+    }
 
+	function t(
+        key: DotPaths<T>,
+        params?: TranslationParams,
+        lang?: string | boolean // Теперь можно передать boolean для использования messageLanguage
+    ): string {
+        // Определяем целевой язык
+        let targetLang: string;
+        
+        if (typeof lang === "boolean") {
+            // Если передан флаг, используем messageLanguage если true, иначе currentLanguage
+            targetLang = lang ? messageLanguage : currentLanguage;
+        } else {
+            // Старое поведение: явный язык > messageLanguage > currentLanguage > en
+            targetLang = lang ?? messageLanguage ?? currentLanguage ?? "en";
+        }
+
+        const trans = translations.get(targetLang) ?? translations.get("en");
+        
+        if (!trans) {
+            logger.warn(`No translations for ${targetLang}, key: ${key}`);
+            return key;
+        }
+	
+		// 3. Получаем значение по ключу
 		const value = String(key)
-			.split(".")
+			.split('.')
 			.reduce<unknown>(
-				(obj, k) =>
-					obj && typeof obj === "object"
-						? (obj as Record<string, unknown>)[k]
+				(obj, k) => 
+					obj && typeof obj === 'object' 
+						? (obj as Record<string, unknown>)[k] 
 						: undefined,
-				trans,
+				trans
 			);
-
-		if (typeof value !== "string") return key;
+	
+		if (typeof value !== 'string') {
+			console.warn(`Translation value not found for key "${key}"`);
+			return key;
+		}
+		
+		// 4. Подставляем параметры если они есть
 		return params
 			? value.replace(/{(\w+)}/g, (_, k) => params[k]?.toString() ?? `{${k}}`)
 			: value;
@@ -143,6 +190,7 @@ export function createLocale<T extends Record<string, unknown>>(
 	return {
 		load,
 		setLanguage,
+		setLanguageMessage,
 		t,
 		setTranslations,
 	};

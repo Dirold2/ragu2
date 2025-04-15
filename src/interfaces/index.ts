@@ -21,15 +21,6 @@ export interface Track {
 	requestedBy?: string;
 }
 
-export interface TrackYandex {
-	id: number | string;
-	title: string;
-	artists: Array<{ name: string }>;
-	albums: Array<{ title?: string }>;
-	durationMs: number | undefined;
-	coverUri: string | undefined;
-}
-
 export interface QueueResult {
 	tracks: Track[];
 	lastTrackId?: string;

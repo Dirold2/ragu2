@@ -64,16 +64,16 @@ export default class PlayerManager {
 		const { guildId, channelId } = interaction;
 
 		if (!guildId) {
-			await this.commandService.send(
+			await this.commandService.reply(
 				interaction,
-				bot.locale.t("errors.serverError"),
+				"messages.playerManager.errors.server_error",
 			);
 			return null;
 		}
 		if (!channelId) {
-			await this.commandService.send(
+			await this.commandService.reply(
 				interaction,
-				bot.locale.t("errors.serverError"),
+				"messages.playerManager.errors.server_error",
 			);
 			return null;
 		}
@@ -111,7 +111,9 @@ export default class PlayerManager {
 		}
 
 		// Создаем новый плеер
-		this.logger.debug(bot.locale.t("player.playerCreated", { guildId }));
+		this.logger.debug(
+			bot.locale.t("messages.playerManager.player.player_created", { guildId }),
+		);
 		const newPlayer = new PlayerService(this.commandService, guildId);
 
 		// Сохраняем в активные плееры и кэш
@@ -157,7 +159,7 @@ export default class PlayerManager {
 	public async togglePause(interaction: CommandInteraction): Promise<void> {
 		const handles = await this.handleServerOnlyCommand(interaction);
 		if (handles?.guildId) {
-			await this.getPlayer(handles.guildId).togglePause(interaction);
+			await this.getPlayer(handles.guildId).togglePause();
 		}
 	}
 
@@ -204,7 +206,11 @@ export default class PlayerManager {
 	public async leaveChannel(guildId: string): Promise<void> {
 		const player = this.players.get(guildId);
 		if (!player) {
-			this.logger.warn(bot.locale.t("errors.playerNotFound", { guildId }));
+			this.logger.warn(
+				bot.locale.t("messages.playerManager.errors.player_not_found", {
+					guildId,
+				}),
+			);
 			return;
 		}
 

@@ -10,12 +10,13 @@ export class LoopCommand {
 		description: bot.locale.t("commands.loop.description"),
 	})
 	async toggleLoop(interaction: CommandInteraction) {
+
 		try {
 			const player = bot.playerManager.getPlayer(interaction.guildId!);
 			if (!player) {
 				return await bot.commandService.reply(
 					interaction,
-					bot.locale.t("errors.player.not_found"),
+					"commands.loop.errors.not_found",
 				);
 			}
 
@@ -25,24 +26,24 @@ export class LoopCommand {
 
 			return await bot.commandService.reply(
 				interaction,
-				bot.locale.t(
-					player.state.loop ? "player.loop.enabled" : "player.loop.disabled",
+					player.state.loop
+						? "commands.loop.enabled"
+						: "commands.loop.disabled",
 					player.state.loop
 						? { track: player.state.currentTrack?.info || "" }
 						: undefined,
-				),
 			);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.track.playback", {
+				bot.locale.t("commands.loop.errors.playback", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
 			return await bot.commandService.reply(
 				interaction,
-				bot.locale.t("errors.track.playback", {
+				"commands.loop.errors.playback", {
 					error: error instanceof Error ? error.message : String(error),
-				}),
+				},
 			);
 		}
 	}

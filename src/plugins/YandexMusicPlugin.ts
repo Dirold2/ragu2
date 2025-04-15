@@ -7,7 +7,6 @@ import { Types, WrappedYMApi, YMApi } from "ym-api-meowed";
 import type {
 	MusicServicePlugin,
 	PlaylistTrack,
-	TrackYandex,
 } from "../interfaces/index.js";
 import {
 	type Config,
@@ -17,16 +16,64 @@ import {
 } from "../types/index.js";
 import { bot } from "../bot.js";
 
+export interface TrackYandex {
+	id: number | string;
+	title: string;
+	artists: Array<{ name: string }>;
+	albums: Array<{ title?: string }>;
+	durationMs: number | undefined;
+	coverUri: string | undefined;
+}
+
 const CACHE_TTL = 600; // 10 minutes
 const CACHE_CHECK_PERIOD = 120; // 2 minutes
 const MAX_RETRIES = 3;
 const MIN_TIMEOUT = 1000;
 const MAX_TIMEOUT = 5000;
 
+/**
+ * Cache wrapper class that conditionally uses NodeCache based on environment variable
+ */
+class CacheWrapper {
+	private cache: NodeCache | null = null;
+	private useCache: boolean;
+
+	constructor(options?: NodeCache.Options) {
+		this.useCache = process.env.USE_CACHE?.toLowerCase() === 'true' || true;
+		
+		if (this.useCache) {
+			this.cache = new NodeCache(options);
+		}
+	}
+
+	get<T>(key: string): T | undefined {
+		if (!this.useCache || !this.cache) return undefined;
+		return this.cache.get<T>(key);
+	}
+
+	set<T>(key: string, value: T, ttl?: string | number): boolean {
+		if (!this.useCache || !this.cache) return false;
+		return this.cache.set(key, value, ttl!);
+	}
+
+	flushAll(): void {
+		if (this.useCache && this.cache) {
+			this.cache.flushAll();
+		}
+	}
+
+	getStats(): NodeCache.Stats {
+		if (this.useCache && this.cache) {
+			return this.cache.getStats();
+		}
+		return { keys: 0, hits: 0, misses: 0, ksize: 0, vsize: 0 };
+	}
+}
+
 @Discord()
 export default class YandexMusicPlugin implements MusicServicePlugin {
 	name = "yandex";
-	urlPatterns = [/music\.yandex\.ru/];
+	urlPatterns = [/music\.yandex\./];
 	private urlTrackPattern = /\/album\/\d+\/track\/(\d+)/;
 	private urlPlaylistPattern = /\/users\/([^/]+)\/playlists\/(\d+)/;
 	private urlAlbumPattern = /\/album\/(\d+)(\?.*)?$/;
@@ -34,12 +81,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	private results: SearchTrackResult[] = [];
 	private wrapper = new WrappedYMApi();
 	private api = new YMApi();
-	private cache = new NodeCache({
-		stdTTL: CACHE_TTL,
-		checkperiod: CACHE_CHECK_PERIOD,
-		maxKeys: 1000,
-		deleteOnExpire: true,
-	});
+	private cache: CacheWrapper;
 	private initialized = false;
 
 	hasAvailableResults = (): boolean => this.results.length > 0;
@@ -61,10 +103,13 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	async searchName(trackName: string): Promise<SearchTrackResult[]> {
 		await this.ensureInitialized();
 		const cacheKey = `search_${trackName}`;
-		return (
-			this.cache.get<SearchTrackResult[]>(cacheKey) ??
-			(await this.updateCacheInBackground(trackName, cacheKey))
-		);
+		const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
+		
+		if (cachedResults) {
+			return cachedResults;
+		}
+		
+		return await this.updateCacheInBackground(trackName, cacheKey);
 	}
 
 	/**
@@ -76,7 +121,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		await this.ensureInitialized();
 		try {
 			const parsedUrl = new URL(url);
-			if (!parsedUrl.hostname.includes("music.yandex.ru")) return [];
+			if (!parsedUrl.hostname.includes("music.yandex")) return [];
 
 			if (this.urlAlbumPattern.test(parsedUrl.pathname)) {
 				const albumId = this.extractId(parsedUrl, this.urlAlbumPattern);
@@ -106,7 +151,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			return [];
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.plugin.url_processing", {
+				bot.locale.t("plugins.yandex.errors.url_processing", {
 					name: this.name,
 					error: error instanceof Error ? error.message : String(error),
 				}),
@@ -143,7 +188,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.track.url_not_found", {
+				bot.locale.t("plugins.yandex.errors.track.url_not_found", {
 					trackId,
 					error: error instanceof Error ? error.message : String(error),
 				}),
@@ -163,16 +208,25 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		playlistName: string,
 	): Promise<SearchTrackResult[]> {
 		try {
+			const cacheKey = `playlist_${playlistId}_${playlistName}`;
+			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
+			
+			if (cachedResults) {
+				return cachedResults;
+			}
+			
 			const playlistInfo = await this.api.getPlaylist(
 				Number(playlistId),
 				playlistName,
 			);
 			if (!playlistInfo?.tracks) {
-				bot.logger.warn(bot.locale.t("errors.playlist.not_found"));
+				bot.logger.warn(
+					bot.locale.t("plugins.yandex.errors.playlist.not_found"),
+				);
 				return [];
 			}
 
-			return (playlistInfo.tracks as PlaylistTrack[])
+			const results = (playlistInfo.tracks as PlaylistTrack[])
 				.map((track) => {
 					const trackData = track.track;
 					return this.formatTrackInfo({
@@ -186,9 +240,12 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				})
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
+				
+			this.cache.set(cacheKey, results);
+			return results;
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.playlist.processing", {
+				bot.locale.t("plugins.yandex.errors.playlist.processing", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
@@ -204,15 +261,25 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	async getAlbumTracks(albumId: string): Promise<SearchTrackResult[]> {
 		await this.ensureInitialized();
 		try {
+			const cacheKey = `album_${albumId}`;
+			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
+			
+			if (cachedResults) {
+				return cachedResults;
+			}
+			
 			const albumInfo = await this.api.getAlbumWithTracks(Number(albumId));
-			return albumInfo.volumes
+			const results = albumInfo.volumes
 				.flat()
 				.map((track) => this.formatTrackInfo(track))
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
+				
+			this.cache.set(cacheKey, results);
+			return results;
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.track.processing", {
+				bot.locale.t("plugins.yandex.errors.track.processing", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
@@ -228,21 +295,33 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
 		await this.ensureInitialized();
 		try {
+			const cacheKey = `recommendations_${trackId}`;
+			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
+			
+			if (cachedResults) {
+				return cachedResults;
+			}
+			
 			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
 			if (!similarTracks?.similarTracks) {
 				bot.logger.warn(
-					bot.locale.t("plugins.yandex.no_similar_tracks_found", { trackId }),
+					bot.locale.t("plugins.yandex.errors.no_similar_tracks_found", {
+						trackId,
+					}),
 				);
 				return [];
 			}
 
-			return similarTracks.similarTracks
+			const results = similarTracks.similarTracks
 				.map((track) => this.formatTrackInfo(track))
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
+				
+			this.cache.set(cacheKey, results);
+			return results;
 		} catch (error) {
 			bot.logger.error(
-				`${bot.locale.t("plugins.yandex.error_fetching_similar_tracks", { trackId })}: ${error instanceof Error ? error.message : String(error)}`,
+				`${bot.locale.t("plugins.yandex.errors.error_fetching_similar_tracks", { trackId })}: ${error instanceof Error ? error.message : String(error)}`,
 			);
 			return [];
 		}
@@ -317,7 +396,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		const validation = TrackResultSchema.safeParse(searchResult);
 		if (!validation.success) {
 			bot.logger.warn(
-				bot.locale.t("errors.track.invalid_data", {
+				bot.locale.t("plugins.yandex.errors.track.invalid_data", {
 					error: JSON.stringify(validation.error),
 				}),
 			);
@@ -335,7 +414,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		const uid = Number(process.env.YM_USER_ID);
 
 		if (!access_token || isNaN(uid)) {
-			throw new Error(bot.locale.t("errors.plugin.missing_config"));
+			throw new Error(
+				bot.locale.t("plugins.yandex.errors.plugin.missing_config"),
+			);
 		}
 
 		const config = { access_token, uid };
@@ -343,7 +424,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 		if (!validation.success) {
 			throw new Error(
-				bot.locale.t("errors.plugin.invalid_config", {
+				bot.locale.t("plugins.yandex.errors.plugin.invalid_config", {
 					errors: validation.error.errors.map((err) => err.message).join(", "),
 				}),
 			);
@@ -365,9 +446,11 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			this.initialized = true;
 		} catch (error) {
 			bot.logger.error(
-				`${bot.locale.t("plugins.yandex.error_initializing_service")}: ${error instanceof Error ? error.message : String(error)}`,
+				`${bot.locale.t("plugins.yandex.errors.error_initializing_service")}: ${error instanceof Error ? error.message : String(error)}`,
 			);
-			throw new Error(bot.locale.t("plugins.yandex.failed_to_initialize"));
+			throw new Error(
+				bot.locale.t("plugins.yandex.errors.failed_to_initialize"),
+			);
 		}
 	}
 
@@ -386,7 +469,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				retries: MAX_RETRIES,
 				onRetry: (error: Error) =>
 					bot.logger.warn(
-						`${bot.locale.t("plugins.yandex.retrying_search", { trackName })}: ${error.message}`,
+						`${bot.locale.t("plugins.yandex.errors.retrying_search", { trackName })}: ${error.message}`,
 					),
 			});
 
@@ -410,7 +493,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			return validatedTracks;
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.track.search", {
+				bot.locale.t("plugins.yandex.errors.track.search", {
 					query: trackName,
 					error: error instanceof Error ? error.message : String(error),
 				}),
@@ -451,15 +534,26 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	}
 
 	private startCacheCleanup(): void {
-		setInterval(() => {
-			const stats = this.cache.getStats();
-			if (stats.keys > 800) {
-				this.cache.flushAll();
-			}
-		}, CACHE_CHECK_PERIOD * 1000);
+		// Only start cache cleanup if caching is enabled
+		if (process.env.USE_CACHE?.toLowerCase() === 'true') {
+			setInterval(() => {
+				const stats = this.cache.getStats();
+				if (stats.keys > 800) {
+					this.cache.flushAll();
+				}
+			}, CACHE_CHECK_PERIOD * 1000);
+		}
 	}
 
 	constructor() {
+		// Initialize the cache wrapper with options
+		this.cache = new CacheWrapper({
+			stdTTL: CACHE_TTL,
+			checkperiod: CACHE_CHECK_PERIOD,
+			maxKeys: 1000,
+			deleteOnExpire: true,
+		});
+		
 		this.startCacheCleanup();
 	}
 }

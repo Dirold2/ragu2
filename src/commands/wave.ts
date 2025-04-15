@@ -15,7 +15,7 @@ export class WaveCommand {
 			if (!player) {
 				return await bot.commandService.reply(
 					interaction,
-					bot.locale.t("errors.player.not_found"),
+					"commands.wave.errors.not_found",
 				);
 			}
 
@@ -25,23 +25,21 @@ export class WaveCommand {
 
 			return await bot.commandService.reply(
 				interaction,
-				bot.locale.t(
-					player.state.wave
-						? "commands.wave.enabled"
-						: "commands.wave.disabled",
-				),
+				player.state.wave
+					? "commands.wave.enabled"
+					: "commands.wave.disabled",
 			);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("errors.track.playback", {
+				bot.locale.t("commands.wave.errors.playback", {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
 			return await bot.commandService.reply(
 				interaction,
-				bot.locale.t("errors.track.playback", {
+				"commands.wave.errors.playback", {
 					error: error instanceof Error ? error.message : String(error),
-				}),
+				},
 			);
 		}
 	}

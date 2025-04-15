@@ -65,7 +65,7 @@ export default class PluginManager {
 			if (cachedPluginName) {
 				const plugin = this.plugins.get(cachedPluginName);
 				if (plugin) {
-					this.logger.debug(this.locale.t("logger.plugin.cache.hit"), {
+					this.logger.debug(this.locale.t("messages.playerManager.cache.hit"), {
 						plugin: plugin.name,
 					});
 					return plugin;
@@ -84,7 +84,10 @@ export default class PluginManager {
 					plugin: plugin.name,
 				});
 			} else {
-				this.logger.debug(this.locale.t("logger.plugin.not_found"), { url });
+				this.logger.debug(
+					this.locale.t("messages.playerManager.errors.plugin.not_found"),
+					{ url },
+				);
 			}
 
 			return plugin;
