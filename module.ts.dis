@@ -164,7 +164,7 @@ export default class BotModule extends Module {
 	private async stopBot(): Promise<void> {
 		await bot.destroy();
 		this.logger.info({
-			message: this.locale.t("bot.status.stopped"),
+			message: this.locale.t("messages.bot.status.stopped"),
 			moduleState: ModuleState.STOPPED,
 		});
 	}
