@@ -17,7 +17,10 @@
             },
             "success": {
                 "added_to_queue": "Added to queue: {track}",
-                "playlist_added": "Playlist successfully added to queue"
+                "playlist_added": "Playlist successfully added to queue",
+                "processing_playlist": "Adding {count} tracks to queue",
+                "processing_batch": "Processing batch {current}/{total} ({batchSize} tracks)",
+                "batch_complete": "Batch processing complete"
             }
         },
         "commandServise": {
@@ -61,7 +64,8 @@
                 "invalid_track_url": "Invalid track URL",
                 "track_url_not_found": "Track URL not found: {trackId}",
                 "empty_check": "Error checking empty channel: {error}",
-                "channel_id_null": "Channel ID is null"
+                "channel_id_null": "Channel ID is null",
+                "connection_null": "Connection is null"
             },
             "player": {
                 "status": {
@@ -74,13 +78,17 @@
                     "player_created": "Created new player for guild: {guildId}",
                     "nothing_playing": "Nothing is currently playing",
                     "fadeout_cleared": "Fadeout cleared",
-                    "fadeout_set": "Fadeout set: {duration}ms"
+                    "fadeout_set": "Fadeout set: {duration}ms",
+                    "no_recommendations": "No recommendations available for source: {source}",
+                    "empty_channel": "Left empty voice channel"
                 },
                 "error": {
                     "plugin_not_found": "Plugin not found for source: {source}",
                     "get_track_url": "Error getting track URL: {trackId} - {error}",
                     "reconnection_failed": "Error reconnecting: {error}",
-                    "destroy": "Ошибка при очистке ресурсов плеера: {error}"
+                    "destroy": "Ошибка при очистке ресурсов плеера: {error}",
+                    "recommendations": "Error getting recommendations for track {trackId}: {error}",
+                    "preload": "Error preloading next track: {error}"
                 }
             }
         },

@@ -9,6 +9,12 @@ export default class PluginManager {
 	private readonly urlCache: Map<string, string> = new Map();
 	private readonly logger = bot.logger;
 	private readonly locale = bot.locale;
+	private readonly MAX_URL_CACHE_SIZE = 1000;
+	private readonly CACHE_CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour
+
+	constructor() {
+		setInterval(() => this.pruneUrlCache(), this.CACHE_CLEANUP_INTERVAL);
+	}
 
 	/**
 	 * Registers a new plugin with proper validation and error handling
@@ -78,6 +84,13 @@ export default class PluginManager {
 			);
 
 			if (plugin) {
+				if (this.urlCache.size >= this.MAX_URL_CACHE_SIZE) {
+					const keysToDelete = Array.from(this.urlCache.keys()).slice(
+						0,
+						Math.floor(this.MAX_URL_CACHE_SIZE * 0.1),
+					);
+					keysToDelete.forEach((key) => this.urlCache.delete(key));
+				}
 				this.urlCache.set(url, plugin.name);
 				this.logger.debug("Plugin found for URL", {
 					url,
@@ -122,5 +135,11 @@ export default class PluginManager {
 			stack: errorObj.stack,
 			context,
 		});
+	}
+
+	private pruneUrlCache(): void {
+		if (this.urlCache.size > this.MAX_URL_CACHE_SIZE / 2) {
+			this.clearCache();
+		}
 	}
 }

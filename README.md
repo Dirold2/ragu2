@@ -99,6 +99,8 @@ Work in progress:
 
 - [x] Add localization
 - [x] Add "wave" for continuous music playback
+- [x] Replacing node-cache with lru-cache
+- [x] Solving the bug with an empty track on the side of the Yandex Music plugin
 - [ ] Fix memory (Max 270MB)
 
 Plugins:

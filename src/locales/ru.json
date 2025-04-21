@@ -17,7 +17,10 @@
             },
             "success": {
                 "added_to_queue": "Добавлено в очередь: {track}",
-                "playlist_added": "Плейлист успешно добавлен в очередь"
+                "playlist_added": "Плейлист успешно добавлен в очередь",
+                "processing_playlist": "Добавление {count} треков в очередь",
+                "processing_batch": "Обработка пакета {current}/{total} ({batchSize} треков)",
+                "batch_complete": "Обработка пакета завершена"
             }
         },
         "commandServise": {
@@ -61,7 +64,8 @@
                 "invalid_track_url": "Недействительный URL трека",
                 "track_url_not_found": "URL трека не найден: {trackId}",
                 "empty_check": "Ошибка проверки пустого канала: {error}",
-                "channel_id_null": "ID канала равен null"
+                "channel_id_null": "ID канала равен null",
+                "connection_null": "Соединение отсутствует"
             },
             "player": {
                 "status": {
@@ -74,13 +78,17 @@
                     "playerCreated": "Создан новый плеер для сервера: {guildId}",
                     "nothingPlaying": "Сейчас ничего не воспроизводится",
                     "fadeout_cleared": "Затухание очищено",
-                    "fadeout_set": "Затухание установлено: {duration}мс"
+                    "fadeout_set": "Затухание установлено: {duration}мс",
+                    "no_recommendations": "Нет доступных рекомендаций для источника: {source}",
+                    "empty_channel": "Покинул пустой голосовой канал"
                 },
                 "error": {
                     "plugin_not_found": "Плагин не найден для источника: {source}",
                     "get_track_url": "Ошибка получения URL трека: {trackId} - {error}",
                     "reconnection_failed": "Ошибка переподключения: {error}",
-                    "destroy": "Ошибка при очистке ресурсов плеера: {error}"
+                    "destroy": "Ошибка при очистке ресурсов плеера: {error}",
+                    "recommendations": "Ошибка получения рекомендаций для трека {trackId}: {error}",
+                    "preload": "Ошибка предзагрузки следующего трека: {error}"
                 }
             }
         },

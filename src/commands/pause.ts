@@ -5,8 +5,8 @@ import { bot } from "../bot.js";
 
 @Discord()
 export class PauseCommand {
-	@Slash({ 
-		name: "pause", 
+	@Slash({
+		name: "pause",
 		description: bot.locale.t("commands.pause.description"),
 	})
 	async pause(interaction: CommandInteraction): Promise<void> {
@@ -14,7 +14,7 @@ export class PauseCommand {
 		if (!player) {
 			return await bot.commandService.reply(
 				interaction,
-				"commands.pause.errors.not_found"
+				"commands.pause.errors.not_found",
 			);
 		}
 
@@ -22,10 +22,8 @@ export class PauseCommand {
 
 		return await bot.commandService.reply(
 			interaction,
-			player.state.pause
-				? "commands.pause.paused"
-				: "commands.pause.resumed",
-			undefined, 
+			player.state.pause ? "commands.pause.paused" : "commands.pause.resumed",
+			undefined,
 		);
 	}
 }

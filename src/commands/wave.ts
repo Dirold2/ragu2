@@ -25,9 +25,7 @@ export class WaveCommand {
 
 			return await bot.commandService.reply(
 				interaction,
-				player.state.wave
-					? "commands.wave.enabled"
-					: "commands.wave.disabled",
+				player.state.wave ? "commands.wave.enabled" : "commands.wave.disabled",
 			);
 		} catch (error) {
 			bot.logger.error(
@@ -37,7 +35,8 @@ export class WaveCommand {
 			);
 			return await bot.commandService.reply(
 				interaction,
-				"commands.wave.errors.playback", {
+				"commands.wave.errors.playback",
+				{
 					error: error instanceof Error ? error.message : String(error),
 				},
 			);

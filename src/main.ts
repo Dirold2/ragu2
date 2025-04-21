@@ -13,10 +13,9 @@ const __dirname = dirname(import.meta);
 
 config({ path: r(dirname(import.meta), ".env") });
 
-
 const logger = createLogger(`ragu2`);
 const locale = createLocale<typeof translations>(`ragu2`);
-locale.load()
+locale.load();
 
 /**
  * Runs the bot

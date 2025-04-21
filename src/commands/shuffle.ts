@@ -15,7 +15,7 @@ export class ShuffleCommand {
 			if (!guildId) {
 				await bot.commandService.reply(
 					interaction,
-					"commands.shuffle.errors.guild_only"
+					"commands.shuffle.errors.guild_only",
 				);
 				return;
 			}
@@ -24,7 +24,7 @@ export class ShuffleCommand {
 			if (!player) {
 				await bot.commandService.reply(
 					interaction,
-					"commands.shuffle.errors.no_player"
+					"commands.shuffle.errors.no_player",
 				);
 				return;
 			}
@@ -33,7 +33,7 @@ export class ShuffleCommand {
 			if (!queueService) {
 				await bot.commandService.reply(
 					interaction,
-					"commands.shuffle.errors.no_queue_service"
+					"commands.shuffle.errors.no_queue_service",
 				);
 				return;
 			}
@@ -43,16 +43,14 @@ export class ShuffleCommand {
 			if (shuffledCount <= 1) {
 				await bot.commandService.reply(
 					interaction,
-					"commands.shuffle.errors.not_enough_tracks"
+					"commands.shuffle.errors.not_enough_tracks",
 				);
 				return;
 			}
 
-			await bot.commandService.reply(
-				interaction,
-				"commands.shuffle.success",
-				{ count: shuffledCount }
-			);
+			await bot.commandService.reply(interaction, "commands.shuffle.success", {
+				count: shuffledCount,
+			});
 		} catch (error) {
 			bot.logger.error(
 				bot.locale.t("commands.shuffle.errors.playback", {
@@ -61,7 +59,8 @@ export class ShuffleCommand {
 			);
 			await bot.commandService.reply(
 				interaction,
-				"commands.shuffle.errors.playback", {
+				"commands.shuffle.errors.playback",
+				{
 					error: error instanceof Error ? error.message : String(error),
 				},
 			);

@@ -30,7 +30,6 @@ import {
 import type { CommandService, Track } from "./index.js";
 
 import { getAudioDurationInSeconds } from "get-audio-duration";
-import pathToFfmpeg from "ffmpeg-ffprobe-static";
 import type { PlayerState } from "../types/index.js";
 import { EventEmitter } from "events";
 
@@ -144,13 +143,16 @@ export default class PlayerService extends EventEmitter {
 	 */
 	public async playOrQueueTrack(track: Track): Promise<void> {
 		try {
+			let success = false;
+
 			if (this.state.isPlaying) {
 				await this.queueTrack(track);
+				success = true;
 			} else {
-				await this.playTrack(track);
+				success = await this.playTrack(track);
 			}
 
-			if (!this.state.nextTrack) {
+			if (success && !this.state.nextTrack) {
 				await this.loadNextTrack();
 			}
 		} catch (error) {
@@ -186,12 +188,12 @@ export default class PlayerService extends EventEmitter {
 		switch (status) {
 			case AudioPlayerStatus.Playing:
 				this.player.pause();
-				pause = true
+				pause = true;
 				isPlaying = false;
 				break;
 			case AudioPlayerStatus.Paused:
 				this.player.unpause();
-				pause = false
+				pause = false;
 				isPlaying = true;
 				break;
 		}
@@ -376,6 +378,7 @@ export default class PlayerService extends EventEmitter {
 	public leaveChannel(): void {
 		if (this.state.connection) {
 			this.state.connection.destroy();
+			this.clearAllTimers();
 			this.reset();
 			this.updateActivity();
 		}
@@ -395,12 +398,12 @@ export default class PlayerService extends EventEmitter {
 	 * @ru Проигрывает трек.
 	 * @param {Track} track - Track to play
 	 */
-	private async playTrack(track: Track): Promise<void> {
+	private async playTrack(track: Track): Promise<boolean> {
 		if (!track) {
 			bot.logger.error(
 				bot.locale.t("messages.playerService.errors.invalid_track"),
 			);
-			return;
+			return false;
 		}
 
 		if (track.source === "url") {
@@ -408,14 +411,14 @@ export default class PlayerService extends EventEmitter {
 				bot.logger.error(
 					bot.locale.t("messages.playerService.errors.invalid_track_url"),
 				);
-				return;
+				return false;
 			}
 			track.trackId = track.url;
 		} else if (!track.trackId) {
 			bot.logger.error(
 				bot.locale.t("messages.playerService.errors.invalid_track"),
 			);
-			return;
+			return false;
 		}
 
 		this.manageFadeOutTimeout();
@@ -431,7 +434,7 @@ export default class PlayerService extends EventEmitter {
 		const trackUrl = await this.getTrackUrl(track.trackId, track.source);
 		if (!trackUrl) {
 			await this.playNextTrack();
-			return;
+			return false;
 		}
 
 		const resource = this.createTrackResource({
@@ -454,7 +457,8 @@ export default class PlayerService extends EventEmitter {
 		this.state.isPlaying = true;
 		this.updateActivity(track.info);
 
-		await this.setupTrackEndFade({ ...track, url: trackUrl });
+		await this.setupTrackEndFade({ ...track, url: trackUrl  });
+		return true;
 	}
 
 	/**
@@ -484,6 +488,7 @@ export default class PlayerService extends EventEmitter {
 			}
 
 			const url = await plugin.getTrackUrl(trackId);
+
 			if (!url) {
 				bot.logger.error(
 					bot.locale.t("messages.playerService.errors.track_url_not_found", {
@@ -501,6 +506,7 @@ export default class PlayerService extends EventEmitter {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
+			await this.playNextTrack()
 			return null;
 		}
 	}
@@ -527,12 +533,24 @@ export default class PlayerService extends EventEmitter {
 	 * @ru Устанавливает эффекты затухания.
 	 */
 	private setupFadeEffects(): void {
-		if (this.timers.fadeOut) clearTimeout(this.timers.fadeOut);
-		this.timers.fadeOut = setTimeout(
-			() =>
-				void this.smoothVolumeChange(this.state.volume / 100, 3000, true, true),
-			500,
-		);
+		if (this.timers.fadeOut) {
+			clearTimeout(this.timers.fadeOut);
+			this.timers.fadeOut = null;
+		}
+
+		// Используем Promise.resolve для гарантии асинхронного выполнения
+		this.timers.fadeOut = setTimeout(() => {
+			Promise.resolve().then(() => {
+				if (this.state.resource?.volume) {
+					void this.smoothVolumeChange(
+						this.state.volume / 100,
+						3000,
+						true,
+						true,
+					);
+				}
+			});
+		}, 500);
 	}
 
 	/**
@@ -583,7 +601,7 @@ export default class PlayerService extends EventEmitter {
 		try {
 			return await getAudioDurationInSeconds(
 				url,
-				process.env.FFPROBE_PATH || pathToFfmpeg.ffprobePath || undefined,
+				process.env.FFPROBE_PATH || undefined,
 			);
 		} catch (error) {
 			bot.logger.error(`Failed to get audio duration for ${url}: ${error}`);
@@ -598,8 +616,10 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private async queueTrack(track: Track): Promise<void> {
 		if (this.guildId) {
-
-			await bot.queueService.setTrack(this.guildId, {...track, priority: true,});
+			await bot.queueService.setTrack(this.guildId, {
+				...track,
+				priority: true,
+			});
 		}
 	}
 
@@ -672,7 +692,7 @@ export default class PlayerService extends EventEmitter {
 				trackId: rec.id,
 				info: `${rec.title} - ${rec.artists.map((a: { name: string }) => a.name).join(", ")}`,
 				requestedBy: this.state.lastTrack?.requestedBy,
-			}),
+			}), 
 		);
 	}
 
@@ -694,15 +714,22 @@ export default class PlayerService extends EventEmitter {
 
 		this.disconnectHandler = async () => {
 			try {
+				if (!this.state.connection) {
+					bot.logger.error(
+						bot.locale.t("messages.playerService.errors.connection_null"),
+					);
+					return;
+				}
+
 				// Пытаемся переподключиться
 				await Promise.race([
 					entersState(
-						this.state.connection!,
+						this.state.connection,
 						VoiceConnectionStatus.Signalling,
 						RECONNECTION_TIMEOUT,
 					),
 					entersState(
-						this.state.connection!,
+						this.state.connection,
 						VoiceConnectionStatus.Connecting,
 						RECONNECTION_TIMEOUT,
 					),
@@ -781,8 +808,11 @@ export default class PlayerService extends EventEmitter {
 			if (membersCount === 0) {
 				if (!this.timers.emptyChannelTimeout) {
 					this.timers.emptyChannelTimeout = setTimeout(() => {
+						if (this.timers.emptyChannelTimeout) {
+							clearTimeout(this.timers.emptyChannelTimeout);
+							this.timers.emptyChannelTimeout = null;
+						}
 						this.leaveChannel();
-						this.timers.emptyChannelTimeout = null;
 					}, 30000);
 				}
 			} else {
@@ -921,10 +951,10 @@ export default class PlayerService extends EventEmitter {
 	 * @param {number} duration - Duration in milliseconds
 	 */
 	protected setEmptyChannelTimer(callback: () => void, duration: number): void {
-		if (this.timers.emptyChannelInterval) {
-			clearInterval(this.timers.emptyChannelInterval);
-			this.timers.emptyChannelInterval = null;
+		if (this.timers.emptyChannelTimeout) {
+			clearTimeout(this.timers.emptyChannelTimeout);
+			this.timers.emptyChannelTimeout = null;
 		}
-		this.timers.emptyChannelInterval = setTimeout(callback, duration);
+		this.timers.emptyChannelTimeout = setTimeout(callback, duration);
 	}
 }

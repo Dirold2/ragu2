@@ -5,7 +5,7 @@ export interface MusicServicePlugin {
 	urlPatterns: RegExp[];
 	searchName(trackName: string): Promise<SearchTrackResult[]>;
 	searchURL(url: string): Promise<SearchTrackResult[] | undefined>;
-	getTrackUrl(trackId: string): Promise<string>;
+	getTrackUrl(trackId: string): Promise<string | null>;
 	getPlaylistURL?(url: string): Promise<SearchTrackResult[] | null>;
 	getRecommendations?(trackId: string): Promise<SearchTrackResult[]>;
 	includesUrl?(url: string): Promise<boolean>;

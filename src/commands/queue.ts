@@ -48,7 +48,8 @@ export class QueueCommand {
 			);
 			await bot.commandService.reply(
 				interaction,
-				"commands.queue.errors.unexpected", {
+				"commands.queue.errors.unexpected",
+				{
 					error: error instanceof Error ? error.message : String(error),
 				},
 			);
@@ -69,10 +70,7 @@ export class QueueCommand {
 
 		const queue = await bot.queueService.getQueue(member.voice.channelId);
 		if (queue.tracks.length === 0) {
-			await bot.commandService.reply(
-				interaction,
-				"commands.queue.empty",
-			);
+			await bot.commandService.reply(interaction, "commands.queue.empty");
 			return;
 		}
 
@@ -107,9 +105,13 @@ export class QueueCommand {
 			this.createReactionCollector(message, interaction);
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("commands.queue.errors.unexpected", {
-					error: error instanceof Error ? error.message : String(error),
-				}, interaction.guild?.preferredLocale || 'en'),
+				bot.locale.t(
+					"commands.queue.errors.unexpected",
+					{
+						error: error instanceof Error ? error.message : String(error),
+					},
+					interaction.guild?.preferredLocale || "en",
+				),
 			);
 		}
 	}
@@ -172,15 +174,25 @@ export class QueueCommand {
 			} catch (error) {
 				if (
 					error instanceof Error &&
-					error.message.includes(bot.locale.t("commands.queue.errors.unknown", undefined, interaction.guild?.preferredLocale || 'en'))
+					error.message.includes(
+						bot.locale.t(
+							"commands.queue.errors.unknown",
+							undefined,
+							interaction.guild?.preferredLocale || "en",
+						),
+					)
 				) {
 					this.message = null;
 					collector.stop();
 				} else {
 					bot.logger.error(
-						bot.locale.t("commands.queue.errors.unexpected", {
-							error: error instanceof Error ? error.message : String(error),
-						}, interaction.guild?.preferredLocale || 'en'),
+						bot.locale.t(
+							"commands.queue.errors.unexpected",
+							{
+								error: error instanceof Error ? error.message : String(error),
+							},
+							interaction.guild?.preferredLocale || "en",
+						),
 					);
 				}
 			}

@@ -75,7 +75,8 @@ export class PlayCommand {
 		if (!interaction.replied && !interaction.deferred) {
 			await bot.commandService.reply(
 				interaction,
-				"commands.play.started_playing", {
+				"commands.play.started_playing",
+				{
 					track: player.state.currentTrack?.info,
 				},
 			);
@@ -118,7 +119,11 @@ export class PlayCommand {
 			}
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("commands.play.searching", { query }, interaction.guild?.preferredLocale || 'en'),
+				bot.locale.t(
+					"commands.play.searching",
+					{ query },
+					interaction.guild?.preferredLocale || "en",
+				),
 				error,
 			);
 			if (!interaction.responded) {
@@ -219,15 +224,18 @@ export class PlayCommand {
 		query: string,
 	): Promise<void> {
 		try {
-			await bot.commandService.reply(
-				interaction,
-				"commands.play.searching", { query },
-			);
+			await bot.commandService.reply(interaction, "commands.play.searching", {
+				query,
+			});
 
 			const results = await bot.nameService.searchName(query);
 			if (!results.length) {
 				await interaction.editReply(
-					bot.locale.t("commands.play.errors.search", { query }, interaction.guild?.preferredLocale || 'en'),
+					bot.locale.t(
+						"commands.play.errors.search",
+						{ query },
+						interaction.guild?.preferredLocale || "en",
+					),
 				);
 				return;
 			}
@@ -242,7 +250,11 @@ export class PlayCommand {
 
 			if (interaction.deferred) {
 				await interaction.editReply(
-					bot.locale.t("commands.play.errors.processing", undefined, interaction.guild?.preferredLocale || 'en'),
+					bot.locale.t(
+						"commands.play.errors.processing",
+						undefined,
+						interaction.guild?.preferredLocale || "en",
+					),
 				);
 			}
 		}

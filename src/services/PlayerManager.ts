@@ -5,7 +5,8 @@ import { type CommandService, PlayerService } from "./index.js";
 import { bot } from "../bot.js";
 
 /**
- * Управляет экземплярами плеера для разных Discord-серверов
+ * @en Manages player instances for different Discord servers
+ * @ru Управляет экземплярами плеера для разных Discord-серверов
  */
 export default class PlayerManager {
 	private readonly players: Map<string, PlayerService> = new Map();
@@ -13,7 +14,6 @@ export default class PlayerManager {
 	private readonly commandService: CommandService;
 	private readonly logger = bot.logger;
 
-	// Добавляем кэш для оптимизации
 	private readonly playerCache = new Map<
 		string,
 		{ lastUsed: number; player: PlayerService }
@@ -21,7 +21,10 @@ export default class PlayerManager {
 	private readonly CACHE_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 минут
 
 	/**
-	 * Создает новый экземпляр PlayerManager
+	 * @en Creates a new PlayerManager instance
+	 * @ru Создает новый экземпляр PlayerManager
+	 * @param queueService Queue service instance
+	 * @param commandService Command service instance
 	 */
 	constructor(queueService = bot.queueService, commandService: CommandService) {
 		this.queueService = queueService;
@@ -32,7 +35,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Запускает периодическую очистку кэша неиспользуемых плееров
+	 * @en Starts periodic cleanup of unused players cache
+	 * @ru Запускает периодическую очистку кэша неиспользуемых плееров
 	 */
 	private startCacheCleanup(): void {
 		setInterval(() => {
@@ -56,7 +60,10 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Проверяет, что команда выполняется в контексте сервера
+	 * @en Checks that command is executed in server context
+	 * @ru Проверяет, что команда выполняется в контексте сервера
+	 * @param interaction Command interaction
+	 * @returns Object with guild and channel IDs or null
 	 */
 	private async handleServerOnlyCommand(
 		interaction: CommandInteraction,
@@ -82,8 +89,10 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Получает или создает экземпляр плеера для сервера
-	 * Оптимизировано с использованием кэша
+	 * @en Gets or creates a player instance for a guild
+	 * @ru Получает или создает экземпляр плеера для сервера
+	 * @param guildId Discord guild ID
+	 * @returns Player service instance
 	 */
 	public getPlayer(guildId: string): PlayerService {
 		// Проверяем активные плееры
@@ -127,7 +136,9 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Присоединяется к голосовому каналу
+	 * @en Joins a voice channel
+	 * @ru Присоединяется к голосовому каналу
+	 * @param interaction Command interaction
 	 */
 	public async joinChannel(interaction: CommandInteraction): Promise<void> {
 		const handles = await this.handleServerOnlyCommand(interaction);
@@ -138,14 +149,19 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Воспроизводит или добавляет трек в очередь на сервере
+	 * @en Plays or queues a track on the guild
+	 * @ru Воспроизводит или добавляет трек в очередь на сервере
+	 * @param guildId Discord guild ID
+	 * @param track Track to play or queue
 	 */
 	public async playOrQueueTrack(guildId: string, track: Track): Promise<void> {
 		await this.getPlayer(guildId).playOrQueueTrack(track);
 	}
 
 	/**
-	 * Пропускает текущий трек
+	 * @en Skips the current track
+	 * @ru Пропускает текущий трек
+	 * @param guildId Discord guild ID
 	 */
 	public async skip(guildId: string): Promise<void> {
 		if (guildId) {
@@ -154,7 +170,9 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Переключает состояние паузы воспроизведения
+	 * @en Toggles playback pause state
+	 * @ru Переключает состояние паузы воспроизведения
+	 * @param interaction Command interaction
 	 */
 	public async togglePause(interaction: CommandInteraction): Promise<void> {
 		const handles = await this.handleServerOnlyCommand(interaction);
@@ -164,7 +182,10 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Устанавливает громкость плеера
+	 * @en Sets the player volume
+	 * @ru Устанавливает громкость плеера
+	 * @param guildId Discord guild ID
+	 * @param volume Volume level (0-100)
 	 */
 	public async setVolume(guildId: string, volume: number): Promise<void> {
 		if (guildId) {
@@ -181,7 +202,10 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Устанавливает состояние повтора плеера
+	 * @en Sets the player loop state
+	 * @ru Устанавливает состояние повтора плеера
+	 * @param guildId Discord guild ID
+	 * @param loop Loop state
 	 */
 	public async setLoop(guildId: string, loop: boolean): Promise<void> {
 		if (guildId) {
@@ -191,7 +215,10 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Устанавливает состояние волны плеера
+	 * @en Sets the player wave state
+	 * @ru Устанавливает состояние волны плеера
+	 * @param guildId Discord guild ID
+	 * @param wave Wave state
 	 */
 	public async setWave(guildId: string, wave: boolean): Promise<void> {
 		if (guildId) {
@@ -201,7 +228,9 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Отключается от голосового канала и удаляет экземпляр плеера
+	 * @en Disconnects from voice channel and removes player instance
+	 * @ru Отключается от голосового канала и удаляет экземпляр плеера
+	 * @param guildId Discord guild ID
 	 */
 	public async leaveChannel(guildId: string): Promise<void> {
 		const player = this.players.get(guildId);
@@ -225,7 +254,8 @@ export default class PlayerManager {
 	}
 
 	/**
-	 * Уничтожает все экземпляры плеера и очищает карту
+	 * @en Destroys all player instances and clears the map
+	 * @ru Уничтожает все экземпляры плеера и очищает карту
 	 */
 	public async destroyAll(): Promise<void> {
 		try {

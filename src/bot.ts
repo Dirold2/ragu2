@@ -68,7 +68,6 @@ export class Bot {
 
 			this.setupEvents();
 			await this.initServices();
-
 		} catch (error) {
 			this.logger.error(this.locale.t("messages.bot.status.init_failed"));
 			throw error;
@@ -191,7 +190,11 @@ export class Bot {
 		try {
 			await this.client.login(token);
 		} catch (error) {
-			this.logger.error(this.locale.t("messages.bot.start.error"));
+			this.logger.error(
+				this.locale.t("messages.bot.status.start_error", {
+					error: String(error),
+				}),
+			);
 			throw error;
 		}
 	}

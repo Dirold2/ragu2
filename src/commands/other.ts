@@ -37,7 +37,8 @@ export class OtherCommand {
 					.join("\n");
 				await bot.commandService.reply(
 					interaction,
-					"commands.other.recently_played_tracks", {trackList},
+					"commands.other.recently_played_tracks",
+					{ trackList },
 				);
 				break;
 			}
@@ -58,7 +59,8 @@ export class OtherCommand {
 					.join("\n");
 				await bot.commandService.reply(
 					interaction,
-					"commands.other.popular_tracks", {topTrackList},
+					"commands.other.popular_tracks",
+					{ topTrackList },
 				);
 				break;
 			}
@@ -77,18 +79,12 @@ export class OtherCommand {
 				const queue = await bot.queueService.getQueue(channelId);
 
 				if (queue.tracks.length === 0) {
-					await bot.commandService.reply(
-						interaction,
-						"commands.queue.empty",
-					);
+					await bot.commandService.reply(interaction, "commands.queue.empty");
 					return;
 				}
 
 				await bot.queueService.clearQueue(channelId);
-				await bot.commandService.reply(
-					interaction,
-					"commands.queue.cleared",
-				);
+				await bot.commandService.reply(interaction, "commands.queue.cleared");
 				break;
 			}
 		}

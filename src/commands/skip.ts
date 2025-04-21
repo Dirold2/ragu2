@@ -19,16 +19,10 @@ export class SkipCommand {
 				);
 			}
 
-			await bot.commandService.reply(
-				interaction,
-				"commands.skip.skipped",
-			);
+			await bot.commandService.reply(interaction, "commands.skip.skipped");
 
 			await bot.playerManager.skip(interaction.guildId!);
-			await bot.commandService.reply(
-				interaction,
-				"commands.skip.skipped",
-			);
+			await bot.commandService.reply(interaction, "commands.skip.skipped");
 		} catch (error) {
 			bot.logger.error(
 				bot.locale.t("commands.skip.errors.playback", {
@@ -37,7 +31,8 @@ export class SkipCommand {
 			);
 			await bot.commandService.reply(
 				interaction,
-				"commands.skip.errors.playback", {
+				"commands.skip.errors.playback",
+				{
 					error: error instanceof Error ? error.message : String(error),
 				},
 			);

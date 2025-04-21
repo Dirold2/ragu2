@@ -25,7 +25,8 @@ export class VolumeCommand {
 		if (volume < 0 || volume > MAX_VOLUME) {
 			return bot.commandService.reply(
 				interaction,
-				"commands.volume.errors.error_max", {
+				"commands.volume.errors.error_max",
+				{
 					maxVolume: MAX_VOLUME,
 				},
 			);
@@ -33,10 +34,9 @@ export class VolumeCommand {
 
 		try {
 			await bot.playerManager.setVolume(interaction.guildId!, volume);
-			await bot.commandService.reply(
-				interaction,
-				"commands.volume.set", { volume }
-			);
+			await bot.commandService.reply(interaction, "commands.volume.set", {
+				volume,
+			});
 		} catch (error) {
 			bot.logger.error(
 				bot.locale.t("commands.volume.errors.playback", {
@@ -45,7 +45,8 @@ export class VolumeCommand {
 			);
 			await bot.commandService.reply(
 				interaction,
-				"commands.volume.errors.playback", {
+				"commands.volume.errors.playback",
+				{
 					error: error instanceof Error ? error.message : String(error),
 				},
 			);

@@ -1,13 +1,10 @@
 import retry from "async-retry";
 import { Discord } from "discordx";
-import NodeCache from "node-cache";
+import { LRUCache } from "lru-cache";
 import { URL } from "url";
 import { Types, WrappedYMApi, YMApi } from "ym-api-meowed";
 
-import type {
-	MusicServicePlugin,
-	PlaylistTrack,
-} from "../interfaces/index.js";
+import type { MusicServicePlugin, PlaylistTrack } from "../interfaces/index.js";
 import {
 	type Config,
 	ConfigSchema,
@@ -25,48 +22,52 @@ export interface TrackYandex {
 	coverUri: string | undefined;
 }
 
-const CACHE_TTL = 600; // 10 minutes
-const CACHE_CHECK_PERIOD = 120; // 2 minutes
+const CACHE_TTL = 600 * 1000;
+const CACHE_CHECK_PERIOD = 120 * 1000;
 const MAX_RETRIES = 3;
 const MIN_TIMEOUT = 1000;
 const MAX_TIMEOUT = 5000;
 
 /**
- * Cache wrapper class that conditionally uses NodeCache based on environment variable
+ * Cache wrapper class that conditionally uses LRUCache based on environment variable
  */
 class CacheWrapper {
-	private cache: NodeCache | null = null;
+	private cache: LRUCache<string, any> | null = null;
 	private useCache: boolean;
 
-	constructor(options?: NodeCache.Options) {
-		this.useCache = process.env.USE_CACHE?.toLowerCase() === 'true' || true;
-		
+	constructor(options?: LRUCache.Options<string, any, unknown>) {
+		this.useCache = process.env.USE_CACHE?.toLowerCase() === "true" || true;
+
 		if (this.useCache) {
-			this.cache = new NodeCache(options);
+			this.cache = new LRUCache<string, any>({
+				max: 1000,
+				ttl: CACHE_TTL,
+				...options,
+			});
 		}
 	}
 
 	get<T>(key: string): T | undefined {
 		if (!this.useCache || !this.cache) return undefined;
-		return this.cache.get<T>(key);
+		return this.cache.get(key) as T | undefined;
 	}
 
-	set<T>(key: string, value: T, ttl?: string | number): boolean {
-		if (!this.useCache || !this.cache) return false;
-		return this.cache.set(key, value, ttl!);
+	set<T>(key: string, value: T, ttl?: number) {
+		if (!this.useCache || !this.cache?.set) return false;
+		return this.cache.set(key, value, { ttl });
 	}
 
-	flushAll(): void {
+	clear(): void {
 		if (this.useCache && this.cache) {
-			this.cache.flushAll();
+			this.cache.clear();
 		}
 	}
 
-	getStats(): NodeCache.Stats {
+	getStats(): { size: number } {
 		if (this.useCache && this.cache) {
-			return this.cache.getStats();
+			return { size: this.cache.size };
 		}
-		return { keys: 0, hits: 0, misses: 0, ksize: 0, vsize: 0 };
+		return { size: 0 };
 	}
 }
 
@@ -86,37 +87,22 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 	hasAvailableResults = (): boolean => this.results.length > 0;
 
-	/**
-	 * Checks if a URL includes a playlist or album
-	 * @param {string} url - URL to check
-	 * @returns {Promise<boolean>} True if the URL includes a playlist or album, false otherwise
-	 */
 	async includesUrl(url: string): Promise<boolean> {
 		return this.urlPlaylistPattern.test(url) || this.urlAlbumPattern.test(url);
 	}
 
-	/**
-	 * Searches for a track or URL
-	 * @param {string} trackName - Track name or URL
-	 * @returns {Promise<SearchTrackResult[]>} Array of search results
-	 */
 	async searchName(trackName: string): Promise<SearchTrackResult[]> {
 		await this.ensureInitialized();
 		const cacheKey = `search_${trackName}`;
 		const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-		
+
 		if (cachedResults) {
 			return cachedResults;
 		}
-		
+
 		return await this.updateCacheInBackground(trackName, cacheKey);
 	}
 
-	/**
-	 * Searches for a track or URL
-	 * @param {string} url - URL to search
-	 * @returns {Promise<SearchTrackResult[]>} Array of search results
-	 */
 	async searchURL(url: string): Promise<SearchTrackResult[]> {
 		await this.ensureInitialized();
 		try {
@@ -135,8 +121,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 					? await this.getPlaylistTracks(playlistId, playlistName)
 					: [];
 			}
-
-			// если в ссылке есть трек, то мы его ищем и возвращаем
 
 			const trackId = this.extractId(parsedUrl, this.urlTrackPattern);
 			if (trackId) {
@@ -160,14 +144,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		}
 	}
 
-	/**
-	 * Retrieves the URL for a track
-	 * @param {string} trackId - Track ID
-	 * @returns {Promise<string>} Track URL
-	 */
-	async getTrackUrl(trackId: string): Promise<string> {
+	async getTrackUrl(trackId: string): Promise<string | null> {
 		await this.ensureInitialized();
-		if (!trackId) return "";
+		if (!trackId) return null;
 
 		try {
 			return (
@@ -184,7 +163,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 						minTimeout: MIN_TIMEOUT,
 						maxTimeout: MAX_TIMEOUT,
 					},
-				)) || ""
+				)) || null
 			);
 		} catch (error) {
 			bot.logger.error(
@@ -193,16 +172,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
-			throw error;
+			return null;
 		}
 	}
 
-	/**
-	 * Retrieves the tracks from a playlist
-	 * @param {string} playlistId - Playlist ID
-	 * @param {string} playlistName - Playlist name
-	 * @returns {Promise<SearchTrackResult[]>} Array of playlist tracks
-	 */
 	async getPlaylistTracks(
 		playlistId: string,
 		playlistName: string,
@@ -210,11 +183,11 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		try {
 			const cacheKey = `playlist_${playlistId}_${playlistName}`;
 			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-			
+
 			if (cachedResults) {
 				return cachedResults;
 			}
-			
+
 			const playlistInfo = await this.api.getPlaylist(
 				Number(playlistId),
 				playlistName,
@@ -240,7 +213,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				})
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
-				
+
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
@@ -253,28 +226,23 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		}
 	}
 
-	/**
-	 * Retrieves the tracks from an album
-	 * @param {string} albumId - Album ID
-	 * @returns {Promise<SearchTrackResult[]>} Array of album tracks
-	 */
 	async getAlbumTracks(albumId: string): Promise<SearchTrackResult[]> {
 		await this.ensureInitialized();
 		try {
 			const cacheKey = `album_${albumId}`;
 			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-			
+
 			if (cachedResults) {
 				return cachedResults;
 			}
-			
+
 			const albumInfo = await this.api.getAlbumWithTracks(Number(albumId));
 			const results = albumInfo.volumes
 				.flat()
 				.map((track) => this.formatTrackInfo(track))
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
-				
+
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
@@ -287,21 +255,16 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		}
 	}
 
-	/**
-	 * Retrieves similar tracks for a given track
-	 * @param {string} trackId - Track ID
-	 * @returns {Promise<SearchTrackResult[]>} Array of similar tracks
-	 */
 	async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
 		await this.ensureInitialized();
 		try {
 			const cacheKey = `recommendations_${trackId}`;
 			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-			
+
 			if (cachedResults) {
 				return cachedResults;
 			}
-			
+
 			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
 			if (!similarTracks?.similarTracks) {
 				bot.logger.warn(
@@ -316,7 +279,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				.map((track) => this.formatTrackInfo(track))
 				.map((track) => this.validateTrackResult(track))
 				.filter((track): track is SearchTrackResult => track !== null);
-				
+
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
@@ -327,36 +290,18 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		}
 	}
 
-	/**
-	 * Clears the cache
-	 */
 	clearCache(): void {
-		this.cache.flushAll();
+		this.cache.clear();
 		this.results = [];
 	}
 
-	/**
-	 * Retrieves the results from the cache
-	 * @returns {SearchTrackResult[]} Array of search results
-	 */
 	getResults = (): SearchTrackResult[] => [...this.results];
 
-	/**
-	 * Extracts an ID from a URL
-	 * @param {URL} parsedUrl - Parsed URL
-	 * @param {RegExp} pattern - Pattern to match
-	 * @returns {string | null} Extracted ID or null if no match is found
-	 */
 	private extractId(parsedUrl: URL, pattern: RegExp): string | null {
 		const match = parsedUrl.pathname.match(pattern);
 		return match?.[1] ?? null;
 	}
 
-	/**
-	 * Extracts playlist information from a URL
-	 * @param {URL} parsedUrl - Parsed URL
-	 * @returns {Object} Playlist information
-	 */
 	private extractPlaylistInfo(parsedUrl: URL): {
 		playlistName: string | null;
 		playlistId: string | null;
@@ -368,11 +313,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		};
 	}
 
-	/**
-	 * Formats track information
-	 * @param {TrackYandex} trackInfo - Track information
-	 * @returns {SearchTrackResult} Formatted track information
-	 */
 	private formatTrackInfo(trackInfo: TrackYandex): SearchTrackResult {
 		return {
 			id: trackInfo.id.toString(),
@@ -385,11 +325,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		};
 	}
 
-	/**
-	 * Validates a track result
-	 * @param {SearchTrackResult} searchResult - Track result
-	 * @returns {SearchTrackResult | null} Validated track result or null if invalid
-	 */
 	private validateTrackResult(
 		searchResult: SearchTrackResult,
 	): SearchTrackResult | null {
@@ -405,10 +340,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		return validation.data;
 	}
 
-	/**
-	 * Loads the configuration
-	 * @returns {Config} Configuration
-	 */
 	private loadConfig(): Config {
 		const access_token = process.env.YM_API_KEY;
 		const uid = Number(process.env.YM_USER_ID);
@@ -433,10 +364,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		return validation.data;
 	}
 
-	/**
-	 * Ensures the API is initialized
-	 * @returns {Promise<void>}
-	 */
 	private async ensureInitialized(): Promise<void> {
 		if (this.initialized) return;
 
@@ -454,12 +381,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		}
 	}
 
-	/**
-	 * Updates the cache in the background
-	 * @param {string} trackName - Track name
-	 * @param {string} cacheKey - Cache key
-	 * @returns {Promise<SearchTrackResult[]>} Array of search results
-	 */
 	private async updateCacheInBackground(
 		trackName: string,
 		cacheKey: string,
@@ -502,11 +423,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		}
 	}
 
-	/**
-	 * Formats a duration in milliseconds to a string
-	 * @param {number} durationMs - Duration in milliseconds
-	 * @returns {string} Formatted duration
-	 */
 	private formatDuration(durationMs: number): string {
 		if (typeof durationMs !== "number") {
 			return "0:00";
@@ -520,9 +436,8 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 	public async destroy(): Promise<void> {
 		this.results = [];
-		this.cache.flushAll();
+		this.cache.clear();
 
-		// Очищаем API клиентов через их методы
 		if (this.wrapper) {
 			this.wrapper = new WrappedYMApi();
 		}
@@ -534,26 +449,22 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	}
 
 	private startCacheCleanup(): void {
-		// Only start cache cleanup if caching is enabled
-		if (process.env.USE_CACHE?.toLowerCase() === 'true') {
+		if (process.env.USE_CACHE?.toLowerCase() === "true") {
 			setInterval(() => {
 				const stats = this.cache.getStats();
-				if (stats.keys > 800) {
-					this.cache.flushAll();
+				if (stats.size > 800) {
+					this.cache.clear();
 				}
-			}, CACHE_CHECK_PERIOD * 1000);
+			}, CACHE_CHECK_PERIOD);
 		}
 	}
 
 	constructor() {
-		// Initialize the cache wrapper with options
 		this.cache = new CacheWrapper({
-			stdTTL: CACHE_TTL,
-			checkperiod: CACHE_CHECK_PERIOD,
-			maxKeys: 1000,
-			deleteOnExpire: true,
+			max: 1000,
+			ttl: CACHE_TTL,
 		});
-		
+
 		this.startCacheCleanup();
 	}
 }
