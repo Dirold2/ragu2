@@ -4,7 +4,7 @@ RAGU2 is a Discord music bot that allows users to play, pause, and manage music 
 
 ## Localization
 
-[__English__](../../README.md), [Русский](./README.md)
+[__English__](./README.md), [Русский](./lang/ru/README.md)
 
 ## Plugins in RAGU2
 
