@@ -68,7 +68,7 @@ export function createLocale<T extends Record<string, unknown>>(
 					logger.debug(`Found locales at: ${fullPath}`);
 					return fullPath;
 				} catch (error) {
-					logger.debug(`Path not found: ${fullPath}`);
+					logger.debug(`Path not found: ${fullPath} | ${error}`);
 					continue;
 				}
 			}

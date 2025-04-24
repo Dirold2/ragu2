@@ -490,11 +490,7 @@ export default class PlayerService extends EventEmitter {
 			const url = await plugin.getTrackUrl(trackId);
 
 			if (!url) {
-				bot.logger.error(
-					bot.locale.t("messages.playerService.errors.track_url_not_found", {
-						trackId,
-					}),
-				);
+				await this.loadNextTrack()
 				return null;
 			}
 

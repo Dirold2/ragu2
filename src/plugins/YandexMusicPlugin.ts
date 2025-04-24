@@ -166,7 +166,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				)) || null
 			);
 		} catch (error) {
-			bot.logger.error(
+			bot.logger.debug(
 				bot.locale.t("plugins.yandex.errors.track.url_not_found", {
 					trackId,
 					error: error instanceof Error ? error.message : String(error),

@@ -249,7 +249,7 @@
                 "url_processing": "Error processing URL in plugin {plugin}: {error}",
                 "track": {
                     "processing": "Error processing track: {error}",
-                    "url_not_found": "Track URL not found: {trackId}",
+                    "url_not_found": "Track URL not found: {trackId} | {error}",
                     "invalid_data": "Invalid track data: {error}",
                     "search": "Error searching for {query}"
                 },

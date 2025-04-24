@@ -21,7 +21,7 @@ export enum ModuleState {
 
 const getStateColor = (state?: ModuleState): ((text: string) => string) => {
 	const applyStyle =
-		(bgStyle: any, fgStyle: any = styles.black.open) =>
+		(bgStyle: string, fgStyle = styles.black.open) =>
 		(text: string): string => {
 			return `${bgStyle}${fgStyle}${text}${styles.reset.open}`;
 		};

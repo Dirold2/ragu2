@@ -249,7 +249,7 @@
                 "url_processing": "Ошибка обработки URL в плагине {plugin}: {error}",
                 "track": {
                     "processing": "Ошибка обработки трека: {error}",
-                    "url_not_found": "URL трека не найден: {trackId}",
+                    "url_not_found": "URL трека не найден: {trackId} | {error}",
                     "invalid_data": "Недействительные данные трека: {error}",
                     "search": "Ошибка поиска: {query}"
                 },
