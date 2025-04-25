@@ -1,11 +1,23 @@
-import { format } from "date-fns";
-import { ru } from "date-fns/locale";
+import dayjs from "dayjs";
 import winston from "winston";
 import DailyRotateFile from "winston-daily-rotate-file";
-import path from "path";
+import path, { resolve } from "path";
 import fs from "fs/promises";
+import { LRUCache } from "lru-cache";
 import styles from "ansi-styles";
+import { dirname } from "dirname-filename-esm/index.js";
+import { config } from "dotenv";
 
+// Load environment variables from .env file
+config({ path: resolve(dirname(import.meta), "../.env") });
+
+// Set the locale for dayjs from environment variable LOG_LANG or default to English
+dayjs.locale(`${process.env.LOG_LANG}` || "en");
+
+/**
+ * @en Enumeration of module states used for logging and state management.
+ * @ru Перечисление состояний модуля, используемое для логирования и управления состоянием.
+ */
 export enum ModuleState {
 	UNINITIALIZED = "UNINITIALIZED",
 	INITIALIZING = "INITIALIZING",
@@ -19,215 +31,244 @@ export enum ModuleState {
 	DEBUG = "DEBUG",
 }
 
-const getStateColor = (state?: ModuleState): ((text: string) => string) => {
-	const applyStyle =
-		(bgStyle: string, fgStyle = styles.black.open) =>
-		(text: string): string => {
-			return `${bgStyle}${fgStyle}${text}${styles.reset.open}`;
-		};
-
-	if (!state) return applyStyle(styles.bgGreenBright.open);
-
-	switch (state) {
-		case ModuleState.UNINITIALIZED:
-			return applyStyle(styles.bgWhite.open, styles.black.open);
-		case ModuleState.INITIALIZED:
-			return applyStyle(styles.bgBlueBright.open);
-		case ModuleState.STARTING:
-			return applyStyle(styles.bgGreenBright.open);
-		case ModuleState.RUNNING:
-			return applyStyle(styles.bgWhiteBright.open);
-		case ModuleState.STOPPING:
-			return applyStyle(styles.bgYellowBright.open, styles.black.open);
-		case ModuleState.STOPPED:
-			return applyStyle(styles.bgGray.open, styles.whiteBright.open);
-		case ModuleState.ERROR:
-			return applyStyle(styles.bgRedBright.open);
-		case ModuleState.WARNING:
-			return applyStyle(styles.bgYellowBright.open, styles.black.open);
-		case ModuleState.DEBUG:
-			return applyStyle(styles.bgBlueBright.open, styles.whiteBright.open);
+/**
+ * @en Returns the level name with ANSI color codes based on the level.
+ * @ru Возвращает имя уровня логирования с ANSI-кодами цвета в зависимости от уровня.
+ *
+ * @param level - Log level (e.g., "info", "warn", "error").
+ * @returns Colored string for the level.
+ */
+const colorizeLevel = (level: string): string => {
+	switch (level) {
+		case "error":
+			return `${styles.red.open}${level}${styles.red.close}`;
+		case "warn":
+			return `${styles.yellow.open}${level}${styles.yellow.close}`;
+		case "info":
+			return `${styles.blue.open}${level}${styles.blue.close}`;
+		case "debug":
+			return `${styles.green.open}${level}${styles.green.close}`;
 		default:
-			return applyStyle(styles.bgBlueBright.open);
+			return level;
 	}
 };
 
 /**
- * Creates and configures a winston logger instance
- * @param {string} [nameModule] - Optional module name to include in log messages
- * @returns {winston.Logger} Configured winston logger instance
+ * @en Extended logger type supporting an additional playerError method.
+ * @ru Расширенный тип логгера с дополнительным методом playerError.
  */
-export const createLogger = (nameModule?: string): winston.Logger => {
-	// Custom format for log messages including timestamp and module name
-	const customFormat = winston.format.printf(
-		({ level, message, timestamp, stack, url, moduleState }) => {
-			const formattedTime = format(
-				new Date(timestamp as unknown as string),
-				"dd.MM.yyyy HH:mm:ss",
-				{ locale: ru },
-			);
-
-			const colorize = getStateColor(moduleState as ModuleState | undefined);
-			const moduleName = nameModule
-				? ` | ${colorize(` ${nameModule.toUpperCase()} `)}`
-				: "";
-
-			let logMessage = `${formattedTime}${moduleName} | ${level}: ${message}`;
-			if (url) {
-				logMessage += `\nAt: ${url}`;
-			}
-			return stack ? `${logMessage}\n${stack}` : logMessage;
-		},
-	);
-
-	// Format configuration for file logging without colors
-	const fileFormat = winston.format.combine(
-		winston.format.timestamp(),
-		winston.format.errors({ stack: true }),
-		winston.format.printf(
-			({ level, message, timestamp, stack, url, moduleState }) => {
-				const formattedTime = format(
-					new Date(timestamp as unknown as string),
-					"dd.MM.yyyy HH:mm:ss",
-					{ locale: ru },
-				);
-
-				const moduleName = nameModule
-					? ` | ${moduleState ? `[${moduleState}]` : ""} ${nameModule.toUpperCase()}`
-					: "";
-
-				let logMessage = `${formattedTime}${moduleName} | ${level}: ${message}`;
-				if (url) {
-					logMessage += `\nAt: ${url}`;
-				}
-				return stack ? `${logMessage}\n${stack}` : logMessage;
-			},
-		),
-	);
-
-	// Format configuration for console logging with colors
-	const consoleFormat = winston.format.combine(
-		winston.format.colorize(),
-		winston.format.timestamp(),
-		customFormat,
-	);
-
-	const logConfig = {
-		maxSize: "20m",
-		maxFiles: "14d",
-		zippedArchive: true,
-		tailable: true, // Автоматически удаляет старые логи
-		compress: true, // Сжимает архивные файлы
-	};
-
-	// Create base logger with file transports
-	const logger = winston.createLogger({
-		level: process.env.LOG_LEVEL || "info",
-		format: fileFormat,
-		transports: [
-			// Daily rotating transport for general application logs
-			new DailyRotateFile({
-				...logConfig,
-				filename: "logs/application-%DATE%.log",
-				datePattern: "YYYY-MM-DD",
-			}),
-			// Daily rotating transport for error logs
-			new DailyRotateFile({
-				...logConfig,
-				filename: "logs/error-%DATE%.log",
-				datePattern: "YYYY-MM-DD",
-				level: "error",
-			}),
-		],
-	});
-
-	// Add console transport in non-production environments
-	if (process.env.NODE_ENV !== "production") {
-		logger.add(
-			new winston.transports.Console({
-				format: consoleFormat,
-				handleExceptions: true,
-				handleRejections: true,
-			}),
-		);
-	}
-
-	// Configure exception handling
-	logger.exceptions.handle(
-		new winston.transports.File({ filename: "logs/exceptions.log" }),
-	);
-
-	// Handle unhandled promise rejections
-	process.on("unhandledRejection", (ex: unknown) => {
-		logger.error(
-			`ERROR_UNHANDLED_REJECTION: ${ex instanceof Error ? ex.message : String(ex)}`,
-		);
-	});
-
-	// Custom format for player messages
-	const playerFormat = winston.format((info) => {
-		if (info.url) {
-			info.message = `${info.message} (URL: ${info.url})`;
-		}
-		return info;
-	});
-
-	// Add player-specific transport with custom format
-	logger.add(
-		new winston.transports.File({
-			filename: "logs/player-error.log",
-			level: "error",
-			format: winston.format.combine(playerFormat(), fileFormat),
-		}),
-	);
-
-	// Добавляем обработчик ошибок для транспортов
-	logger.transports.forEach((transport) => {
-		transport.on("error", (error) => {
-			console.error("Logger transport error:", error);
-		});
-	});
-
-	// Добавляем очистку обработчиков при завершении работы
-	process.once("beforeExit", () => {
-		logger.close();
-		logger.clear(); // Очищаем все обработчики
-	});
-
-	return logger;
+type ExtendedLogger = winston.Logger & {
+	playerError: (error: unknown, url?: string) => void;
 };
 
 /**
- * Extend winston Logger interface with custom methods
+ * @en Directory where log files are stored.
+ * @ru Директория, в которой хранятся файлы логов.
  */
-declare module "winston" {
-	interface Logger {
-		/**
-		 * Log player-specific errors
-		 * @param {unknown} error - Error to log
-		 * @param {string} [url] - Optional URL where error occurred
-		 */
-		playerError(error: unknown, url?: string): void;
+const logDir = path.join(process.cwd(), "logs");
+
+/**
+ * @en Configuration object for log rotation and file settings.
+ * @ru Объект конфигурации для ротации логов и настроек файлов.
+ */
+const logConfig = {
+	maxSize: "20m",
+	maxFiles: "14d",
+	zippedArchive: true,
+	tailable: true,
+	compress: true,
+	datePattern: "YYYY-MM-DD",
+};
+
+/**
+ * @en Formatter for file transports with colors applied.
+ * @ru Форматтер для файловых транспортов с применением цветов.
+ */
+const formatter = winston.format.printf(({ level, message, stack, url }) => {
+	const time = dayjs().format("DD.MM.YYYY HH:mm:ss");
+	let msg = `${time} | ${colorizeLevel(level)}: ${message}`;
+	if (url) msg += `\nAt: ${url}`;
+	return stack ? `${msg}\n${stack}` : msg;
+});
+
+/**
+ * @en Formatter for console transport without colorization.
+ * @ru Форматтер для консольного транспорта без цветового оформления.
+ */
+const formatterConsole = winston.format.printf(({ level, message, stack, url }) => {
+	const time = dayjs().format("DD.MM.YYYY HH:mm:ss");
+	let msg = `${time} | ${level}: ${message}`;
+	if (url) msg += `\nAt: ${url}`;
+	return stack ? `${msg}\n${stack}` : msg;
+});
+
+/**
+ * @en Ensures that the log directory exists; creates it if it doesn't.
+ * @ru Гарантирует существование директории логов; создает её, если она не существует.
+ *
+ * @returns A Promise resolved when the directory exists.
+ */
+async function ensureLogDirExists(): Promise<void> {
+	try {
+		await fs.access(logDir);
+	} catch {
+		await fs.mkdir(logDir, { recursive: true });
 	}
 }
 
-// Export default logger instance
-const logger = createLogger();
+/**
+ * @en Base logger singleton instance with file transports.
+ * @ru Базовый экземпляр логгера (singleton) с файловыми транспортами.
+ */
+const baseLogger = winston.createLogger({
+	level: process.env.LOG_LEVEL || "info",
+	format: formatterConsole,
+	transports: [
+		new DailyRotateFile({
+			...logConfig,
+			filename: `${logDir}/application-%DATE%.log`,
+		}),
+		new DailyRotateFile({
+			...logConfig,
+			filename: `${logDir}/error-%DATE%.log`,
+			level: "error",
+		}),
+		new winston.transports.File({
+			filename: `${logDir}/player-error.log`,
+			level: "error",
+		}),
+	],
+	exitOnError: false,
+}) as ExtendedLogger;
 
-export default logger;
+// Add console transport with colorized formatter for non-production environments
+if (process.env.NODE_ENV !== "production") {
+	baseLogger.add(
+		new winston.transports.Console({
+			handleExceptions: true,
+			handleRejections: true,
+			format: formatter,
+		}),
+	);
+}
 
-// Добавляем функцию очистки старых логов
-export const cleanupOldLogs = async (daysToKeep = 14): Promise<void> => {
-	const logsDir = path.join(process.cwd(), "logs");
-	const files = await fs.readdir(logsDir);
-	const now = Date.now();
-	const maxAge = daysToKeep * 24 * 60 * 60 * 1000;
-
-	for (const file of files) {
-		const filePath = path.join(logsDir, file);
-		const stats = await fs.stat(filePath);
-		if (now - stats.mtime.getTime() > maxAge) {
-			await fs.unlink(filePath);
-		}
-	}
+/**
+ * @en Logs an error specifically for the player, including URL and stack trace if available.
+ * @ru Логирует ошибку плеера, включая URL и стек вызовов, если они доступны.
+ *
+ * @param error - The error object or message.
+ * @param url - Optional URL related to the error.
+ */
+baseLogger.playerError = function (error: unknown, url?: string) {
+	this.error(error instanceof Error ? error.message : String(error), {
+		url,
+		stack: error instanceof Error ? error.stack : undefined,
+	});
 };
+
+let handlersRegistered = false;
+
+/**
+ * @en Registers global error handlers and process signal handlers.
+ * @ru Регистрирует глобальные обработчики ошибок и обработчики сигналов процесса.
+ */
+const registerErrorHandlers = (): void => {
+	if (handlersRegistered) return;
+
+	baseLogger.exceptions.handle(
+		new winston.transports.File({ filename: `${logDir}/exceptions.log` })
+	);
+
+	["SIGINT", "SIGTERM", "beforeExit"].forEach((signal) => {
+		process.once(signal, () =>
+			baseLogger.info(`Logger shutting down (${signal})...`)
+		);
+	});
+
+	process.on("unhandledRejection", (reason) => {
+		baseLogger.error(
+			`UNHANDLED_REJECTION: ${
+				reason instanceof Error
+					? reason.stack || reason.message
+					: String(reason)
+			}`
+		);
+	});
+
+	handlersRegistered = true;
+};
+
+registerErrorHandlers();
+
+/**
+ * @en LRU cache for storing created child loggers.
+ * @ru LRU-кэш для хранения созданных дочерних логгеров.
+ */
+const loggerCache = new LRUCache<string, ExtendedLogger>({
+	max: 100,
+	ttl: 1000 * 60 * 60,
+});
+
+/**
+ * @en Creates a child logger with module-specific formatting and caching.
+ * @ru Создает дочерний логгер с форматом, зависящим от модуля, и кэшированием.
+ *
+ * @param nameModule - The module name to be included in log messages.
+ * @param moduleState - The current state of the module.
+ * @returns The extended logger instance with module-specific formatting.
+ */
+export function createLogger(
+	nameModule?: string,
+	moduleState?: ModuleState,
+): ExtendedLogger {
+	const key = `${nameModule ?? "default"}:${moduleState ?? ""}`;
+	const cached = loggerCache.get(key);
+	if (cached) return cached;
+
+	const combinedFormat = winston.format.combine(
+		winston.format.timestamp(),
+		winston.format.errors({ stack: true }),
+		formatter
+	);
+
+	// Pass the module name as an additional property
+	const childLogger = baseLogger.child({ module: nameModule || "" }) as ExtendedLogger;
+	childLogger.format = combinedFormat;
+
+	childLogger.playerError = function (error: unknown, url?: string) {
+		this.error(error instanceof Error ? error.message : String(error), {
+			url,
+			stack: error instanceof Error ? error.stack : undefined,
+		});
+	};
+
+	loggerCache.set(key, childLogger);
+	return childLogger;
+}
+
+/**
+ * @en Cleans up log files older than the specified number of days.
+ * @ru Очищает файлы логов, которым старше указанного количества дней.
+ *
+ * @param daysToKeep - The number of days to keep logs (default: 14).
+ * @returns A Promise resolved when old log files are deleted.
+ */
+export const cleanupOldLogs = async (daysToKeep = 14): Promise<void> => {
+	const files = await fs.readdir(logDir);
+	const now = Date.now();
+	const maxAge = daysToKeep * 86400000;
+
+	await Promise.all(
+		files.map(async (file) => {
+			const filePath = path.join(logDir, file);
+			const { mtime } = await fs.stat(filePath);
+			if (now - mtime.getTime() > maxAge) {
+				await fs.unlink(filePath);
+			}
+		})
+	);
+};
+
+await ensureLogDirExists();
+
+export default createLogger();
