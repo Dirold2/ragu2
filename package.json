@@ -27,6 +27,7 @@
         "@discordx/importer": "^1.3.1",
         "discord.js": "^14.18.0",
         "discordx": "^11.12.2",
+        "opusscript": "^0.1.1",
         "dotenv": "^16.5.0",
         "get-audio-duration": "^4.0.1",
         "lru-cache": "^11.1.0",
