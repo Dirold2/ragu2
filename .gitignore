@@ -6,6 +6,7 @@ package-lock.json
 yarn.lock
 eslint.config
 pnpm-lock.yaml
+module.ts
 *.log
 *.pid
 *.tmp
