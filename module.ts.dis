@@ -18,8 +18,8 @@ config({ path: resolve(dirname(import.meta), ".env") });
  * Discord bot module that handles bot initialization and lifecycle
  */
 export default class BotModule extends Module {
-	public databaseModule: any;
-	public queueService: any;
+	public databaseModule!: typeof import("../database/module.js").module;
+	public queueService!: CacheQueueService;
 
 	constructor() {
 		super();
@@ -129,11 +129,11 @@ export default class BotModule extends Module {
 		this.databaseModule =
 			this.moduleManager.getModule<
 				typeof import("../database/module.js").module
-			>("database");
+			>("database")!;
 
 		if (this.databaseModule?.exports?.getQueueService?.()) {
 			bot!.databaseModule = this.databaseModule
-			bot!.queueService = this.databaseModule.exports.getQueueService();
+			this.queueService = this.databaseModule.exports.getQueueService() as unknown as CacheQueueService;
 			this.logger.info({
 				message: "Модуль базы данных успешно подключен",
 				moduleState: ModuleState.INITIALIZED,
