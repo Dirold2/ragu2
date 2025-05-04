@@ -95,12 +95,14 @@ const formatter = winston.format.printf(({ level, message, stack, url }) => {
  * @en Formatter for console transport without colorization.
  * @ru Форматтер для консольного транспорта без цветового оформления.
  */
-const formatterConsole = winston.format.printf(({ level, message, stack, url }) => {
-	const time = dayjs().format("DD.MM.YYYY HH:mm:ss");
-	let msg = `${time} | ${level}: ${message}`;
-	if (url) msg += `\nAt: ${url}`;
-	return stack ? `${msg}\n${stack}` : msg;
-});
+const formatterConsole = winston.format.printf(
+	({ level, message, stack, url }) => {
+		const time = dayjs().format("DD.MM.YYYY HH:mm:ss");
+		let msg = `${time} | ${level}: ${message}`;
+		if (url) msg += `\nAt: ${url}`;
+		return stack ? `${msg}\n${stack}` : msg;
+	},
+);
 
 /**
  * @en Ensures that the log directory exists; creates it if it doesn't.
@@ -176,12 +178,12 @@ const registerErrorHandlers = (): void => {
 	if (handlersRegistered) return;
 
 	baseLogger.exceptions.handle(
-		new winston.transports.File({ filename: `${logDir}/exceptions.log` })
+		new winston.transports.File({ filename: `${logDir}/exceptions.log` }),
 	);
 
 	["SIGINT", "SIGTERM", "beforeExit"].forEach((signal) => {
 		process.once(signal, () =>
-			baseLogger.info(`Logger shutting down (${signal})...`)
+			baseLogger.info(`Logger shutting down (${signal})...`),
 		);
 	});
 
@@ -191,7 +193,7 @@ const registerErrorHandlers = (): void => {
 				reason instanceof Error
 					? reason.stack || reason.message
 					: String(reason)
-			}`
+			}`,
 		);
 	});
 
@@ -228,11 +230,13 @@ export function createLogger(
 	const combinedFormat = winston.format.combine(
 		winston.format.timestamp(),
 		winston.format.errors({ stack: true }),
-		formatter
+		formatter,
 	);
 
 	// Pass the module name as an additional property
-	const childLogger = baseLogger.child({ module: nameModule || "" }) as ExtendedLogger;
+	const childLogger = baseLogger.child({
+		module: nameModule || "",
+	}) as ExtendedLogger;
 	childLogger.format = combinedFormat;
 
 	childLogger.playerError = function (error: unknown, url?: string) {
@@ -265,7 +269,7 @@ export const cleanupOldLogs = async (daysToKeep = 14): Promise<void> => {
 			if (now - mtime.getTime() > maxAge) {
 				await fs.unlink(filePath);
 			}
-		})
+		}),
 	);
 };
 

@@ -47,20 +47,20 @@ export default class NameService {
 	async searchName(trackName: string): Promise<SearchTrackResult[]> {
 		const TIMEOUT_MS = 2500; // 2.5 секунды на запрос
 		const trimmedName = trackName.trim();
-		
+
 		if (!trimmedName) return [];
-	
+
 		try {
 			// Добавляем таймаут для всего запроса
 			const result = await Promise.race([
-				TrackUrlSchema.safeParse(trimmedName).success 
+				TrackUrlSchema.safeParse(trimmedName).success
 					? this.searchAndProcessURL(trimmedName)
 					: this.searchAcrossPlugins(trimmedName),
-				new Promise<SearchTrackResult[]>((_, reject) => 
-					setTimeout(() => reject(new Error("Search timeout")), TIMEOUT_MS)
-				)
+				new Promise<SearchTrackResult[]>((_, reject) =>
+					setTimeout(() => reject(new Error("Search timeout")), TIMEOUT_MS),
+				),
 			]);
-	
+
 			this.logger.debug(`Found ${result.length} results for: ${trimmedName}`);
 			return result;
 		} catch (error) {

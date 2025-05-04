@@ -459,7 +459,7 @@ export default class PlayerService extends EventEmitter {
 		this.state.isPlaying = true;
 		this.updateActivity(track.info);
 
-		await this.setupTrackEndFade({ ...track, url: trackUrl  });
+		await this.setupTrackEndFade({ ...track, url: trackUrl });
 		return true;
 	}
 
@@ -492,7 +492,7 @@ export default class PlayerService extends EventEmitter {
 			const url = await plugin.getTrackUrl(trackId);
 
 			if (!url) {
-				await this.loadNextTrack()
+				await this.loadNextTrack();
 				return null;
 			}
 
@@ -504,7 +504,7 @@ export default class PlayerService extends EventEmitter {
 					error: error instanceof Error ? error.message : String(error),
 				}),
 			);
-			await this.playNextTrack()
+			await this.playNextTrack();
 			return null;
 		}
 	}
@@ -690,7 +690,7 @@ export default class PlayerService extends EventEmitter {
 				trackId: rec.id,
 				info: `${rec.title} - ${rec.artists.map((a: { name: string }) => a.name).join(", ")}`,
 				requestedBy: this.state.lastTrack?.requestedBy,
-			}), 
+			}),
 		);
 	}
 
@@ -792,18 +792,18 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private async checkEmpty(): Promise<void> {
 		if (!this.state.connection || !this.state.channelId) return;
-	
+
 		try {
 			const channel = await this.getVoiceChannel();
 			if (!channel) {
 				this.handleDisconnect();
 				return;
 			}
-	
-			const membersCount = channel.members.filter(m => 
-				!m.user.bot && m.id !== bot.client.user?.id
+
+			const membersCount = channel.members.filter(
+				(m) => !m.user.bot && m.id !== bot.client.user?.id,
 			).size;
-	
+
 			if (membersCount === 0) {
 				if (!this.timers.emptyChannelTimeout) {
 					this.timers.emptyChannelTimeout = setTimeout(() => {
