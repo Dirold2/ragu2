@@ -94,42 +94,48 @@ export class PlayCommand {
 		query: string,
 	): Promise<void> {
 		try {
+			// Проверка минимальной длины запроса
 			if (query.length < PlayCommand.MIN_QUERY_LENGTH) {
-				if (!interaction.responded) {
-					await interaction.respond([]);
-				}
-				return;
+				return this.sendEmptyResponse(interaction);
 			}
+	
+			// Получение и обработка результатов
 			const results = await bot.nameService.searchName(query);
-			const choices = this.processAutocompleteResults(
-				results as unknown as Track[],
-				query,
-			);
-
-			if (!interaction.responded) {
+			const choices = this.processAutocompleteResults(results as Track[], query);
+	
+			// Отправка ответа, если взаимодействие активно
+			if (this.isInteractionValid(interaction)) {
 				await interaction.respond(
-					choices.map((choice) => ({
+					choices.map(choice => ({
 						name: choice.name,
-						value: this.truncateString(
-							choice.value,
-							PlayCommand.MAX_CHOICE_LENGTH,
-						),
-					})),
+						value: this.truncateString(choice.value, PlayCommand.MAX_CHOICE_LENGTH)
+					}))
 				);
 			}
 		} catch (error) {
-			bot.logger.error(
-				bot.locale.t(
-					"commands.play.searching",
-					{ query },
-					interaction.guild?.preferredLocale || "en",
-				),
-				error,
-			);
-			if (!interaction.responded) {
-				await interaction.respond([]);
-			}
+			this.handleAutocompleteError(interaction, query, error);
 		}
+	}
+	
+	private async sendEmptyResponse(interaction: AutocompleteInteraction): Promise<void> {
+		if (!interaction.responded) {
+			await interaction.respond([]).catch(() => {});
+		}
+	}
+	
+	private isInteractionValid(interaction: AutocompleteInteraction): boolean {
+		return !interaction.responded && Date.now() - interaction.createdTimestamp < 3000;
+	}
+	
+	private handleAutocompleteError(
+		interaction: AutocompleteInteraction,
+		query: string,
+		error: unknown
+	): void {
+		if (!interaction.responded) {
+			interaction.respond([]).catch(() => {});
+		}
+		bot.logger.error(`Autocomplete failed for "${query}":`, error);
 	}
 
 	/**

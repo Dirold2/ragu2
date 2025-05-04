@@ -64,6 +64,7 @@ export default class PlayerService extends EventEmitter {
 	) {
 		super();
 		this.setupPlayerEvents();
+		this.startInactiveCheck();
 	}
 
 	/**
@@ -381,6 +382,7 @@ export default class PlayerService extends EventEmitter {
 			this.clearAllTimers();
 			this.reset();
 			this.updateActivity();
+			this.state.channelId = null;
 		}
 	}
 
@@ -790,32 +792,27 @@ export default class PlayerService extends EventEmitter {
 	 */
 	private async checkEmpty(): Promise<void> {
 		if (!this.state.connection || !this.state.channelId) return;
-
+	
 		try {
 			const channel = await this.getVoiceChannel();
-
 			if (!channel) {
 				this.handleDisconnect();
 				return;
 			}
-
-			const membersCount = channel.members.filter((m) => !m.user.bot).size;
-
+	
+			const membersCount = channel.members.filter(m => 
+				!m.user.bot && m.id !== bot.client.user?.id
+			).size;
+	
 			if (membersCount === 0) {
 				if (!this.timers.emptyChannelTimeout) {
 					this.timers.emptyChannelTimeout = setTimeout(() => {
-						if (this.timers.emptyChannelTimeout) {
-							clearTimeout(this.timers.emptyChannelTimeout);
-							this.timers.emptyChannelTimeout = null;
-						}
 						this.leaveChannel();
 					}, 30000);
 				}
-			} else {
-				if (this.timers.emptyChannelTimeout) {
-					clearTimeout(this.timers.emptyChannelTimeout);
-					this.timers.emptyChannelTimeout = null;
-				}
+			} else if (this.timers.emptyChannelTimeout) {
+				clearTimeout(this.timers.emptyChannelTimeout);
+				this.timers.emptyChannelTimeout = null;
 			}
 		} catch (error) {
 			bot.logger.error(
@@ -860,6 +857,9 @@ export default class PlayerService extends EventEmitter {
 		this.state.lastTrack = this.state.currentTrack;
 		this.state.isPlaying = false;
 		this.state.currentTrack = null;
+		if (!this.state.nextTrack && !this.state.loop) {
+			await this.checkEmpty();
+		}
 		await this.playNextTrack();
 	};
 
@@ -895,6 +895,14 @@ export default class PlayerService extends EventEmitter {
 			nextTrack: null,
 			resource: null,
 		};
+	}
+
+	public startInactiveCheck(): void {
+		setInterval(() => {
+			if (!this.state.isPlaying && this.state.channelId) {
+				this.checkEmpty();
+			}
+		}, 300_000); // 5 минут
 	}
 
 	/**

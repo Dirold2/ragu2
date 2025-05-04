@@ -45,17 +45,28 @@ export default class NameService {
 	 * @returns Promise with search results
 	 */
 	async searchName(trackName: string): Promise<SearchTrackResult[]> {
-		this.logger.debug(
-			this.locale.t("messages.nameService.info.searching_track", {
-				query: trackName,
-			}),
-		);
+		const TIMEOUT_MS = 2500; // 2.5 секунды на запрос
 		const trimmedName = trackName.trim();
+		
 		if (!trimmedName) return [];
-
-		return TrackUrlSchema.safeParse(trimmedName).success
-			? this.searchAndProcessURL(trimmedName)
-			: this.searchAcrossPlugins(trimmedName);
+	
+		try {
+			// Добавляем таймаут для всего запроса
+			const result = await Promise.race([
+				TrackUrlSchema.safeParse(trimmedName).success 
+					? this.searchAndProcessURL(trimmedName)
+					: this.searchAcrossPlugins(trimmedName),
+				new Promise<SearchTrackResult[]>((_, reject) => 
+					setTimeout(() => reject(new Error("Search timeout")), TIMEOUT_MS)
+				)
+			]);
+	
+			this.logger.debug(`Found ${result.length} results for: ${trimmedName}`);
+			return result;
+		} catch (error) {
+			this.logger.error(`Search failed for "${trimmedName}":`, error);
+			return [];
+		}
 	}
 
 	/**
