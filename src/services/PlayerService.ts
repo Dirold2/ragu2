@@ -1,291 +1,573 @@
 import {
-	type CommandInteraction,
-	type GuildMember,
+	CommandInteraction,
+	GuildMember,
 	PermissionFlagsBits,
-	type VoiceChannel,
+	VoiceChannel,
 } from "discord.js";
 import { Discord } from "discordx";
 import {
-	type AudioPlayer,
+	AudioPlayer,
 	AudioPlayerStatus,
-	type AudioResource,
 	createAudioPlayer,
 	createAudioResource,
-	type DiscordGatewayAdapterCreator,
+	DiscordGatewayAdapterCreator,
 	entersState,
 	getVoiceConnection,
 	joinVoiceChannel,
 	NoSubscriberBehavior,
 	StreamType,
-	type VoiceConnection,
+	VoiceConnection,
 	VoiceConnectionStatus,
 } from "@discordjs/voice";
-
-import { bot } from "../bot.js";
-import {
-	DEFAULT_VOLUME,
-	EMPTY_CHANNEL_CHECK_INTERVAL,
-	RECONNECTION_TIMEOUT,
-} from "../config.js";
-import type { CommandService, Track } from "./index.js";
-
-import { getAudioDurationInSeconds } from "get-audio-duration";
-import type { PlayerState } from "../types/index.js";
 import { EventEmitter } from "events";
+import { AudioService } from "./audio/AudioService.js";
+import { PlayerTimers } from "./PlayerTimers.js";
+import { bot } from "../bot.js";
+import type { Track, PlayerState } from "./index.js";
+import { z } from "zod";
+import { VOLUME } from "../config.js";
+import { getAudioDurationInSeconds } from "get-audio-duration";
+import { milli } from "miliseconds";
 
-/**
- * @en Interface for player timers.
- * @ru Интерфейс для таймеров плеера.
- */
-interface PlayerTimers {
-	emptyChannelInterval: ReturnType<typeof setTimeout> | null;
-	emptyChannelTimeout: ReturnType<typeof setTimeout> | null;
-	fadeOut: ReturnType<typeof setTimeout> | null;
+export enum PlayerServiceEvents {
+	PLAYING = "playing",
+	PAUSED = "paused",
+	TRACK_STARTED = "trackStarted",
+	TRACK_ENDED = "trackEnded",
+	QUEUE_EMPTY = "queueEmpty",
+	ERROR = "error",
+	VOLUME_CHANGED = "volumeChanged",
+	EQUALIZER_CHANGED = "equalizerChanged",
+	LOWPASS_CHANGED = "lowPassChanged",
+	LOOP_CHANGED = "loopChanged",
+	CROSSFADE_COMPLETED = "crossfadeCompleted",
+	CONNECTED = "connected",
+	TRACK_QUEUED = "trackQueued",
 }
 
+export const TrackSchema = z.object({
+	source: z.string().min(1),
+	trackId: z.string().min(1),
+	info: z.string().min(1),
+	requestedBy: z.string().optional(),
+	url: z.string().url().optional(),
+});
+
+/**
+ * PlayerService управляет воспроизведением музыки, очередью, состоянием и взаимодействием с голосовым каналом Discord.
+ * Использует AudioService для обработки аудио и взаимодействует с очередью через bot.queueService.
+ */
 @Discord()
 export default class PlayerService extends EventEmitter {
 	private readonly player: AudioPlayer = createAudioPlayer({
 		behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
 	});
-
-	private timers: PlayerTimers = {
-		emptyChannelInterval: null,
-		emptyChannelTimeout: null,
-		fadeOut: null,
-	};
-
+	private audioService: AudioService;
+	private timers: PlayerTimers = new PlayerTimers();
+	private disconnectHandler: (() => Promise<void>) | null = null;
 	public state: PlayerState = this.getInitialState();
-	private disconnectHandler: ((...args: any[]) => void) | null = null;
+	private fadeOutTimer: NodeJS.Timeout | null = null;
+	private readonly FADEOUT_BEFORE_END = milli().seconds(3).value();
+	private readonly CROSSFADE_DURATION = milli().seconds(3).value();
 
 	constructor(
-		private readonly commandService: CommandService,
+		private readonly commandService: any,
 		public readonly guildId: string,
 	) {
 		super();
-		this.setupPlayerEvents();
-		this.startInactiveCheck();
+		this.audioService = new AudioService();
+		this.setupEvents();
 	}
 
 	/**
-	 * @en Gets the initial state of the player.
-	 * @ru Возвращает начальное состояние плеера.
-	 * @returns {PlayerState} Initial state
+	 * Настраивает обработку событий плеера и аудиосервиса
 	 */
-	private getInitialState(): PlayerState {
-		return {
-			connection: null,
-			isPlaying: false,
-			resource: null,
-			channelId: null,
-			volume: DEFAULT_VOLUME,
-			currentTrack: null,
-			nextTrack: null,
-			lastTrack: null,
-			loop: false,
-			wave: false,
-			pause: false,
-		};
-	}
-
-	/**
-	 * @en Sets up player events.
-	 * @ru Устанавливает события плеера.
-	 */
-	private setupPlayerEvents(): void {
-		this.player.on("error", (error) => {
-			bot.logger.error(
-				bot.locale.t("messages.playerService.player.status.error"),
-				error,
-			);
-			void this.handleTrackEnd();
+	private setupEvents(): void {
+		this.player.on(AudioPlayerStatus.Playing, () => {
+			this.state.isPlaying = true;
+			this.state.pause = false;
+			this.emit(PlayerServiceEvents.PLAYING);
 		});
-		this.player.on(AudioPlayerStatus.Idle, () => void this.handleTrackEnd());
+		this.player.on(AudioPlayerStatus.Paused, () => {
+			this.state.isPlaying = false;
+			this.state.pause = true;
+			this.emit(PlayerServiceEvents.PAUSED);
+		});
+		this.player.on(AudioPlayerStatus.Idle, () => {
+			this.handleTrackEnd();
+		});
+		this.player.on("error", (error) => {
+			console.error("Player error:", error);
+			this.handleTrackEnd();
+		});
+		this.audioService.on("volumeChanged", (volume) => {
+			this.emit(PlayerServiceEvents.VOLUME_CHANGED, volume);
+		});
+		this.audioService.on("equalizerChanged", (eq) => {
+			this.emit(PlayerServiceEvents.EQUALIZER_CHANGED, eq);
+		});
+		this.audioService.on("error", (error) => {
+			this.emit(PlayerServiceEvents.ERROR, error);
+		});
+		this.audioService.on("lowPassChanged", (frequency) => {
+			this.state.lowPassFrequency = frequency;
+			this.emit(PlayerServiceEvents.LOWPASS_CHANGED, frequency);
+		});
 	}
 
 	/**
-	 * @en Initializes player properties.
-	 * @ru Инициализирует свойства плеера.
-	 * @param {keyof Pick<PlayerState, "loop" | "wave" | "volume" | "currentTrack">} property - Property to initialize
+	 * Получает URL трека динамически
 	 */
-	public async initialize(
-		property: keyof Pick<
-			PlayerState,
-			"loop" | "wave" | "volume" | "currentTrack"
-		>,
-	): Promise<void> {
-		const getters = {
-			loop: () => bot.queueService.getLoop(this.guildId),
-			wave: () => bot.queueService.getWave(this.guildId),
-			volume: () => bot.queueService.getVolume(this.guildId),
-			currentTrack: () => bot.queueService.getTrack(this.guildId),
-		};
-
-		let value: Track | boolean | number | null = await getters[property]();
-
-		if (value === null && property === "volume") {
-			value = DEFAULT_VOLUME;
-		}
-
-		if (property === "volume") {
-			this.state[property] = value as number;
-			await bot.queueService.setVolume(this.guildId, value as number);
-		} else if (property === "currentTrack") {
-			this.state[property] = value as Track;
-		} else {
-			this.state[property] = value as boolean;
-		}
-	}
-
-	/**
-	 * @en Plays or queues a track.
-	 * @ru Проигрывает или добавляет трек в очередь.
-	 * @param {Track} track - Track to play or queue
-	 */
-	public async playOrQueueTrack(track: Track): Promise<void> {
+	private async getTrackUrl(trackId: string, source: string): Promise<string | null> {
 		try {
-			let success = false;
-
-			if (this.state.isPlaying) {
-				await this.queueTrack(track);
-				success = true;
-			} else {
-				success = await this.playTrack(track);
+			if (source === "url") return trackId;
+			const plugin = bot?.pluginManager?.getPlugin(source);
+			if (!plugin?.getTrackUrl) {
+				bot?.logger.error(bot.locale.t("messages.playerService.player.error.plugin_not_found", { source }));
+				return null;
 			}
+			const url = await plugin.getTrackUrl(trackId);
+			if (!url) {
+				bot?.logger.warn(bot.locale.t("messages.playerService.player.warning.url_not_found", { trackId, source }));
+				return null;
+			}
+			return url;
+		} catch (error) {
+			bot?.logger.error(bot.locale.t("messages.playerService.player.error.get_track_url", { trackId, error: error instanceof Error ? error.message : String(error) }));
+			return null;
+		}
+	}
 
-			if (success && !this.state.nextTrack) {
+	/**
+	 * Получает длительность трека (мс)
+	 */
+	private async getDuration(url: string): Promise<number> {
+		try {
+			const durationInSeconds = await getAudioDurationInSeconds(url, process.env.FFPROBE_PATH || undefined);
+			return milli().milliseconds(durationInSeconds).value();
+		} catch (error) {
+			bot.logger.error(`Failed to get audio duration for ${url}: ${error}`);
+			return 0;
+		}
+	}
+
+	/**
+	 * Воспроизводит трек
+	 */
+	async playTrack(track: Track): Promise<boolean> {
+		if (!track) {
+			console.error("Invalid track provided");
+			return false;
+		}
+		try {
+			const trackUrl = await this.getTrackUrl(track.trackId, track.source);
+			if (!trackUrl) {
+				console.error(`Failed to get URL for track: ${track.trackId}`);
+				await this.playNextTrack();
+				return false;
+			}
+			const processedStream = await this.audioService.createAudioStreamFromUrl(trackUrl);
+			const resource = createAudioResource(processedStream, {
+				inputType: StreamType.Raw,
+				inlineVolume: false,
+			});
+			this.state.currentTrack = track;
+			await this.setVolumeFast(0);
+			this.player.play(resource);
+			await this.setVolume(this.state.volume, 1000);
+			try {
+				const duration = await this.getDuration(trackUrl);
+				if (duration && duration > this.FADEOUT_BEFORE_END) {
+					if (this.fadeOutTimer) {
+						clearTimeout(this.fadeOutTimer);
+						this.fadeOutTimer = null;
+					}
+					this.fadeOutTimer = setTimeout(async () => {
+						if (this.state.nextTrack) {
+							await this.startCrossfade();
+						} else {
+							await this.setVolume(0, 1000);
+						}
+					}, duration - this.FADEOUT_BEFORE_END);
+				}
+			} catch (error) {
+				console.error(`Failed to get track duration: ${error}`);
+			}
+			if (!this.state.loop) {
+				await bot?.queueService.logTrackPlay(track.requestedBy!, track.trackId, track.info);
+			}
+			this.emit(PlayerServiceEvents.TRACK_STARTED, track);
+			return true;
+		} catch (error) {
+			console.error(`Failed to play track: ${error}`);
+			await this.playNextTrack();
+			return false;
+		}
+	}
+
+	/**
+	 * Кроссфейд к следующему треку
+	 */
+	private async startCrossfade(): Promise<void> {
+		try {
+			if (!this.state.nextTrack) return;
+			const nextTrack = this.state.nextTrack;
+			this.state.nextTrack = null;
+			const nextTrackUrl = await this.getTrackUrl(nextTrack.trackId, nextTrack.source);
+			if (!nextTrackUrl) {
+				console.error(`Failed to get URL for next track: ${nextTrack.trackId}`);
+				await this.playNextTrack();
+				return;
+			}
+			const currentStream = await this.audioService.createAudioStreamFromUrl(this.state.currentTrack!.url!);
+			const nextStream = await this.audioService.createAudioStreamFromUrl(nextTrackUrl);
+			const crossfadeStream = this.audioService.createCrossfadeStream(currentStream, nextStream, milli().seconds(this.CROSSFADE_DURATION).value());
+			const resource = createAudioResource(crossfadeStream, {
+				inputType: StreamType.Raw,
+				inlineVolume: false,
+			});
+			this.state.currentTrack = nextTrack;
+			this.player.play(resource);
+			if (!this.state.loop) {
+				await bot?.queueService.logTrackPlay(nextTrack.requestedBy!, nextTrack.trackId, nextTrack.info);
+			}
+			this.emit(PlayerServiceEvents.TRACK_STARTED, nextTrack);
+			this.emit(PlayerServiceEvents.CROSSFADE_COMPLETED, nextTrack);
+		} catch (error) {
+			console.error(`Crossfade failed: ${error}`);
+			await this.playNextTrack();
+		}
+	}
+
+	/**
+	 * Воспроизводит или добавляет трек в очередь
+	 */
+	async playOrQueueTrack(
+		track: Track,
+		interaction?: CommandInteraction,
+	): Promise<void> {
+		if (!track) {
+			console.error("Invalid track provided");
+			return;
+		}
+		try {
+			// Если нет подключения и есть interaction, пробуем подключиться
+			if (!this.state.connection && interaction) {
+				await this.joinChannel(interaction);
+			}
+			if (this.state.isPlaying) {
+				// Если что-то уже играет, добавляем в очередь
+				await this.queueTrack(track);
+				this.emit(PlayerServiceEvents.TRACK_QUEUED, track);
+			} else {
+				// Если ничего не играет, воспроизводим сразу
+				const success = await this.playTrack(track);
+				if (!success) {
+					console.error("Failed to play track");
+					return;
+				}
+			}
+			// Загружаем следующий трек если его нет
+			if (!this.state.nextTrack) {
 				await this.loadNextTrack();
 			}
 		} catch (error) {
-			bot.logger.error(
-				`${bot.locale.t("messages.playerService.errors.failed_to_play_queue_track")}: ${error}`,
-			);
+			console.error(`Failed to play or queue track: ${error}`);
+			throw error;
 		}
 	}
 
 	/**
-	 * @en Skips the current track.
-	 * @ru Пропускает текущий трек.
+	 * Добавляет трек в очередь
+	 */
+	private async queueTrack(track: Track): Promise<void> {
+		if (this.guildId) {
+			await bot?.queueService.setTrack(this.guildId, {
+				...track,
+				priority: true,
+			});
+		}
+	}
+
+	/**
+	 * Загружает следующий трек из очереди
+	 */
+	private async loadNextTrack(): Promise<void> {
+		if (this.guildId) {
+			const nextTrack = await bot?.queueService.getTrack(this.guildId);
+			if (nextTrack) {
+				this.state.nextTrack = nextTrack;
+			}
+		}
+	}
+
+	/**
+	 * Воспроизводит следующий трек
+	 */
+	private async playNextTrack(): Promise<void> {
+		try {
+			if (this.state.loop && this.state.currentTrack) {
+				// Повторяем текущий трек
+				await this.playTrack(this.state.currentTrack);
+			} else if (this.state.nextTrack) {
+				// Воспроизводим следующий трек
+				const nextTrack = this.state.nextTrack;
+				this.state.nextTrack = null;
+				await this.playTrack(nextTrack);
+				// Загружаем следующий трек если не в режиме повтора
+				if (!this.state.loop) {
+					await this.loadNextTrack();
+				}
+			} else {
+				// Проверяем wave режим для рекомендаций
+				if (this.state.currentTrack?.source === "yandex") {
+					await this.tryPlayRecommendations();
+				} else {
+					// Очередь пуста
+					this.emit(PlayerServiceEvents.QUEUE_EMPTY);
+					this.resetState();
+				}
+			}
+		} catch (error) {
+			console.error(`Failed to play next track: ${error}`);
+			this.resetState();
+		}
+	}
+
+	/**
+	 * Пытается воспроизвести рекомендации (wave режим)
+	 */
+	private async tryPlayRecommendations(): Promise<void> {
+		try {
+			const waveEnabled = bot?.queueService.getWave(this.guildId);
+			const lastTrack = this.state.currentTrack;
+			if (waveEnabled && lastTrack?.trackId && lastTrack.source === "yandex") {
+				const recommendations = await this.getRecommendations(lastTrack.trackId);
+				if (recommendations.length > 0) {
+					await this.playTrack(recommendations[0]);
+					bot?.queueService.setLastTrackID(this.guildId, recommendations[0].trackId);
+					return;
+				}
+			}
+			// Если рекомендации не найдены или wave отключен
+			this.emit(PlayerServiceEvents.QUEUE_EMPTY);
+			this.resetState();
+		} catch (error) {
+			console.error(`Failed to play recommendations: ${error}`);
+			this.emit(PlayerServiceEvents.QUEUE_EMPTY);
+			this.resetState();
+		}
+	}
+
+	/**
+	 * Получает рекомендации для трека
+	 */
+	private async getRecommendations(trackId: string): Promise<Track[]> {
+		try {
+			const plugin = bot?.pluginManager?.getPlugin("yandex");
+			if (!plugin?.getRecommendations) {
+				return [];
+			}
+			const recommendations = await plugin.getRecommendations(trackId);
+			return recommendations.map(
+				(rec: { id: string; title: string; artists: any[] }) => ({
+					source: "yandex",
+					trackId: rec.id,
+					info: `${rec.title} - ${rec.artists.map((a: { name: string }) => a.name).join(", ")}`,
+					requestedBy: this.state.currentTrack?.requestedBy,
+				}),
+			);
+		} catch (error) {
+			console.error(`Failed to get recommendations: ${error}`);
+			return [];
+		}
+	}
+
+	/**
+	 * Инициализирует свойства плеера
+	 */
+	public async initialize(
+		property: keyof Pick<PlayerState, "loop" | "volume">,
+	): Promise<void> {
+		try {
+			const getters = {
+				loop: () => bot?.queueService.getLoop(this.guildId),
+				volume: () => bot?.queueService.getVolume(this.guildId),
+			};
+			let value: boolean | number | null = getters[property]();
+			if (value === null && property === "volume") {
+				value = VOLUME.DEFAULT_PERCENT;
+			}
+			if (property === "volume") {
+				this.state[property] = value as number;
+				bot?.queueService.setVolume(this.guildId, value as number);
+				await this.setVolume(value as number);
+				console.log(value);
+			} else {
+				this.state[property] = value as boolean;
+				bot?.queueService.setLoop(this.guildId, value as boolean);
+			}
+		} catch (error) {
+			console.error(`Failed to initialize ${property}: ${error}`);
+		}
+	}
+
+	/**
+	 * Получает текущий трек
+	 */
+	getCurrentTrack(): Track | null {
+		return this.state.currentTrack;
+	}
+
+	/**
+	 * Получает следующий трек
+	 */
+	getNextTrack(): Track | null {
+		return this.state.nextTrack;
+	}
+
+	/**
+	 * Проверяет, воспроизводится ли что-то
+	 */
+	isPlaying(): boolean {
+		return this.state.isPlaying;
+	}
+
+	/**
+	 * Проверяет, на паузе ли плеер
+	 */
+	isPaused(): boolean {
+		return this.state.pause;
+	}
+
+	/**
+	 * Получает текущую громкость
+	 */
+	getVolume(): number {
+		return this.state.volume;
+	}
+
+	/**
+	 * Устанавливает режим повтора
+	 */
+	async setLoop(enabled: boolean): Promise<void> {
+		this.state.loop = enabled;
+		bot?.queueService.setLoop(this.guildId, enabled);
+		this.emit(PlayerServiceEvents.LOOP_CHANGED, enabled);
+	}
+
+	/**
+	 * Получает состояние повтора
+	 */
+	getLoop(): boolean {
+		return this.state.loop;
+	}
+
+	/**
+	 * Устанавливает громкость
+	 */
+	async setVolume(volume: number, duration = 200): Promise<void> {
+		await this.audioService.setVolume(volume / 100, duration);
+		bot?.queueService.setVolume(this.guildId, volume);
+		this.state.volume = volume;
+	}
+
+	async setVolumeFast(volume: number) {
+		this.audioService.setVolumeFast(volume / 100);
+	}
+
+	/**
+	 * Пропускает текущий трек
 	 */
 	public async skip(): Promise<void> {
-		this.state.loop = false;
-		await bot.queueService.setLoop(this.guildId, false);
-		await this.smoothVolumeChange(0, 1500);
-		await new Promise((r) => setTimeout(r, 1000));
-		await this.playNextTrack();
+		try {
+			this.state.loop = false;
+			bot?.queueService.setLoop(this.guildId, false);
+			// Плавно уменьшаем громкость перед сменой трека
+			await this.setVolume(0, 1000);
+			await new Promise((r) => setTimeout(r, 1000));
+			await this.playNextTrack();
+		} catch (error) {
+			console.error(`Failed to skip track: ${error}`);
+			this.emit(PlayerServiceEvents.ERROR, error);
+		}
 	}
 
 	/**
-	 * @en Toggles the pause state of the player.
-	 * @ru Переключает состояние паузы плеера.
+	 * Устанавливает эквалайзер
 	 */
-	public async togglePause(): Promise<void> {
-		if (!this.state.connection) return;
-
-		const status = this.player.state.status;
-		let isPlaying: boolean | undefined;
-		let pause: boolean | undefined;
-
-		switch (status) {
-			case AudioPlayerStatus.Playing:
-				this.player.pause();
-				pause = true;
-				isPlaying = false;
-				break;
-			case AudioPlayerStatus.Paused:
-				this.player.unpause();
-				pause = false;
-				isPlaying = true;
-				break;
-		}
-
-		if (isPlaying !== undefined && pause !== undefined) {
-			this.state.isPlaying = isPlaying;
-			this.state.pause = pause;
-		}
+	async setBass(bass: number): Promise<void> {
+		this.audioService.setBass(bass);
 	}
 
 	/**
-	 * @en Sets the volume of the player.
-	 * @ru Устанавливает громкость плеера.
-	 * @param {number} volume - Volume to set
+	 * Включает/выключает компрессор
 	 */
-	public async setVolume(volume: number): Promise<void> {
-		if (this.player.state.status === AudioPlayerStatus.Playing) {
-			await this.smoothVolumeChange(volume / 100, 2000);
-			await bot.queueService.setVolume(this.guildId, volume);
+	async setCompressor(enabled: boolean): Promise<void> {
+		this.audioService.setCompressor(enabled);
+	}
+
+	/**
+	 * Кроссфейд к следующему треку
+	 */
+	async crossfadeToTrack(nextTrack: Track, duration = 3000): Promise<void> {
+		if (!this.state.currentTrack) {
+			await this.playTrack(nextTrack);
+			return;
+		}
+		try {
+			// Фейд-аут текущего трека
+			await this.audioService.setVolume(0, duration / 2);
+			// Через половину времени начинаем новый трек
+			setTimeout(async () => {
+				await this.playTrack(nextTrack);
+				this.audioService.setVolume(0);
+				await this.audioService.setVolume(this.state.volume / 100, duration / 2);
+			}, duration / 2);
+			this.emit(PlayerServiceEvents.CROSSFADE_COMPLETED, nextTrack);
+		} catch (error) {
+			console.error(`Crossfade failed: ${error}`);
+			await this.playTrack(nextTrack);
 		}
 	}
 
 	/**
-	 * @en Joins a voice channel.
-	 * @ru Присоединяется к голосовому каналу.
-	 * @param {CommandInteraction} interaction - Discord command interaction
+	 * Подключается к голосовому каналу
 	 */
 	public async joinChannel(interaction: CommandInteraction): Promise<void> {
 		const member = interaction.member as GuildMember;
 		const voiceChannelId = member.voice.channel?.id;
-
 		if (!voiceChannelId || !this.hasVoiceAccess(member)) {
-			await this.commandService.reply(
-				interaction,
-				"messages.playerService.errors.not_in_voice_channel",
-			);
+			await this.commandService.reply(this.commandService.locale.t("messages.playerService.errors.not_in_voice_channel"));
 			return;
 		}
-
 		try {
 			this.state.channelId = voiceChannelId;
-			this.state.connection = await this.establishConnection(
-				voiceChannelId,
-				interaction,
-			);
-
-			const track = await bot.queueService.getTrack(this.guildId);
-			if (track) await this.playOrQueueTrack(track);
-
-			await Promise.all([this.initialize("volume"), this.initialize("wave")]);
+			this.state.connection = await this.establishConnection(voiceChannelId, interaction);
+			// Инициализируем настройки
+			await Promise.all([this.initialize("volume"), this.initialize("loop")]);
 			this.setupDisconnectHandler();
 			this.startEmptyCheck();
+			this.emit(PlayerServiceEvents.CONNECTED, voiceChannelId);
 		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("messages.playerService.errors.voice_connection", {
-					error: String(error),
-				}),
-			);
-			this.reset();
+			console.error(`Voice connection failed: ${error}`);
+			this.resetState();
 		}
 	}
 
-	/**
-	 * @en Establishes a voice connection.
-	 * @ru Устанавливает голосовое соединение.
-	 * @param {string} channelId - Discord channel ID
-	 * @param {CommandInteraction} interaction - Discord command interaction
-	 * @returns {Promise<VoiceConnection>} Voice connection
-	 */
-	private async establishConnection(
-		channelId: string,
-		interaction: CommandInteraction,
-	): Promise<VoiceConnection> {
+	private async establishConnection(channelId: string, interaction: CommandInteraction): Promise<VoiceConnection> {
 		let connection = getVoiceConnection(this.guildId);
 		if (connection) return connection;
-
 		if (!interaction.guild) {
-			throw new Error(
-				bot.locale.t("messages.playerService.errors.guild_not_found"),
-			);
+			throw new Error("Guild not found");
 		}
-
 		connection = joinVoiceChannel({
 			channelId,
 			guildId: this.guildId,
-			adapterCreator: interaction.guild
-				.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+			adapterCreator: interaction.guild.voiceAdapterCreator as DiscordGatewayAdapterCreator,
 			selfDeaf: false,
 			selfMute: false,
 		});
-
 		try {
 			await entersState(connection, VoiceConnectionStatus.Ready, 30000);
 			connection.subscribe(this.player);
@@ -296,604 +578,152 @@ export default class PlayerService extends EventEmitter {
 		}
 	}
 
-	/**
-	 * @en Smoothly changes the volume of the player.
-	 * @ru Плавно изменяет громкость плеера.
-	 * @param {number} target - Target volume
-	 * @param {number} duration - Duration of the volume change
-	 * @param {boolean} memorize - Whether to memorize the volume
-	 * @param {boolean} zero - Whether to start from 0
-	 * @returns {Promise<void>} Promise that resolves when the volume change is complete
-	 */
-	public smoothVolumeChange(
-		target: number,
-		duration: number,
-		memorize: boolean = true,
-		zero: boolean = false,
-	): Promise<void> {
-		if (!this.state.resource?.volume) {
-			return Promise.resolve();
-		}
-
-		return new Promise((resolve) => {
-			let animationFrameId: ReturnType<typeof setTimeout> | null = null;
-
-			const start = zero ? 0 : this.state.volume / 100 || 0;
-			const diff = target - start;
-			const startTime = Date.now();
-
-			if (memorize) this.state.volume = target * 100;
-
-			// Если изменение незначительное или длительность 0, применяем сразу
-			if (Math.abs(diff) < 0.01 || duration <= 0) {
-				this.state.resource?.volume?.setVolumeLogarithmic(
-					Math.max(0, Math.min(1, target)),
-				);
-				return resolve();
-			}
-
-			const animate = () => {
-				if (!this.state.resource?.volume) {
-					if (animationFrameId) clearTimeout(animationFrameId);
-					return resolve();
-				}
-
-				const elapsed = Date.now() - startTime;
-				const progress = Math.min(elapsed / duration, 1);
-
-				const vol = start + diff * progress;
-				this.state.resource.volume.setVolumeLogarithmic(
-					Math.max(0, Math.min(1, vol)),
-				);
-
-				if (progress < 1) {
-					animationFrameId = setTimeout(animate, 16);
-				} else {
-					if (animationFrameId) clearTimeout(animationFrameId);
-					resolve();
-				}
-			};
-
-			animate();
-		});
-	}
-
-	/**
-	 * @en Checks if a member has voice access.
-	 * @ru Проверяет, есть ли у участника доступ к голосовому каналу.
-	 * @param {GuildMember} member - Guild member
-	 * @returns {boolean} Whether the member has voice access
-	 */
 	private hasVoiceAccess(member: GuildMember): boolean {
 		const voiceChannel = member.voice.channel;
-		return !!(
-			voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) &&
-			voiceChannel.id
-		);
+		return !!(voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) && voiceChannel.id);
 	}
 
-	/**
-	 * @en Leaves the voice channel.
-	 * @ru Покидает голосовой канал.
-	 */
-	public leaveChannel(): void {
-		if (this.state.connection) {
-			this.state.connection.destroy();
-			this.clearAllTimers();
-			this.reset();
-			this.updateActivity();
-			this.state.channelId = null;
-		}
-	}
-
-	/**
-	 * @en Updates the activity of the bot.
-	 * @ru Обновляет активность бота.
-	 * @param {string} activity - Activity to set
-	 */
-	private updateActivity(activity?: string) {
-		bot.client.user?.setActivity(activity || "");
-	}
-
-	/**
-	 * @en Plays a track.
-	 * @ru Проигрывает трек.
-	 * @param {Track} track - Track to play
-	 */
-	private async playTrack(track: Track): Promise<boolean> {
-		if (!track) {
-			bot.logger.error(
-				bot.locale.t("messages.playerService.errors.invalid_track"),
-			);
-			return false;
-		}
-
-		if (track.source === "url") {
-			if (!track.url) {
-				bot.logger.error(
-					bot.locale.t("messages.playerService.errors.invalid_track_url"),
-				);
-				return false;
-			}
-			track.trackId = track.url;
-		} else if (!track.trackId) {
-			bot.logger.error(
-				bot.locale.t("messages.playerService.errors.invalid_track"),
-			);
-			return false;
-		}
-
-		this.manageFadeOutTimeout();
-
-		this.state.currentTrack = track;
-		if (track.source === "yandex") {
-			this.state.lastTrack = track;
-			await bot.queueService.setLastTrackID(this.guildId, track.trackId);
-		}
-
-		await Promise.all([this.initialize("volume"), this.initialize("wave")]);
-
-		const trackUrl = await this.getTrackUrl(track.trackId, track.source);
-		if (!trackUrl) {
-			await this.playNextTrack();
-			return false;
-		}
-
-		const resource = this.createTrackResource({
-			...track,
-			url: trackUrl,
-		});
-		this.setupFadeEffects();
-
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-		this.player.play(resource);
-
-		if (!this.state.loop) {
-			await bot.queueService.logTrackPlay(
-				track.requestedBy!,
-				track.trackId,
-				track.info,
-			);
-		}
-
-		this.state.isPlaying = true;
-		this.updateActivity(track.info);
-
-		await this.setupTrackEndFade({ ...track, url: trackUrl });
-		return true;
-	}
-
-	/**
-	 * @en Gets the URL of a track.
-	 * @ru Получает URL трека.
-	 * @param {string} trackId - Track ID
-	 * @param {string} source - Source of the track
-	 * @returns {Promise<string | null>} URL of the track or null if not found
-	 */
-	private async getTrackUrl(
-		trackId: string,
-		source: string,
-	): Promise<string | null> {
+	public async togglePause(): Promise<void> {
+		if (!this.state.connection) return;
 		try {
-			if (source === "url") {
-				return trackId;
+			const status = this.player.state.status;
+			switch (status) {
+				case AudioPlayerStatus.Playing:
+					this.player.pause();
+					break;
+				case AudioPlayerStatus.Paused:
+					this.player.unpause();
+					break;
 			}
-
-			const plugin = bot.pluginManager.getPlugin(source);
-			if (!plugin?.getTrackUrl) {
-				bot.logger.error(
-					bot.locale.t("messages.playerService.player.error.plugin_not_found", {
-						source,
-					}),
-				);
-				return null;
-			}
-
-			const url = await plugin.getTrackUrl(trackId);
-
-			if (!url) {
-				await this.loadNextTrack();
-				return null;
-			}
-
-			return url;
 		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("messages.playerService.player.error.get_track_url", {
-					trackId,
-					error: error instanceof Error ? error.message : String(error),
-				}),
-			);
-			await this.playNextTrack();
-			return null;
+			console.error(`Failed to toggle pause: ${error}`);
 		}
 	}
 
-	/**
-	 * @en Creates a track resource.
-	 * @ru Создает ресурс трека.
-	 * @param {Track & { url: string }} track - Track with URL
-	 * @returns {AudioResource} Track resource
-	 */
-	private createTrackResource(track: Track & { url: string }): AudioResource {
-		const resource = createAudioResource(track.url, {
-			inputType: StreamType.Arbitrary,
-			inlineVolume: true,
-			silencePaddingFrames: 5,
-		});
-		resource.volume?.setVolumeLogarithmic(0);
-		this.state.resource = resource;
-		return resource;
-	}
-
-	/**
-	 * @en Sets up fade effects.
-	 * @ru Устанавливает эффекты затухания.
-	 */
-	private setupFadeEffects(): void {
-		if (this.timers.fadeOut) {
-			clearTimeout(this.timers.fadeOut);
-			this.timers.fadeOut = null;
-		}
-
-		// Используем Promise.resolve для гарантии асинхронного выполнения
-		this.timers.fadeOut = setTimeout(() => {
-			Promise.resolve().then(() => {
-				if (this.state.resource?.volume) {
-					void this.smoothVolumeChange(
-						this.state.volume / 100,
-						3000,
-						true,
-						true,
-					);
-				}
-			});
-		}, 500);
-	}
-
-	/**
-	 * @en Manages the fade out timeout.
-	 * @ru Управляет таймаутом затухания.
-	 * @param {number} duration - Duration of the fade out
-	 */
-	private manageFadeOutTimeout(duration?: number): void {
-		if (this.timers.fadeOut) {
-			clearTimeout(this.timers.fadeOut);
-			this.timers.fadeOut = null;
-			bot.logger.debug(
-				bot.locale.t("messages.playerService.player.status.fadeout_cleared"),
-			);
-		}
-
-		if (duration && duration > 0) {
-			this.timers.fadeOut = setTimeout(() => {
-				void this.smoothVolumeChange(0, 6000, false);
-			}, duration);
-			bot.logger.debug(
-				bot.locale.t("messages.playerService.player.status.fadeout_set", {
-					duration,
-				}),
-			);
-		}
-	}
-
-	/**
-	 * @en Sets up the track end fade.
-	 * @ru Устанавливает затухание в конце трека.
-	 * @param {Track & { url: string }} track - Track with URL
-	 */
-	private async setupTrackEndFade(
-		track: Track & { url: string },
-	): Promise<void> {
-		const duration = await this.getDuration(track.url);
-		this.manageFadeOutTimeout(duration - 8000);
-	}
-
-	/**
-	 * @en Gets the duration of a track.
-	 * @ru Получает продолжительность трека.
-	 * @param {string} url - URL of the track
-	 * @returns {Promise<number>} Duration of the track
-	 */
-	private async getDuration(url: string): Promise<number> {
-		try {
-			return await getAudioDurationInSeconds(
-				url,
-				process.env.FFPROBE_PATH || undefined,
-			);
-		} catch (error) {
-			bot.logger.error(`Failed to get audio duration for ${url}: ${error}`);
-			return 0;
-		}
-	}
-
-	/**
-	 * @en Queues a track.
-	 * @ru Добавляет трек в очередь.
-	 * @param {Track} track - Track to queue
-	 */
-	private async queueTrack(track: Track): Promise<void> {
-		if (this.guildId) {
-			await bot.queueService.setTrack(this.guildId, {
-				...track,
-				priority: true,
-			});
-		}
-	}
-
-	/**
-	 * @en Loads the next track.
-	 * @ru Загружает следующий трек.
-	 */
-	private async loadNextTrack(): Promise<void> {
-		if (this.guildId) {
-			this.state.nextTrack = await bot.queueService.getTrack(this.guildId);
-		}
-	}
-
-	/**
-	 * @en Plays the next track.
-	 * @ru Проигрывает следующий трек.
-	 */
-	private async playNextTrack(): Promise<void> {
-		if (this.state.loop && this.state.currentTrack) {
-			await this.playTrack(this.state.currentTrack);
-		} else if (this.state.nextTrack) {
-			await this.playTrack(this.state.nextTrack);
-			if (!this.state.loop) {
-				this.state.nextTrack = null;
-				await this.loadNextTrack();
-			}
-		} else if (this.state.wave && this.state.lastTrack?.trackId) {
-			if (this.state.lastTrack.source === "yandex") {
-				const recommendations = await this.getRecommendations(
-					this.state.lastTrack.trackId,
-				);
-				if (recommendations.length > 0) {
-					await this.playTrack(recommendations[0]);
-					await bot.queueService.setLastTrackID(
-						this.guildId,
-						recommendations[0].trackId,
-					);
-					this.state.lastTrack = recommendations[0];
-				} else {
-					this.reset();
-					this.updateActivity();
-				}
-			} else {
-				this.reset();
-				this.updateActivity();
-			}
-		} else {
-			this.reset();
-			this.updateActivity();
-		}
-	}
-
-	/**
-	 * @en Gets recommendations for a track.
-	 * @ru Получает рекомендации для трека.
-	 * @param {string} trackId - Track ID
-	 * @returns {Promise<Track[]>} Recommendations
-	 */
-	private async getRecommendations(trackId: string): Promise<Track[]> {
-		const plugin = bot.pluginManager.getPlugin(
-			this.state.lastTrack?.source || "",
-		);
-		const recommendations = plugin?.getRecommendations
-			? await plugin.getRecommendations(trackId)
-			: [];
-
-		return recommendations.map(
-			(rec: { id: string; title: string; artists: any[] }) => ({
-				source: "yandex",
-				trackId: rec.id,
-				info: `${rec.title} - ${rec.artists.map((a: { name: string }) => a.name).join(", ")}`,
-				requestedBy: this.state.lastTrack?.requestedBy,
-			}),
-		);
-	}
-
-	/**
-	 * @en Sets up the disconnect handler.
-	 * @ru Устанавливает обработчик отключения.
-	 */
 	private setupDisconnectHandler(): void {
 		if (!this.state.connection) return;
-
-		// Удаляем предыдущий обработчик, если он существует
 		if (this.disconnectHandler) {
-			this.state.connection.off(
-				VoiceConnectionStatus.Disconnected,
-				this.disconnectHandler,
-			);
+			this.state.connection.off(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
 			this.disconnectHandler = null;
 		}
-
 		this.disconnectHandler = async () => {
 			try {
-				if (!this.state.connection) {
-					bot.logger.error(
-						bot.locale.t("messages.playerService.errors.connection_null"),
-					);
-					return;
-				}
-
-				// Пытаемся переподключиться
+				if (!this.state.connection) return;
 				await Promise.race([
-					entersState(
-						this.state.connection,
-						VoiceConnectionStatus.Signalling,
-						RECONNECTION_TIMEOUT,
-					),
-					entersState(
-						this.state.connection,
-						VoiceConnectionStatus.Connecting,
-						RECONNECTION_TIMEOUT,
-					),
+					entersState(this.state.connection, VoiceConnectionStatus.Signalling, 5000),
+					entersState(this.state.connection, VoiceConnectionStatus.Connecting, 5000),
 				]);
-
-				// Если успешно переподключились, восстанавливаем воспроизведение
 				if (this.state.currentTrack && !this.state.isPlaying) {
 					await this.playTrack(this.state.currentTrack);
 				}
 			} catch (error) {
-				bot.logger.error(
-					bot.locale.t(
-						"messages.playerService.player.error.reconnection_failed",
-						{
-							error: error instanceof Error ? error.message : String(error),
-						},
-					),
-				);
+				console.error(`Reconnection failed: ${error}`);
 				this.handleDisconnect();
 			}
 		};
-
-		this.state.connection.on(
-			VoiceConnectionStatus.Disconnected,
-			this.disconnectHandler,
-		);
+		this.state.connection.on(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
 	}
 
-	/**
-	 * @en Handles the disconnect event.
-	 * @ru Обрабатывает событие отключения.
-	 */
 	private handleDisconnect(): void {
 		if (this.state.connection) {
 			this.state.connection.removeAllListeners();
 			this.state.connection.destroy();
 			this.state.connection = null;
 		}
-		this.reset();
-		this.updateActivity();
+		this.resetState();
 	}
 
-	/**
-	 * @en Starts the empty channel check.
-	 * @ru Запускает проверку пустого канала.
-	 */
+	public leaveChannel(): void {
+		if (this.state.connection) {
+			this.state.connection.destroy();
+			this.clearTimers();
+			this.resetState();
+			this.state.channelId = null;
+		}
+	}
+
 	private startEmptyCheck(): void {
 		if (this.timers.emptyChannelInterval) {
 			clearInterval(this.timers.emptyChannelInterval);
 			this.timers.emptyChannelInterval = null;
 		}
-
-		this.timers.emptyChannelInterval = setInterval(
-			() => void this.checkEmpty(),
-			EMPTY_CHANNEL_CHECK_INTERVAL,
-		);
+		this.timers.emptyChannelInterval = setInterval(() => void this.checkEmpty(), milli().seconds(30).value()); // Проверяем каждые 30 секунд
 	}
 
-	/**
-	 * @en Checks if the voice channel is empty.
-	 * @ru Проверяет, пустой ли голосовой канал.
-	 */
 	private async checkEmpty(): Promise<void> {
 		if (!this.state.connection || !this.state.channelId) return;
-
 		try {
 			const channel = await this.getVoiceChannel();
 			if (!channel) {
 				this.handleDisconnect();
 				return;
 			}
-
 			const membersCount = channel.members.filter(
-				(m) => !m.user.bot && m.id !== bot.client.user?.id,
+				(m) => !m.user.bot && m.id !== bot?.client.user?.id,
 			).size;
-
 			if (membersCount === 0) {
 				if (!this.timers.emptyChannelTimeout) {
 					this.timers.emptyChannelTimeout = setTimeout(() => {
 						this.leaveChannel();
-					}, 30000);
+					}, milli().seconds(30).value());
 				}
 			} else if (this.timers.emptyChannelTimeout) {
 				clearTimeout(this.timers.emptyChannelTimeout);
 				this.timers.emptyChannelTimeout = null;
 			}
 		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("messages.playerService.errors.empty_check", {
-					error: String(error),
-				}),
-			);
+			console.error(`Empty check failed: ${error}`);
 			this.handleDisconnect();
 		}
 	}
 
-	/**
-	 * @en Gets the voice channel.
-	 * @ru Получает голосовой канал.
-	 * @returns {Promise<VoiceChannel | null>} Voice channel or null
-	 */
 	private async getVoiceChannel(): Promise<VoiceChannel | null> {
-		if (!this.state.channelId) {
-			bot.logger.error(
-				bot.locale.t("messages.playerService.errors.channel_id_null"),
-			);
-			return null;
-		}
-
+		if (!this.state.channelId) return null;
 		try {
-			const guild = await bot.client.guilds.fetch(this.guildId);
-			const channel = (await guild.channels.fetch(
-				this.state.channelId,
-			)) as VoiceChannel;
+			const guild = await bot?.client.guilds.fetch(this.guildId);
+			const channel = (await guild.channels.fetch(this.state.channelId)) as VoiceChannel;
 			return channel;
 		} catch (error) {
-			bot.logger.error(`Failed to fetch voice channel: ${error}`);
+			console.error(`Failed to fetch voice channel: ${error}`);
 			return null;
 		}
 	}
 
-	/**
-	 * @en Handles the track end event.
-	 * @ru Обрабатывает событие окончания трека.
-	 */
 	private handleTrackEnd = async (): Promise<void> => {
-		this.state.lastTrack = this.state.currentTrack;
-		this.state.isPlaying = false;
-		this.state.currentTrack = null;
-		if (!this.state.nextTrack && !this.state.loop) {
-			await this.checkEmpty();
+		try {
+			// Очищаем таймер fadeOut если он есть
+			if (this.fadeOutTimer) {
+				clearTimeout(this.fadeOutTimer);
+				this.fadeOutTimer = null;
+			}
+			const previousTrack = this.state.currentTrack;
+			// Сбрасываем состояние текущего трека
+			this.state.currentTrack = null;
+			this.state.isPlaying = false;
+			this.state.pause = false;
+			// Эмитим событие о завершении трека
+			this.emit(PlayerServiceEvents.TRACK_ENDED, previousTrack);
+			// Проверяем режим повтора
+			if (this.state.loop && previousTrack) {
+				// Если включен режим повтора, воспроизводим тот же трек
+				await this.playTrack(previousTrack);
+			} else {
+				// Иначе переходим к следующему треку
+				await this.playNextTrack();
+			}
+		} catch (error) {
+			console.error(`Error handling track end: ${error}`);
+			this.emit(PlayerServiceEvents.ERROR, error);
+			this.resetState();
 		}
-		await this.playNextTrack();
 	};
 
-	/**
-	 * @en Clears all timers.
-	 * @ru Очищает все таймеры.
-	 */
-	private clearAllTimers(): void {
-		for (const key in this.timers) {
-			if (this.timers.hasOwnProperty(key)) {
-				const timer = this.timers[key as keyof PlayerTimers];
-				if (timer) {
-					clearTimeout(timer);
-					clearInterval(timer as NodeJS.Timeout);
-					this.timers[key as keyof PlayerTimers] = null;
-				}
-			}
-		}
-	}
-
-	/**
-	 * @en Resets the player state.
-	 * @ru Сбрасывает состояние плеера.
-	 */
-	private reset(): void {
-		this.clearAllTimers();
-
-		// Reset the state
+	private resetState(): void {
 		this.state = {
 			...this.state,
 			isPlaying: false,
 			currentTrack: null,
 			nextTrack: null,
-			resource: null,
 		};
 	}
 
@@ -902,63 +732,75 @@ export default class PlayerService extends EventEmitter {
 			if (!this.state.isPlaying && this.state.channelId) {
 				this.checkEmpty();
 			}
-		}, 300_000); // 5 минут
+		}, milli().minutes(5).value()); // 5 минут
 	}
 
-	/**
-	 * @en Destroys the player.
-	 * @ru Уничтожает плеер.
-	 */
 	public async destroy(): Promise<void> {
 		try {
-			this.player.stop();
-			this.removeAllListeners();
-
-			this.clearAllTimers();
-
-			// Cleanup disconnect handler
-			if (this.disconnectHandler && this.state.connection) {
-				this.state.connection.off(
-					VoiceConnectionStatus.Disconnected,
-					this.disconnectHandler,
-				);
-				this.disconnectHandler = null;
+			// Очищаем таймер fadeOut если он есть
+			if (this.fadeOutTimer) {
+				clearTimeout(this.fadeOutTimer);
+				this.fadeOutTimer = null;
 			}
-
-			this.reset();
+			this.player.stop();
+			this.audioService.destroy();
+			this.removeAllListeners();
+			this.clearTimers();
+			this.resetState();
 		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("messages.playerService.player.error.destroy", {
-					error: error instanceof Error ? error.message : String(error),
-				}),
-			);
+			console.error(`Destroy failed: ${error}`);
 		}
 	}
 
 	/**
-	 * @en Sets the fade out timer.
-	 * @ru Устанавливает таймер затухания.
-	 * @param {() => void} callback - Callback function
-	 * @param {number} duration - Duration in milliseconds
+	 * Получает текущее состояние плеера
 	 */
-	protected setFadeOutTimer(callback: () => void, duration: number): void {
-		if (this.timers.fadeOut) {
-			clearTimeout(this.timers.fadeOut);
-		}
-		this.timers.fadeOut = setTimeout(callback, duration);
+	public getState() {
+		return {
+			...this.state,
+			playerStatus: this.player.state.status,
+		};
 	}
 
 	/**
-	 * @en Sets the empty channel timer.
-	 * @ru Устанавливает таймер пустого канала.
-	 * @param {() => void} callback - Callback function
-	 * @param {number} duration - Duration in milliseconds
+	 * Устанавливает следующий трек для воспроизведения
 	 */
-	protected setEmptyChannelTimer(callback: () => void, duration: number): void {
-		if (this.timers.emptyChannelTimeout) {
-			clearTimeout(this.timers.emptyChannelTimeout);
-			this.timers.emptyChannelTimeout = null;
-		}
-		this.timers.emptyChannelTimeout = setTimeout(callback, duration);
+	public setNextTrack(track: Track): void {
+		this.state.nextTrack = track;
+	}
+
+	/**
+	 * Устанавливает параметры low pass фильтра
+	 */
+	async setLowPassFilter(frequency: number, q: number = 0.707): Promise<void> {
+		this.audioService.setLowPassFrequency(frequency);
+		this.state.lowPassFrequency = frequency;
+		this.state.lowPassQ = q;
+	}
+
+	private clearTimers(): void {
+		Object.values(this.timers).forEach((timer) => {
+			if (timer) {
+				clearTimeout(timer);
+				clearInterval(timer as NodeJS.Timeout);
+			}
+		});
+		this.timers = new PlayerTimers();
+	}
+
+	private getInitialState(): PlayerState {
+		return {
+			connection: null,
+			isPlaying: false,
+			channelId: null,
+			volume: VOLUME.DEFAULT_PERCENT,
+			currentTrack: null,
+			nextTrack: null,
+			loop: false,
+			pause: false,
+			wave: false,
+			lowPassFrequency: 0,
+			lowPassQ: 0.707,
+		};
 	}
 }

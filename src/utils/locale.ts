@@ -105,7 +105,7 @@ export function createLocale<T extends Record<string, unknown>>(
 			translations.set(language, JSON.parse(content));
 			loadedLanguages.add(language);
 		} catch (error) {
-			logger.error(`Failed to load ${language} translations: ${error}`);
+			// logger.error(`Failed to load ${language} translations: ${error}`);
 			if (language !== "en") await load("en");
 		}
 	}
@@ -130,7 +130,7 @@ export function createLocale<T extends Record<string, unknown>>(
 		}
 
 		if (!translations.has(language)) {
-			logger.warn(`Language ${language} not loaded, falling back to en`);
+			// logger.warn(`Language ${language} not loaded, falling back to en`);
 			language = "en";
 		}
 		messageLanguage = language;

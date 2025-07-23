@@ -65,7 +65,9 @@
                 "track_url_not_found": "Track URL not found: {trackId}",
                 "empty_check": "Error checking empty channel: {error}",
                 "channel_id_null": "Channel ID is null",
-                "connection_null": "Connection is null"
+                "connection_null": "Connection is null",
+                "join_failed": "Failed to join voice channel: {error}",
+                "no_permission": "Bot doesn't have permission to join this voice channel"
             },
             "player": {
                 "status": {
@@ -81,6 +83,9 @@
                     "fadeout_set": "Fadeout set: {duration}ms",
                     "no_recommendations": "No recommendations available for source: {source}",
                     "empty_channel": "Left empty voice channel"
+                },
+                "warning": {
+                    "url_not_found":"Track URL not found: {trackId} | {error}"
                 },
                 "error": {
                     "plugin_not_found": "Plugin not found for source: {source}",

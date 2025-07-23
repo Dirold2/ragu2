@@ -2,6 +2,7 @@ import { LRUCache } from "lru-cache";
 import { bot } from "../bot.js";
 import { type Track, TrackSchema } from "../types/index.js";
 import type { QueueResult } from "../interfaces/index.js";
+import { VOLUME } from "../config.js";
 
 interface EnhancedQueueResult extends QueueResult {
 	loop?: boolean;
@@ -12,7 +13,7 @@ export default class CacheQueueService {
 	private cache: LRUCache<string, any>;
 	private readonly logger = bot.logger!;
 	private readonly locale = bot.locale!;
-	private static readonly DEFAULT_VOLUME = 10;
+	private static readonly DEFAULT_VOLUME = (VOLUME.DEFAULT * 100) || 20;
 	private static readonly BATCH_SIZE = 50;
 
 	private readonly trackCache = new Map<string, Map<string, Track>>();

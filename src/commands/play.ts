@@ -38,7 +38,7 @@ export class PlayCommand {
 			if (!interaction.isChatInputCommand()) return;
 
 			const player = bot.playerManager.getPlayer(interaction.guildId!);
-			await player.initialize("currentTrack");
+			// await player.initialize("currentTrack");
 
 			if (!player.state.currentTrack?.info) {
 				if (!interaction.replied && !interaction.deferred) {

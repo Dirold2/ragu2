@@ -65,7 +65,12 @@
                 "track_url_not_found": "URL трека не найден: {trackId}",
                 "empty_check": "Ошибка проверки пустого канала: {error}",
                 "channel_id_null": "ID канала равен null",
-                "connection_null": "Соединение отсутствует"
+                "connection_null": "Соединение отсутствует",
+                "no_permission": "У бота нет прав для подключения к этому голосовому каналу",
+                "join_failed": "Не удалось присоединиться к голосовому каналу: {error}"
+            },
+            "warning": {
+                "url_not_found": "URL трека не найден: {trackId} | {error}"
             },
             "player": {
                 "status": {
