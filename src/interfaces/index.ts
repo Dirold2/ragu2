@@ -3,6 +3,7 @@ import { SearchTrackResult } from "../types/index.js";
 export interface MusicServicePlugin {
 	name: string;
 	urlPatterns: RegExp[];
+	disabled?: boolean;
 	searchName(trackName: string): Promise<SearchTrackResult[]>;
 	searchURL(url: string): Promise<SearchTrackResult[] | undefined>;
 	getTrackUrl(trackId: string): Promise<string | null>;

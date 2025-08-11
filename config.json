@@ -1,0 +1,31 @@
+{
+    "volume": {
+        "min": 0,
+        "max": 1,
+        "default": 0.1,
+        "fadeInStart": 0
+    },
+    "fade": {
+        "fadeout_before_end": 3000,
+        "fadein": 3000
+    },
+    "equalizer": {
+        "bass_min": -20,
+        "bass_max": 20,
+        "treble_min": -10,
+        "treble_max": 20,
+        "bass_default": 1,
+        "treble_default": 15
+    },
+    "compressor": {
+        "default": false
+    },
+    "normalize": {
+        "default": false
+    },
+    "time": {
+        "play": {
+            "default": 1000
+        }
+    }
+}

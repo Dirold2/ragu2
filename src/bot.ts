@@ -8,6 +8,7 @@ import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
+import { config } from "@dotenvx/dotenvx";
 
 import {
 	CacheQueueService,
@@ -17,13 +18,15 @@ import {
 	PluginManager,
 } from "./services/index.js";
 
-import { config } from "dotenv";
 import { dirname } from "dirname-filename-esm";
 import { resolve } from "path";
 import translations from "./locales/en.json" with { type: "json" };
 import { createLogger, createLocale } from "./utils/index.js";
+import { MusicServicePlugin } from "./interfaces/index.js";
 
 config({ path: resolve(dirname(import.meta), "../.env") });
+
+// Удалён импорт dotenvx
 
 /**
  * Bot class
@@ -105,6 +108,16 @@ export class Bot {
 		}
 	}
 
+	private isMusicServicePlugin(obj: any): obj is MusicServicePlugin {
+		return (
+			obj &&
+			typeof obj.name === "string" &&
+			Array.isArray(obj.urlPatterns) &&
+			typeof obj.searchName === "function" &&
+			typeof obj.getTrackUrl === "function"
+		);
+	}
+
 	/**
 	 * Load plugins
 	 */
@@ -119,14 +132,51 @@ export class Bot {
 
 			await Promise.all(
 				pluginFiles.map(async (file) => {
+					const pluginPath = String(pathToFileURL(path.join(pluginsDir, file)));
 					try {
-						const pluginPath = String(
-							pathToFileURL(path.join(pluginsDir, file)),
-						);
-						const { default: Plugin } = await import(pluginPath);
-						const plugin = new Plugin();
-						this.pluginManager.registerPlugin(plugin);
-						this.logger.debug(`Plugin loaded: ${file}`);
+						const imported = await import(pluginPath);
+						const PluginConstructor = imported?.default;
+
+						if (typeof PluginConstructor !== "function") {
+							this.logger.warn(
+								this.locale.t("messages.bot.warnings.invalid_plugin_export", {
+									file,
+								}),
+								{ file },
+							);
+							return;
+						}
+
+						const pluginInstance = new PluginConstructor();
+
+						if (!this.isMusicServicePlugin(pluginInstance)) {
+							this.logger.warn(
+								this.locale.t("messages.bot.warnings.plugin_shape_mismatch", {
+									file,
+								}),
+								{ file, plugin: pluginInstance },
+							);
+							return;
+						}
+
+						const registered =
+							this.pluginManager.registerPlugin(pluginInstance);
+						if (registered) {
+							if (pluginInstance.disabled) {
+								this.logger.debug(
+									this.locale.t("messages.bot.info.plugin_loaded_disabled", {
+										file,
+										name: pluginInstance.name,
+									}),
+									{ plugin: pluginInstance.name },
+								);
+							} else {
+								this.logger.info(
+									this.locale.t("messages.bot.info.plugin_loaded", { file }),
+									{ plugin: pluginInstance.name },
+								);
+							}
+						}
 					} catch (error) {
 						this.logger.error(
 							this.locale.t("messages.bot.errors.register_error_files", {

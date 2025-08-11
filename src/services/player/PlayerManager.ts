@@ -1,8 +1,8 @@
 import type { CommandInteraction } from "discord.js";
 
-import type { Track } from "../interfaces/index.js";
-import { type CommandService, PlayerService } from "./index.js";
-import { bot } from "../bot.js";
+import type { Track } from "../../interfaces/index.js";
+import { type CommandService, PlayerService } from "../index.js";
+import { bot } from "../../bot.js";
 
 /**
  * @en Manages player instances for different Discord servers
@@ -13,6 +13,7 @@ export default class PlayerManager {
 	private readonly queueService = bot.queueService;
 	private readonly commandService: CommandService;
 	private readonly logger = bot.logger;
+	private readonly bot = bot;
 
 	private readonly playerCache = new Map<
 		string,
@@ -123,7 +124,7 @@ export default class PlayerManager {
 		this.logger.debug(
 			bot.locale.t("messages.playerManager.player.player_created", { guildId }),
 		);
-		const newPlayer = new PlayerService(this.commandService, guildId);
+		const newPlayer = new PlayerService(guildId, this.bot);
 
 		// Сохраняем в активные плееры и кэш
 		this.players.set(guildId, newPlayer);
@@ -154,8 +155,15 @@ export default class PlayerManager {
 	 * @param guildId Discord guild ID
 	 * @param track Track to play or queue
 	 */
-	public async playOrQueueTrack(guildId: string, track: Track): Promise<void> {
-		await this.getPlayer(guildId).playOrQueueTrack(track);
+	public async playOrQueueTrack(
+		guildId: string,
+		track: Track,
+		interaction: CommandInteraction,
+	): Promise<void> {
+		const handles = await this.handleServerOnlyCommand(interaction);
+		if (handles?.guildId) {
+			await this.getPlayer(guildId).playOrQueueTrack(track);
+		}
 	}
 
 	/**
@@ -191,7 +199,7 @@ export default class PlayerManager {
 		if (guildId) {
 			try {
 				// Получаем плеер и ждем завершения установки громкости
-				await this.getPlayer(guildId).setVolume(volume);
+				await this.getPlayer(guildId).effects.setVolume(volume);
 				this.logger.debug(`Volume for guild ${guildId} set to ${volume}%`);
 			} catch (error) {
 				this.logger.error(
@@ -228,6 +236,64 @@ export default class PlayerManager {
 	}
 
 	/**
+	 * @en Sets the player compressor
+	 * @ru Устанавливает компрессор на плеер
+	 * @param guildId Discord guild ID
+	 * @param boolean False || True
+	 */
+	public async setCompressor(guildId: string, boolean: boolean): Promise<void> {
+		if (guildId) {
+			try {
+				// Получаем плеер и ждем завершения установки громкости
+				await this.getPlayer(guildId).effects.setCompressor(boolean);
+				this.logger.debug(`Compressor for guild ${guildId} set to ${boolean}`);
+			} catch (error) {
+				this.logger.error(
+					`Failed to set compressor for guild ${guildId}: ${error}`,
+				);
+			}
+		}
+	}
+
+	/**
+	 * @en Sets the player bass
+	 * @ru Устанавливает басс на плеер
+	 * @param guildId Discord guild ID
+	 * @param number
+	 */
+	public async setBass(guildId: string, number: number): Promise<void> {
+		if (guildId) {
+			try {
+				// Получаем плеер и ждем завершения установки громкости
+				await this.getPlayer(guildId).effects.setBass(number);
+				this.logger.debug(`Bass for guild ${guildId} set to ${number}`);
+			} catch (error) {
+				this.logger.error(`Failed to set bass for guild ${guildId}: ${error}`);
+			}
+		}
+	}
+
+	/**
+	 * @en Sets the player treble
+	 * @ru Устанавливает высокие частоты на плеер
+	 * @param guildId Discord guild ID
+	 * @param number
+	 */
+	public async setTreble(guildId: string, number: number): Promise<void> {
+		if (guildId) {
+			try {
+				// Получаем плеер и ждем завершения установки громкости
+				await this.getPlayer(guildId).effects.setTreble(number);
+				this.logger.debug(`Treable for guild ${guildId} set to ${number}`);
+			} catch (error) {
+				this.logger.error(
+					`Failed to set treable for guild ${guildId}: ${error}`,
+				);
+			}
+		}
+	}
+
+	/**
 	 * @en Disconnects from voice channel and removes player instance
 	 * @ru Отключается от голосового канала и удаляет экземпляр плеера
 	 * @param guildId Discord guild ID
@@ -244,7 +310,7 @@ export default class PlayerManager {
 		}
 
 		await player.destroy();
-		player.leaveChannel();
+		player.connectionManager.leaveChannel();
 		this.players.delete(guildId);
 
 		// Обновляем кэш, но не удаляем плеер из кэша
@@ -266,7 +332,7 @@ export default class PlayerManager {
 
 			// Отключаем все плееры
 			for (const player of this.players.values()) {
-				player.leaveChannel();
+				player.connectionManager.leaveChannel();
 			}
 
 			this.players.clear();
@@ -277,6 +343,27 @@ export default class PlayerManager {
 			this.logger.info("All players destroyed successfully");
 		} catch (error) {
 			this.logger.error("Error destroying players:", error);
+		}
+	}
+
+	/**
+	 * @en Graceful shutdown of all players and cleanup
+	 * @ru Graceful shutdown всех плееров и очистка
+	 */
+	public async shutdown(): Promise<void> {
+		this.logger.info("Starting PlayerManager shutdown...");
+
+		try {
+			// Останавливаем периодическую очистку кэша
+			// (в реальности нужно сохранить ссылку на интервал)
+
+			// Уничтожаем все плееры
+			await this.destroyAll();
+
+			this.logger.info("PlayerManager shutdown completed successfully");
+		} catch (error) {
+			this.logger.error("Error during PlayerManager shutdown:", error);
+			throw error;
 		}
 	}
 }

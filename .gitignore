@@ -1,35 +1,51 @@
-# files
-.vscode
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
 .env
 .env.local
-package-lock.json
-yarn.lock
-eslint.config
-pnpm-lock.yaml
-module.ts
+.env.*.local
+
+# Logs & Temp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 *.log
 *.pid
 *.tmp
 *.bak
-*.swp
-*.swo
-*.DS_Store
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build output
+dist/
+lib/
+build/
+coverage/
+logs/
+
+# Dependencies
+node_modules/
+
+# Database / runtime data
 *.sqlite
-
-dist
-lib
-test
-coverage
 dev.db
+cookies.json
 
-# folders
-dist
-lib
-test
-coverage
-build
-node_modules
-node_modules
-logs
-prisma/migrations
-.prisma
+# Tests
+test/
+
+# Package managers lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Custom
+module.ts

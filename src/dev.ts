@@ -1,14 +1,14 @@
 import chokidar from "chokidar";
-import { dirname } from "dirname-filename-esm";
 import { DIService, MetadataStorage } from "discordx";
-import { config } from "dotenv";
 import { resolve } from "@discordx/importer";
+import { dirname } from "dirname-filename-esm";
 import { bot } from "./bot.js";
+import { config } from "@dotenvx/dotenvx";
 import { resolve as r } from "path";
 
-const __dirname = dirname(import.meta);
+config({ path: r(dirname(import.meta), "../.env") });
 
-config({ path: r(dirname(import.meta), ".env") });
+const __dirname = dirname(import.meta);
 
 /** Timeout constants */
 const CONSTANTS = {

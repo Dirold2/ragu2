@@ -64,7 +64,7 @@ export default class NameService {
 			this.logger.debug(`Found ${result.length} results for: ${trimmedName}`);
 			return result;
 		} catch (error) {
-			this.logger.error(`Search failed for "${trimmedName}":`, error);
+			// this.logger.error(`Search failed for "${trimmedName}":`, error);
 			return [];
 		}
 	}
@@ -157,7 +157,7 @@ export default class NameService {
 		);
 
 		await Promise.all([
-			this.playerManager.playOrQueueTrack(guildId, track) || null,
+			this.playerManager.playOrQueueTrack(guildId, track, interaction) || null,
 			this.playerManager.joinChannel(interaction) || null,
 		]);
 	}
@@ -318,6 +318,12 @@ export default class NameService {
 
 		if (interaction) {
 			await this.playerManager.joinChannel(interaction);
+			const firstTrack = this.createTrackInfo(tracks[0], interaction, false);
+			await this.playerManager.playOrQueueTrack(
+				guildId,
+				firstTrack,
+				interaction,
+			);
 		}
 	}
 

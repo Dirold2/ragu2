@@ -1,10 +1,5 @@
-import path from "path";
-import { dirname } from "dirname-filename-esm";
-import { createLogger } from "./logger.js";
-import fs from "fs/promises";
-
-const __dirname = dirname(import.meta);
-const logger = createLogger("locale");
+import logger from "./logger.js";
+import { loadTranslation } from "./localeCache.js";
 
 export type TranslationParams = {
 	[key: string]: string | number;
@@ -34,107 +29,67 @@ export interface Locale<T = undefined> {
 
 export function createLocale<T extends Record<string, unknown>>(
 	moduleName: string,
-	options: { fastLangSwitch?: boolean } = {},
+	_options: { fastLangSwitch?: boolean } = {},
 ): LocalePrivate<T> {
 	const translations = new Map<string, T>();
 	const loadedLanguages = new Set<string>();
 	let currentLanguage = "en";
 	let messageLanguage = "en";
-	const { fastLangSwitch = false } = options;
 
-	/**
-	 * Finds the correct path to locales directory with multiple fallback options
-	 */
-	async function findLocalesPath(): Promise<string | null> {
-		logger.debug(`Current __dirname: ${__dirname}`);
-
-		const searchBases = [
-			path.join(__dirname, "../"),
-			path.join(__dirname, "../../"),
-			path.join(__dirname, "../../../"),
-			path.join(__dirname, "../modules"),
-			path.join(__dirname, "../../modules"),
-			path.join(__dirname, "../../../modules"),
-		];
-
-		const localeLocations = ["src/locales", "locales"];
-
-		for (const base of searchBases) {
-			for (const loc of localeLocations) {
-				const fullPath = path.join(base, moduleName, loc);
-
-				try {
-					await fs.access(fullPath);
-					logger.debug(`Found locales at: ${fullPath}`);
-					return fullPath;
-				} catch (error) {
-					logger.debug(`Path not found: ${fullPath} | ${error}`);
-					continue;
-				}
-			}
-		}
-
-		logger.error(
-			`Failed to find locales for module ${moduleName}. Checked paths:`,
-		);
-		searchBases.forEach((base) => {
-			localeLocations.forEach((loc) => {
-				logger.error(`- ${path.join(base, moduleName, loc)}`);
-			});
-		});
-
-		return null;
-	}
-
-	async function load(language: string = "en") {
-		if (fastLangSwitch && loadedLanguages.has(language)) {
+	async function load(language = "en") {
+		// Check if already loaded
+		if (loadedLanguages.has(language)) {
 			return;
 		}
 
 		try {
-			const localesPath = await findLocalesPath();
-			if (!localesPath) {
-				logger.error(`Locales directory not found for module ${moduleName}`);
-				return;
+			const data = await loadTranslation(moduleName, language);
+			if (data) {
+				translations.set(language, data);
+				loadedLanguages.add(language);
+			} else if (language !== "en") {
+				// Fallback to English if available
+				await load("en");
 			}
-
-			const filePath = path.join(localesPath, `${language}.json`);
-			logger.debug(`Loading translations from: ${filePath}`);
-
-			const content = await fs.readFile(filePath, "utf-8");
-			translations.set(language, JSON.parse(content));
-			loadedLanguages.add(language);
 		} catch (error) {
-			// logger.error(`Failed to load ${language} translations: ${error}`);
-			if (language !== "en") await load("en");
+			logger.error(
+				// `Failed to load ${language} translations for ${moduleName}:`,
+				error,
+			);
+			if (language !== "en") {
+				await load("en");
+			}
 		}
 	}
 
 	async function setLanguage(language: string) {
-		if (fastLangSwitch && loadedLanguages.has(language)) {
-			currentLanguage = language;
-			return;
-		}
-
-		if (!translations.has(language)) {
+		if (!loadedLanguages.has(language)) {
 			await load(language);
 		}
+
 		currentLanguage = translations.has(language) ? language : "en";
-		loadedLanguages.add(language);
 	}
 
 	function setLanguageMessage(language: string): void {
-		if (fastLangSwitch && loadedLanguages.has(language)) {
-			currentLanguage = language;
-			return;
+		// Only load if not already loaded
+		if (!loadedLanguages.has(language)) {
+			// Async load in background, use fallback for now
+			load(language).catch(() => {
+				logger.warn(`Failed to load language ${language}, using fallback`);
+			});
+
+			// Use fallback language immediately
+			if (!translations.has(language)) {
+				language = "en";
+			}
 		}
 
-		if (!translations.has(language)) {
-			// logger.warn(`Language ${language} not loaded, falling back to en`);
-			language = "en";
-		}
 		messageLanguage = language;
-		logger.debug(`Message language set to: ${language}`);
+
+		// Only log language changes, not every call
+		if (messageLanguage !== language) {
+			logger.debug(`Message language changed to: ${language}`);
+		}
 	}
 
 	function t(
@@ -155,9 +110,11 @@ export function createLocale<T extends Record<string, unknown>>(
 		}
 
 		const trans = translations.get(targetLang) ?? translations.get("en");
-
 		if (!trans) {
-			logger.warn(`No translations for ${targetLang}, key: ${key}`);
+			// Only warn once per missing language
+			if (!translations.has(targetLang)) {
+				logger.warn(`No translations available for ${targetLang}`);
+			}
 			return key;
 		}
 
@@ -172,7 +129,6 @@ export function createLocale<T extends Record<string, unknown>>(
 			);
 
 		if (typeof value !== "string") {
-			console.warn(`Translation value not found for key "${key}"`);
 			return key;
 		}
 
@@ -183,16 +139,12 @@ export function createLocale<T extends Record<string, unknown>>(
 
 	function setTranslations(newTranslations: T): void {
 		translations.set(currentLanguage, newTranslations);
+		loadedLanguages.add(currentLanguage);
 	}
 
 	function clearCache(): void {
 		translations.clear();
 		loadedLanguages.clear();
-	}
-
-	if (translations.size > 10) {
-		const oldestKey = translations.keys().next().value!;
-		translations.delete(oldestKey);
 	}
 
 	return {
@@ -204,3 +156,11 @@ export function createLocale<T extends Record<string, unknown>>(
 		clearCache,
 	};
 }
+
+// Create a default locale instance for the main bot
+export const locale = createLocale("ragu2", { fastLangSwitch: true });
+
+// Pre-load default language
+locale.load("en").catch((error) => {
+	logger.error("Failed to load default locale:", error);
+});

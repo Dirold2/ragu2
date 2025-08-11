@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "lib": ["ES2022", "DOM"],
-    "moduleResolution": "NodeNext",
+    "target": "ES2023",
+    "module": "nodenext",
+    "lib": ["ES2023", "DOM"],
+    "moduleResolution": "nodenext",
     "rootDir": "./src",
     "outDir": "build",
     "allowSyntheticDefaultImports": true,
@@ -27,12 +27,10 @@
     "baseUrl": ".",
     "paths": {
       "*": ["node_modules/*", "src/types/*"],
-      "@utils/*": ["src/utils/*"],
-      "@api/*": ["src/api/*"], 
-      "@service/*": ["src/services/*"],
-      "@commands/*": ["src/commands/*"],
-      "@plugins/*": ["src/plugins/*"],
-      "#prisma/*": [".prisma/*"],
+      "#utils/*": ["src/utils/*"],
+      "#service/*": ["src/services/*"],
+      "#commands/*": ["src/commands/*"],
+      "#plugins/*": ["src/plugins/*"],
       "#*": [
         "./src/*",
         "./src/*.ts",

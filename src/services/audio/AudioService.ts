@@ -1,239 +1,98 @@
-import { Readable, Transform } from "stream";
-import ffmpeg from "fluent-ffmpeg";
+import type { Readable } from "readable-stream";
+import type { SimpleFFmpeg } from "./SimpleFfmpegWrapper.js";
 import { request } from "undici";
-import { EventEmitter } from "events";
-import { COMPRESSOR, EQUALIZER, NORMALIZE, VOLUME } from "../../config.js";
-
-interface AudioProcessingOptions {
-	volume: number;
-	bass: number;
-	treble: number;
-	compressor: boolean;
-	normalize: boolean;
-	lowPassFrequency?: number;
-	lowPassQ?: number;
-}
-
-// Constants for limits
-const VOLUME_MIN = VOLUME.MIN ?? 0;
-const VOLUME_MAX = VOLUME.MAX ?? 1;
-const BASS_MIN = EQUALIZER.BASS_MIN ?? -20;
-const BASS_MAX = EQUALIZER.BASS_MAX ?? 20;
-const TREBLE_MIN = EQUALIZER.TREBLE_MIN ?? -20;
-const TREBLE_MAX = EQUALIZER.TREBLE_MAX ?? 20;
-
-/**
- * Transform stream for processing PCM audio data with real-time effects and smooth volume fade
- */
-class AudioProcessor extends Transform {
-	private volume: number;
-	private bass: number;
-	private treble: number;
-	private compressor: boolean;
-	private isFading: boolean = false;
-	private lastVolume: number;
-	private lastLogTime: number = 0;
-
-	// Fade (time-based)
-	private fadeStartTime: number | null = null;
-	private fadeDuration: number = 0;
-	private fadeFrom: number = 0;
-	private fadeTo: number = 0;
-
-	constructor(options: AudioProcessingOptions) {
-		super();
-		this.volume = options.volume;
-		this.lastVolume = options.volume;
-		this.bass = options.bass;
-		this.treble = options.treble;
-		this.compressor = options.compressor;
-	}
-
-	/**
-	 * Set volume instantly
-	 */
-	setVolume(volume: number): void {
-		this.lastVolume = this.volume;
-		this.volume = Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, volume));
-		this.logVolume();
-	}
-
-	/**
-	 * Start smooth fade to target volume over duration (ms)
-	 */
-	startFade(targetVolume: number, duration: number): void {
-		this.isFading = true;
-		this.fadeFrom = this.volume;
-		this.fadeTo = Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, targetVolume));
-		this.fadeStartTime = Date.now();
-		this.fadeDuration = duration;
-	}
-
-	setEqualizer(bass: number, treble: number): void {
-		this.bass = Math.max(BASS_MIN, Math.min(BASS_MAX, bass));
-		this.treble = Math.max(TREBLE_MIN, Math.min(TREBLE_MAX, treble));
-	}
-
-	setCompressor(enabled: boolean): void {
-		this.compressor = enabled;
-	}
-
-	private logVolume(): void {
-		const now = Date.now();
-		if (now - this.lastLogTime >= 1000) {
-			console.log(`[Volume] ${Math.round(this.volume * 100)}%`);
-			this.lastLogTime = now;
-		}
-	}
-
-	_transform(chunk: Buffer, _encoding: string, callback: Function): void {
-		try {
-			// Time-based fade
-			if (this.isFading && this.fadeStartTime !== null) {
-				const now = Date.now();
-				const elapsed = now - this.fadeStartTime;
-				if (elapsed >= this.fadeDuration) {
-					this.volume = this.fadeTo;
-					this.isFading = false;
-					this.fadeStartTime = null;
-				} else {
-					const progress = elapsed / this.fadeDuration;
-					this.volume = this.fadeFrom + (this.fadeTo - this.fadeFrom) * progress;
-				}
-				this.logVolume();
-			}
-
-			const samples = new Int16Array(
-				chunk.buffer,
-				chunk.byteOffset,
-				chunk.length / 2,
-			);
-
-			// Smooth volume change per sample
-			const volumeDelta = this.volume - this.lastVolume;
-			const volumeStep = volumeDelta / samples.length;
-
-			for (let i = 0; i < samples.length; i += 2) {
-				let left = samples[i];
-				let right = samples[i + 1] ?? left;
-
-				const currentVolume = this.lastVolume + (volumeStep * i);
-				left = Math.round(left * currentVolume);
-				right = Math.round(right * currentVolume);
-
-				// Equalizer
-				if (this.bass !== 0) {
-					const bassMultiplier = 1 + this.bass / 100;
-					left = Math.round(left * bassMultiplier);
-					right = Math.round(right * bassMultiplier);
-				}
-				if (this.treble !== 0) {
-					const trebleMultiplier = 1 + this.treble / 100;
-					left = Math.round(left * trebleMultiplier);
-					right = Math.round(right * trebleMultiplier);
-				}
-
-				// Compressor
-				if (this.compressor) {
-					const threshold = 0.8;
-					const ratio = 4;
-					const leftNorm = left / 32768;
-					const rightNorm = right / 32768;
-					if (Math.abs(leftNorm) > threshold) {
-						const excess = Math.abs(leftNorm) - threshold;
-						const compressed = threshold + excess / ratio;
-						left = Math.round(compressed * 32768 * Math.sign(leftNorm));
-					}
-					if (Math.abs(rightNorm) > threshold) {
-						const excess = Math.abs(rightNorm) - threshold;
-						const compressed = threshold + excess / ratio;
-						right = Math.round(compressed * 32768 * Math.sign(rightNorm));
-					}
-				}
-
-				// Final overflow check
-				samples[i] = Math.max(-32768, Math.min(32767, left));
-				samples[i + 1] = Math.max(-32768, Math.min(32767, right));
-			}
-
-			this.lastVolume = this.volume;
-			callback(null, chunk);
-		} catch (error) {
-			console.error("[AudioProcessor] Error in transform:", error);
-			callback(error);
-		}
-	}
-}
-
-/**
- * Определяет формат аудиофайла по mime-type
- */
-function getInputFormatFromMimeType(mimeType: string | undefined): string | undefined {
-	if (!mimeType) return undefined;
-	if (mimeType.includes('mpeg')) return 'mp3';
-	if (mimeType.includes('flac')) return 'flac';
-	if (mimeType.includes('ogg')) return 'ogg';
-	if (mimeType.includes('wav')) return 'wav';
-	if (mimeType.includes('mp4') || mimeType.includes('aac')) return 'm4a';
-	if (mimeType.includes('opus')) return 'opus';
-	return undefined;
-}
+import { EventEmitter } from "eventemitter3";
+import { StreamType } from "@discordjs/voice";
+import { AudioProcessor } from "./AudioProcessor.js";
+import { getInputFormatFromMimeType } from "../../utils/audioFormat.js";
+import type { AudioProcessingOptions } from "../../types/audio.js";
+import {
+	DEFAULT_VOLUME,
+	DEFAULT_BASS,
+	DEFAULT_TREBLE,
+	DEFAULT_COMPRESSOR,
+	DEFAULT_NORMALIZE,
+} from "../../utils/constants.js";
+import { FFmpegManager } from "./FfmpegManager.js";
+import {
+	safeRequestStream,
+	safeRequestStreamWithRetry,
+} from "../../utils/safeRequestStream.js";
+import type { IncomingHttpHeaders } from "http";
 
 /**
  * AudioService: main audio processing and effects manager
  */
 export class AudioService extends EventEmitter {
 	private processor: AudioProcessor | null = null;
+	private currentInputStream: Readable | null = null;
+	private ffmpegManager = new FFmpegManager();
+	private currentFFmpegCommand: SimpleFFmpeg | null = null;
 	private currentOptions: AudioProcessingOptions;
 
-	constructor(
-		options: AudioProcessingOptions = {
-			volume: VOLUME.DEFAULT ?? 0.2,
-			bass: EQUALIZER.BASS_DEFAULT ?? 0,
-			treble: EQUALIZER.TREBLE_DEFAULT ?? 0,
-			compressor: COMPRESSOR.DEFAULT ?? false,
-			normalize: NORMALIZE.DEFAULT ?? false,
-		},
-	) {
+	constructor(options: Partial<AudioProcessingOptions> = {}) {
 		super();
-		this.currentOptions = options;
+		this.currentOptions = {
+			volume: DEFAULT_VOLUME,
+			bass: DEFAULT_BASS,
+			treble: DEFAULT_TREBLE,
+			compressor: DEFAULT_COMPRESSOR,
+			normalize: DEFAULT_NORMALIZE,
+			...options,
+		};
+
+		// Forward FFmpeg manager events
+		this.ffmpegManager.on("error", (error) => this.emit("error", error));
+		this.ffmpegManager.on("debug", (message) => this.emit("debug", message));
 	}
 
-	async setVolume(volume: number, duration = 2000): Promise<void> {
-		const clampedVolume = Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, volume));
-		this.currentOptions.volume = clampedVolume;
+	async setVolume(volume: number, duration = 2000, set = true): Promise<void> {
+		if (set) {
+			this.currentOptions.volume = volume;
+		}
 		if (this.processor) {
-			this.processor.startFade(clampedVolume, duration);
-			this.emit("volumeChanged", clampedVolume * 100);
+			this.processor.startFade(volume, duration);
+			this.emit("volumeChanged", volume * 100);
 		}
 	}
 
-	setVolumeFast(volume: number) {
-		const clampedVolume = Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, volume));
-		this.currentOptions.volume = clampedVolume;
+	setVolumeFast(volume: number, set = false): void {
+		if (set) {
+			this.currentOptions.volume = volume;
+		}
 		if (this.processor) {
-			this.processor.setVolume(clampedVolume);
-			this.emit("volumeChanged", clampedVolume * 100);
+			this.processor.setVolume(volume);
+			this.emit("volumeChanged", volume * 100);
 		}
 	}
 
-	setBass(bass: number) {
-		this.currentOptions.bass = Math.max(BASS_MIN, Math.min(BASS_MAX, bass));
+	setBass(bass: number): void {
+		this.currentOptions.bass = bass;
+		this.updateEqualizer();
+	}
+
+	setTreble(treble: number): void {
+		this.currentOptions.treble = treble;
+		this.updateEqualizer();
+	}
+
+	private updateEqualizer(): void {
 		if (this.processor) {
-			this.processor.setEqualizer(this.currentOptions.bass, this.currentOptions.treble);
-			this.emit("equalizerChanged", { bass: this.currentOptions.bass, treble: this.currentOptions.treble });
+			this.processor.setEqualizer(
+				this.currentOptions.bass,
+				this.currentOptions.treble,
+				this.currentOptions.compressor,
+			);
+			this.emit("equalizerChanged", {
+				bass: this.currentOptions.bass,
+				treble: this.currentOptions.treble,
+				compressor: this.currentOptions.compressor,
+				normalize: this.currentOptions.normalize,
+			});
 		}
 	}
 
-	setTreble(treble: number) {
-		this.currentOptions.treble = Math.max(TREBLE_MIN, Math.min(TREBLE_MAX, treble));
-		if (this.processor) {
-			this.processor.setEqualizer(this.currentOptions.bass, this.currentOptions.treble);
-			this.emit("equalizerChanged", { bass: this.currentOptions.bass, treble: this.currentOptions.treble });
-		}
-	}
-
-	setCompressor(enabled: boolean) {
+	setCompressor(enabled: boolean): void {
 		this.currentOptions.compressor = enabled;
 		if (this.processor) {
 			this.processor.setCompressor(enabled);
@@ -241,117 +100,474 @@ export class AudioService extends EventEmitter {
 		}
 	}
 
-	setNormalize(enabled: boolean) {
-		this.currentOptions.normalize = enabled;
+	setLowPassFrequency(frequency?: number): void {
+		this.currentOptions.lowPassFrequency = frequency;
+		this.emit("lowPassChanged", frequency);
 	}
 
-	setLowPassFrequency(frequency?: number) {
-		this.currentOptions.lowPassFrequency = frequency;
+	async fadeIn(): Promise<void> {
+		if (!this.processor) return;
+
+		// Сразу ставим громкость 0 без плавности (быстрый сброс)
+		this.setVolumeFast(0, false);
+
+		// Плавно повышаем до текущего заданного уровня за время fadein
+		this.processor.startFade(
+			this.currentOptions.volume,
+			this.currentOptions.fade?.fadein ?? 3000,
+		);
+
+		this.emit("volumeChanged", this.currentOptions.volume * 100);
+	}
+
+	/**
+	 * Следует редиректам для HEAD-запроса (до ограниченного числа) и возвращает заголовки.
+	 */
+	private async getHeadersFollowingRedirects(
+		url: string,
+		maxRedirects = 5,
+	): Promise<IncomingHttpHeaders> {
+		let current = url;
+		for (let i = 0; i < maxRedirects; i++) {
+			// Используем увеличенные таймауты для всех запросов
+			const headersTimeout = 15000; // 15 секунд для всех запросов
+			const bodyTimeout = 15000; // 15 секунд для всех запросов
+
+			const res = await request(current, {
+				method: "HEAD",
+				headersTimeout,
+				bodyTimeout,
+			});
+			if (
+				res.statusCode >= 300 &&
+				res.statusCode < 400 &&
+				res.headers.location
+			) {
+				let loc = res.headers.location;
+				if (Array.isArray(loc)) loc = loc[0];
+				if (typeof loc !== "string") break;
+				if (!loc.startsWith("http")) {
+					loc = new URL(loc, current).toString();
+				}
+				current = loc;
+				continue;
+			}
+			return res.headers;
+		}
+		throw new Error(`Too many redirects when fetching headers for ${url}`);
 	}
 
 	async getInputFormatFromHeaders(url: string): Promise<string | undefined> {
 		try {
-			const { headers } = await request(url, { method: 'HEAD' });
-			const mimeType = headers['content-type'] as string | undefined;
+			const headers = await this.getHeadersFollowingRedirects(url);
+			const mimeType =
+				typeof headers["content-type"] === "string"
+					? headers["content-type"]
+					: Array.isArray(headers["content-type"])
+						? headers["content-type"][0]
+						: undefined;
 			return getInputFormatFromMimeType(mimeType);
 		} catch {
 			return undefined;
 		}
 	}
-
-	async createAudioStreamFromUrl(url: string): Promise<Readable> {
-		const inputFormat = await this.getInputFormatFromHeaders(url);
-		const { body } = await request(url, { method: 'GET' });
-		return this.createProcessedStream(body as Readable, inputFormat);
+	/**
+	 * Ожидает bass/treble в нормализованном диапазоне [-1,1].
+	 * Преобразует в dB с мягкой кривой.
+	 * NOTE: This function is no longer used for EQ if AudioProcessor handles it.
+	 */
+	userToGainDb(userVal: number, maxDb = 15): number {
+		const v = Math.max(-1, Math.min(1, userVal));
+		return Math.sign(v) * Math.pow(Math.abs(v), 0.5) * maxDb;
 	}
 
-	createProcessedStream(inputStream: Readable, inputFormat?: string): Readable {
+	async createAudioStreamFromUrl(url: string): Promise<Readable> {
+		// Перед новым стримом очищаем предыдущий
+		await this.destroyCurrentStreamSafe().catch(() => {});
+
+		let inputFormat: string | undefined;
+		try {
+			inputFormat = await this.getInputFormatFromHeaders(url);
+		} catch (e) {
+			this.emit(
+				"debug",
+				`Failed to resolve input format: ${(e as Error).message}`,
+			);
+			inputFormat = undefined;
+		}
+
+		let body: Readable;
+		try {
+			// Используем увеличенные таймауты для всех аудио-запросов
+			const requestOptions = {
+				method: "GET" as const,
+				headersTimeout: 30000, // 30 секунд для всех запросов
+				bodyTimeout: 120000, // 2 минуты для всех запросов
+			};
+
+			body = await safeRequestStreamWithRetry(url, requestOptions);
+		} catch (err) {
+			const error = err as Error;
+
+			// Специальная обработка для ошибок прерывания
+			if (
+				error.name === "AbortError" ||
+				error.message.includes("aborted") ||
+				error.message.includes("Request aborted")
+			) {
+				this.emit("debug", `Audio request aborted for ${url}`);
+				throw new Error(`Audio request was cancelled`);
+			}
+
+			// Улучшенная обработка таймаутов и ошибок подключения
+			if (
+				error.message.includes("timeout") ||
+				error.message.includes("Connect Timeout")
+			) {
+				this.emit(
+					"error",
+					new Error(
+						`Connection timeout while fetching audio from ${url}. Please check your internet connection or try again later.`,
+					),
+				);
+				throw new Error(`Audio connection timeout: ${error.message}`);
+			}
+
+			if (
+				error.message.includes("ENOTFOUND") ||
+				error.message.includes("ECONNREFUSED") ||
+				error.message.includes("ECONNRESET") ||
+				error.message.includes("Connection failed")
+			) {
+				this.emit(
+					"error",
+					new Error(
+						`Failed to connect to audio server for ${url}. The server may be unavailable.`,
+					),
+				);
+				throw new Error(`Audio connection failed: ${error.message}`);
+			}
+
+			this.emit(
+				"error",
+				new Error(`Failed to fetch audio URL: ${error.message}`),
+			);
+			throw err;
+		}
+
+		this.currentInputStream = body;
+		this.fadeIn();
+		return this.createProcessedStream(body, inputFormat);
+	}
+
+	async createProcessedStream(
+		inputStream: Readable,
+		inputFormat?: string,
+	): Promise<Readable> {
 		const filters = this.buildAudioFilters();
 
-		console.log(inputFormat);
+		const ffmpegCommand = (await this.ffmpegManager.createCommand())
+			.inputs(inputStream)
+			.options("-fflags", "nobuffer")
+			.options("-flags", "low_delay")
+			.options("-f", inputFormat ?? "mp3")
+			.options("-acodec", "pcm_s16le")
+			.options("-f", "s16le")
+			.options("-ar", "48000")
+			.options("-ac", "2")
+			.options("-af", filters.join(","))
+			.output("pipe:1");
 
-		const ffmpegCommand = ffmpeg()
-			.input(inputStream)
-			.inputFormat(inputFormat ?? "mp3")
-			.audioCodec("pcm_s16le")
-			.format("s16le")
-			.audioFrequency(48000)
-			.audioChannels(2)
-			.audioFilters(filters)
-			.on("start", (cmd: string) => this.emit("debug", `FFmpeg started: ${cmd}`))
-			.on("error", (err: Error) => this.emit("error", err))
-			.on("stderr", (line: string) => this.emit("debug", `FFmpeg stderr: ${line}`));
-
+		this.currentFFmpegCommand = ffmpegCommand;
 		this.processor = new AudioProcessor(this.currentOptions);
-		ffmpegCommand.pipe(this.processor);
-		this.emit("streamCreated", this.processor);
 
+		// Start the FFmpeg process and get the output stream
+		const { output, done } = ffmpegCommand.run();
+
+		// Флаг для отслеживания состояния потока
+		let streamEnded = false;
+
+		// Helper to silence known benign stream errors
+		const isIgnorableStreamError = (msg: string): boolean => {
+			const m = msg.toLowerCase();
+			return (
+				m.includes("premature close") ||
+				m.includes("err_stream_premature_close") ||
+				m.includes("write after end") ||
+				m.includes("epipe") ||
+				m.includes("other side closed") ||
+				m.includes("econnreset")
+			);
+		};
+
+		// Обработка ошибок входного потока
+		inputStream.on("error", (error) => {
+			if (streamEnded) return;
+
+			const errorMessage = error.message;
+
+			if (isIgnorableStreamError(errorMessage)) {
+				this.emit(
+					"debug",
+					`[AudioService] Ignored input stream error: ${errorMessage}`,
+				);
+				return;
+			}
+
+			if (
+				errorMessage.includes("ERR_STREAM_PREMATURE_CLOSE") ||
+				errorMessage.includes("Premature close")
+			) {
+				this.emit(
+					"error",
+					new Error(
+						`Audio stream closed prematurely. This may be due to network issues or the audio source being unavailable.`,
+					),
+				);
+			} else if (errorMessage.includes("timeout")) {
+				this.emit(
+					"error",
+					new Error(
+						`Audio stream timeout. The connection to the audio source was too slow.`,
+					),
+				);
+			} else if (errorMessage.includes("write after end")) {
+				this.emit(
+					"error",
+					new Error(
+						`Audio stream write after end error. Stream was closed unexpectedly.`,
+					),
+				);
+			} else {
+				this.emit("error", new Error(`Audio stream error: ${errorMessage}`));
+			}
+		});
+
+		// Обработка завершения входного потока
+		inputStream.on("end", () => {
+			this.emit("debug", "[AudioService] Input stream ended");
+		});
+
+		inputStream.on("close", () => {
+			this.emit("debug", "[AudioService] Input stream closed");
+		});
+
+		// Обработка ошибок выходного потока FFmpeg
+		output.on("error", (error) => {
+			if (streamEnded) return;
+
+			const errorMessage = error.message;
+
+			if (isIgnorableStreamError(errorMessage)) {
+				this.emit(
+					"debug",
+					`[AudioService] Ignored FFmpeg output error: ${errorMessage}`,
+				);
+				return;
+			}
+
+			if (
+				errorMessage.includes("ERR_STREAM_PREMATURE_CLOSE") ||
+				errorMessage.includes("Premature close")
+			) {
+				this.emit(
+					"error",
+					new Error(
+						`FFmpeg output stream closed prematurely. Audio processing may have failed.`,
+					),
+				);
+			} else if (errorMessage.includes("write after end")) {
+				this.emit(
+					"error",
+					new Error(`FFmpeg output stream write after end error.`),
+				);
+			} else {
+				this.emit(
+					"error",
+					new Error(`FFmpeg output stream error: ${errorMessage}`),
+				);
+			}
+		});
+
+		// Обработка завершения выходного потока FFmpeg
+		output.on("end", () => {
+			this.emit("debug", "[AudioService] FFmpeg output stream ended");
+		});
+
+		output.on("close", () => {
+			this.emit("debug", "[AudioService] FFmpeg output stream closed");
+		});
+
+		// Pipe ffmpeg output into processor
+		output.pipe(this.processor);
+
+		// Optional: if you want to react when ffmpeg finishes/error
+		done.catch((e) => {
+			if (streamEnded) return;
+
+			const errorMessage = e.message;
+
+			if (isIgnorableStreamError(errorMessage)) {
+				this.emit(
+					"debug",
+					`[AudioService] Ignored FFmpeg done error: ${errorMessage}`,
+				);
+				return;
+			}
+
+			if (
+				errorMessage.includes("ERR_STREAM_PREMATURE_CLOSE") ||
+				errorMessage.includes("Premature close")
+			) {
+				this.emit(
+					"error",
+					new Error(
+						`FFmpeg process closed prematurely. This may be due to invalid audio format or network issues.`,
+					),
+				);
+			} else if (errorMessage.includes("EPIPE")) {
+				this.emit(
+					"error",
+					new Error(
+						`FFmpeg pipe error. Audio processing pipeline was interrupted.`,
+					),
+				);
+			} else if (errorMessage.includes("write after end")) {
+				this.emit(
+					"error",
+					new Error(
+						`FFmpeg write after end error. Stream was closed unexpectedly.`,
+					),
+				);
+			} else {
+				this.emit("error", e);
+			}
+		});
+
+		done.then(() => {
+			streamEnded = true;
+			this.emit("debug", "[AudioService] FFmpeg finished processing");
+		});
+
+		// Обработка завершения процессора
+		this.processor.on("end", () => {
+			streamEnded = true;
+			this.emit("debug", "[AudioService] Audio processor ended");
+		});
+
+		this.processor.on("close", () => {
+			streamEnded = true;
+			this.emit("debug", "[AudioService] Audio processor closed");
+		});
+
+		this.processor.on("error", (error: { message: any }) => {
+			if (streamEnded) return;
+
+			const errorMessage = error.message;
+
+			if (errorMessage.includes("write after end")) {
+				this.emit("error", new Error(`Audio processor write after end error.`));
+			} else {
+				this.emit("error", new Error(`Audio processor error: ${errorMessage}`));
+			}
+		});
+
+		this.emit("streamCreated", this.processor);
 		return this.processor;
 	}
 
-	createFadeStream(
-		inputStream: Readable,
-		type: "in" | "out",
-		durationMs: number,
-	): Readable {
-		const durationSec = durationMs / 1000;
-		const fadeFilter = `afade=t=${type}:st=0:d=${durationSec}`;
-
-		const ffmpegCommand = ffmpeg()
-			.input(inputStream)
-			.inputFormat("s16le")
-			.audioCodec("pcm_s16le")
-			.format("s16le")
-			.audioFrequency(48000)
-			.audioChannels(2)
-			.audioFilters([fadeFilter])
-			.on("start", (cmd) => this.emit("debug", `Fade ${type} started: ${cmd}`))
-			.on("error", (err) => this.emit("error", err));
-
-		return ffmpegCommand.pipe() as unknown as Readable;
-	}
-
-	createCrossfadeStream(
-		prevStream: Readable,
-		nextStream: Readable,
-		durationMs: number,
-	): Readable {
-		const durationSec = durationMs / 1000;
-
-		const ffmpegCommand = ffmpeg()
-			.input(prevStream)
-			.inputFormat("s16le")
-			.input(nextStream)
-			.inputFormat("s16le")
-			.complexFilter([`acrossfade=d=${durationSec}:c1=tri:c2=tri`])
-			.audioCodec("pcm_s16le")
-			.format("s16le")
-			.audioFrequency(48000)
-			.audioChannels(2)
-			.on("start", (cmd) => this.emit("debug", `Crossfade started: ${cmd}`))
-			.on("error", (err) => this.emit("error", err));
-
-		return ffmpegCommand.pipe() as unknown as Readable;
-	}
-
 	private buildAudioFilters(): string[] {
-		const { volume, bass, treble, compressor, normalize, lowPassFrequency } =
-			this.currentOptions;
+		const { volume, lowPassFrequency } = this.currentOptions;
+
 		const filters: string[] = [];
 
+		// Громкость (still applied here for initial overall volume adjustment by FFmpeg)
 		filters.push(`volume=${volume}`);
-		if (bass !== 0 || treble !== 0) {
-			filters.push(`equalizer=f=100:t=q:w=1:g=${bass}`);
-			filters.push(`equalizer=f=10000:t=q:w=1:g=${treble}`);
+
+		// Bass and Treble are now handled dynamically by AudioProcessor.
+		// Removed FFmpeg bass/treble filters from here.
+
+		// ФНЧ (Low-pass filter - if it's a separate, non-dynamic effect)
+		if (lowPassFrequency) {
+			filters.push(`lowpass=f=${lowPassFrequency}`);
 		}
-		if (compressor) filters.push("acompressor");
-		if (normalize) filters.push("dynaudnorm");
-		if (lowPassFrequency) filters.push(`lowpass=f=${lowPassFrequency}`);
+
+		// Auto-limiter logic removed as it was tied to FFmpeg's bass/treble processing.
+		// If a general limiter is needed, it should be added based on other criteria
+		// or implemented within AudioProcessor if it needs to be dynamic.
 
 		return filters;
 	}
 
-	destroy(): void {
+	async createAudioStreamForDiscord(
+		url: string,
+	): Promise<{ stream: Readable; type: StreamType }> {
+		let inputFormat: string | undefined;
+		try {
+			inputFormat = await this.getInputFormatFromHeaders(url);
+		} catch {
+			inputFormat = undefined;
+		}
+
+		try {
+			// Используем увеличенные таймауты для всех аудио-запросов
+			const requestOptions = {
+				method: "GET" as const,
+				headersTimeout: 30000, // 30 секунд для всех запросов
+				bodyTimeout: 120000, // 2 минуты для всех запросов
+			};
+
+			if (inputFormat === "opus" || inputFormat === "ogg") {
+				const body = await safeRequestStream(url, requestOptions);
+				return { stream: body, type: StreamType.OggOpus };
+			} else if (inputFormat === "webm") {
+				const body = await safeRequestStream(url, requestOptions);
+				return { stream: body, type: StreamType.WebmOpus };
+			} else {
+				const processed = await this.createAudioStreamFromUrl(url);
+				return { stream: processed, type: StreamType.Raw };
+			}
+		} catch (err) {
+			const error = err as Error;
+
+			// Специальная обработка для ошибок прерывания
+			if (
+				error.name === "AbortError" ||
+				error.message.includes("aborted") ||
+				error.message.includes("Request aborted")
+			) {
+				this.emit("debug", `Audio request aborted for ${url}`);
+				throw new Error(`Audio request was cancelled`);
+			}
+
+			this.emit("error", error);
+			throw err;
+		}
+	}
+
+	async destroyCurrentStreamSafe(): Promise<void> {
+		if (this.currentFFmpegCommand) {
+			await this.ffmpegManager
+				.terminateProcess(this.currentFFmpegCommand)
+				.catch(() => {});
+			this.currentFFmpegCommand = null;
+		}
+
+		if (this.currentInputStream) {
+			this.currentInputStream.removeAllListeners();
+			this.currentInputStream.destroy();
+			this.currentInputStream = null;
+		}
+
+		if (this.processor) {
+			this.processor.removeAllListeners();
+			this.processor.end();
+			this.processor = null;
+		}
+	}
+
+	async destroy(): Promise<void> {
+		await this.ffmpegManager.terminateAll();
 		this.processor = null;
 		this.removeAllListeners();
 	}

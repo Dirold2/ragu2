@@ -2,7 +2,7 @@ import { LRUCache } from "lru-cache";
 import { bot } from "../bot.js";
 import { type Track, TrackSchema } from "../types/index.js";
 import type { QueueResult } from "../interfaces/index.js";
-import { VOLUME } from "../config.js";
+import config from "../../config.json" with { type: "json" };
 
 interface EnhancedQueueResult extends QueueResult {
 	loop?: boolean;
@@ -13,7 +13,7 @@ export default class CacheQueueService {
 	private cache: LRUCache<string, any>;
 	private readonly logger = bot.logger!;
 	private readonly locale = bot.locale!;
-	private static readonly DEFAULT_VOLUME = (VOLUME.DEFAULT * 100) || 20;
+	private static readonly DEFAULT_VOLUME = config.volume.default * 100 || 20;
 	private static readonly BATCH_SIZE = 50;
 
 	private readonly trackCache = new Map<string, Map<string, Track>>();
@@ -99,7 +99,7 @@ export default class CacheQueueService {
 			this.invalidateQueueCache(guildId);
 
 			if (track.source === "yandex") {
-				await this.setLastTrackID(guildId, track.trackId);
+				this.setLastTrackID(guildId, track.trackId);
 			}
 		} catch (error) {
 			this.logger.error(
@@ -135,7 +135,7 @@ export default class CacheQueueService {
 					guildCache.set(track.trackId, track);
 
 					if (track.source === "yandex") {
-						await this.setLastTrackID(guildId, track.trackId);
+						this.setLastTrackID(guildId, track.trackId);
 					}
 				}
 			}
@@ -157,10 +157,10 @@ export default class CacheQueueService {
 			if (cachedQueue) return cachedQueue;
 
 			const tracks = Array.from(this.trackCache.get(guildId)?.values() || []);
-			const lastTrackId = await this.getLastTrackID(guildId);
-			const waveStatus = await this.getWave(guildId);
-			const volume = await this.getVolume(guildId);
-			const loop = await this.getLoop(guildId);
+			const lastTrackId = this.getLastTrackID(guildId);
+			const waveStatus = this.getWave(guildId);
+			const volume = this.getVolume(guildId);
+			const loop = this.getLoop(guildId);
 
 			const result: EnhancedQueueResult = {
 				tracks,
@@ -181,6 +181,28 @@ export default class CacheQueueService {
 				}),
 			);
 			return { tracks: [], waveStatus: false, loop: false };
+		}
+	}
+
+	async getQueueLength(guildId: string): Promise<number> {
+		try {
+			// Если есть кэшированная очередь, используем её
+			const cachedQueue = this.queueCache.get(guildId);
+			if (cachedQueue) {
+				return cachedQueue.tracks.length;
+			}
+
+			// Иначе получаем из trackCache
+			const tracks = this.trackCache.get(guildId);
+			return tracks ? tracks.size : 0;
+		} catch (error) {
+			this.logger.error(
+				this.locale.t("messages.cacheQueueService.errors.get_queue_length", {
+					guildId,
+					error: error instanceof Error ? error.message : String(error),
+				}),
+			);
+			return 0;
 		}
 	}
 

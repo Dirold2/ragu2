@@ -1,5 +1,7 @@
-import { MusicServicePlugin } from '../interfaces/MusicServicePlugin';
-import { SearchTrackResult } from '../types/SearchTrackResult';
+import type { MusicServicePlugin } from "../interfaces/index.js";
+import {
+	type SearchTrackResult,
+} from "../types/index.js";
 
 export default class YandexMusicPlugin implements MusicServicePlugin {
     name = 'yandex';

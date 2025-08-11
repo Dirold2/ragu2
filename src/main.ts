@@ -1,17 +1,17 @@
 import { dirname } from "dirname-filename-esm";
-
-import { resolve as r } from "path";
+import { config } from "@dotenvx/dotenvx";
+import { resolve } from "path";
 
 import { importx } from "@discordx/importer";
 
 import { bot } from "./bot.js";
-import { config } from "dotenv";
 import { createLocale, createLogger } from "./utils/index.js";
+import { registerShutdownHandlers } from "./utils/gracefulShutdown.js";
 import translations from "./locales/en.json" with { type: "json" };
 
-const __dirname = dirname(import.meta);
+config({ path: resolve(dirname(import.meta), "../.env") });
 
-config({ path: r(dirname(import.meta), ".env") });
+const __dirname = dirname(import.meta);
 
 const logger = createLogger(`ragu2`);
 const locale = createLocale<typeof translations>(`ragu2`);
@@ -21,6 +21,9 @@ locale.load();
  * Runs the bot
  */
 async function run() {
+	// Регистрируем обработчики graceful shutdown
+	registerShutdownHandlers();
+
 	await bot.initialize();
 
 	logger.info(locale.t("messages.bot.initialization.success"));
