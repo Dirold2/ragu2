@@ -55,6 +55,27 @@ function safelyDestroy(
 ): void {
 	if (!stream) return;
 	try {
+		// Attach a temporary error listener to prevent uncaught 'error' during destroy
+		const onError = (error: unknown) => {
+			if (isAbortError(error)) {
+				bot?.logger.debug(
+					`[safeRequestStream] Stream already aborted${urlForLog ? ` for ${urlForLog}` : ""}`,
+				);
+			} else {
+				bot?.logger.debug(
+					`[safeRequestStream] Error during safe destroy${urlForLog ? ` for ${urlForLog}` : ""}: ${(error as Error).message}`,
+				);
+			}
+		};
+
+		// Ensure the temporary handler is removed when the stream closes
+		stream.once("error", onError);
+		stream.once("close", () => {
+			try {
+				stream.removeListener("error", onError);
+			} catch {}
+		});
+
 		if (!stream.destroyed) {
 			stream.destroy();
 		}

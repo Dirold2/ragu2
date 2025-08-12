@@ -2,11 +2,6 @@ import { EventEmitter } from "eventemitter3";
 import type { Track } from "../../types/audio.js";
 import { getAudioDurationInSeconds } from "get-audio-duration";
 import { Bot } from "../../bot.js";
-import { config } from "@dotenvx/dotenvx";
-import { resolve } from "path";
-import { dirname } from "dirname-filename-esm";
-
-config({ path: resolve(dirname(import.meta), "../../../.env") });
 
 export class TrackManager extends EventEmitter {
 	private bot: Bot;

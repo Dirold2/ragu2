@@ -73,6 +73,8 @@ export class ErrorHandler extends EventEmitter {
 				"err_stream_premature_close",
 				"write after end",
 				"epipe",
+				"request aborted",
+				"aborted",
 			];
 			if (ignorable.some((p) => msg.includes(p))) {
 				bot?.logger?.debug(

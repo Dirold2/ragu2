@@ -20,6 +20,7 @@ export interface Track {
 	priority?: boolean;
 	waveStatus?: boolean;
 	requestedBy?: string;
+	durationMs?: number;
 }
 
 export interface QueueResult {

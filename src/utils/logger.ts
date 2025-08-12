@@ -5,10 +5,11 @@ import path from "path";
 import fs from "fs/promises";
 import { LRUCache } from "lru-cache";
 import styles from "ansi-styles";
+import callsites from "callsites";
+
 import { config } from "@dotenvx/dotenvx";
 import { resolve } from "path";
-import { dirname } from "dirname-filename-esm";
-import callsites from "callsites";
+import { dirname } from "dirname-filename-esm/index.js";
 
 config({ path: resolve(dirname(import.meta), "../../.env") });
 
@@ -78,10 +79,10 @@ const logConfig = {
 };
 
 const SHOW_SOURCE = (() => {
-    const raw = process.env.LOG_SHOW_SOURCE?.trim();
-    if (!raw) return true;
-    const lowered = raw.toLowerCase();
-    return !(lowered === "0" || lowered === "false" || lowered === "off");
+	const raw = process.env.LOG_SHOW_SOURCE?.trim();
+	if (!raw) return true;
+	const lowered = raw.toLowerCase();
+	return !(lowered === "0" || lowered === "false" || lowered === "off");
 })();
 
 async function ensureLogDirExists(): Promise<void> {
@@ -95,60 +96,60 @@ async function ensureLogDirExists(): Promise<void> {
 await ensureLogDirExists();
 
 const CALLER_SKIP_PATTERNS = [
-    "node:internal",
+	"node:internal",
 	"node:events",
-    "(internal/)",
-    "/internal/",
-    "winston",
-    "/utils/logger",
-    "\\utils\\logger",
-    "/node_modules/",
-    "\\node_modules\\",
-    "@discordx/importer",
-    "importx",
-    "discordx",
-    "ts-node",
-    "loader.js",
-    "combine.js",
+	"(internal/)",
+	"/internal/",
+	"winston",
+	"/utils/logger",
+	"\\utils\\logger",
+	"/node_modules/",
+	"\\node_modules\\",
+	"@discordx/importer",
+	"importx",
+	"discordx",
+	"ts-node",
+	"loader.js",
+	"combine.js",
 ];
 
 const addCallerInfo = winston.format((info: ExtendedLogInfo) => {
-    try {
-        const level = String(info.level || "").toLowerCase();
-        if (level !== "warn" && level !== "error") return info;
-        const frames = callsites();
-        for (const frame of frames) {
-            const filePath = frame.getFileName?.();
-            if (!filePath) continue;
-            const lower = filePath.toLowerCase();
-            if (lower.startsWith("node:")) continue;
-            if (CALLER_SKIP_PATTERNS.some((p) => lower.includes(p))) continue;
-            const inSrc = lower.includes("/src/") || lower.includes("\\src\\");
-            const file = path.basename(filePath);
-            const line = frame.getLineNumber?.();
-            if (inSrc) {
-                info.source = line ? `${file}:${line}` : file;
-                break;
-            }
-        }
-        if (!info.source) {
-            const frames2 = callsites();
-            for (const frame of frames2) {
-                const filePath = frame.getFileName?.();
-                if (!filePath) continue;
-                const lower = filePath.toLowerCase();
-                if (lower.startsWith("node:")) continue;
-                if (CALLER_SKIP_PATTERNS.some((p) => lower.includes(p))) continue;
-                const file = path.basename(filePath);
-                const line = frame.getLineNumber?.();
-                info.source = line ? `${file}:${line}` : file;
-                break;
-            }
-        }
-    } catch {
-        // ignore
-    }
-    return info;
+	try {
+		const level = String(info.level || "").toLowerCase();
+		if (level !== "warn" && level !== "error") return info;
+		const frames = callsites();
+		for (const frame of frames) {
+			const filePath = frame.getFileName?.();
+			if (!filePath) continue;
+			const lower = filePath.toLowerCase();
+			if (lower.startsWith("node:")) continue;
+			if (CALLER_SKIP_PATTERNS.some((p) => lower.includes(p))) continue;
+			const inSrc = lower.includes("/src/") || lower.includes("\\src\\");
+			const file = path.basename(filePath);
+			const line = frame.getLineNumber?.();
+			if (inSrc) {
+				info.source = line ? `${file}:${line}` : file;
+				break;
+			}
+		}
+		if (!info.source) {
+			const frames2 = callsites();
+			for (const frame of frames2) {
+				const filePath = frame.getFileName?.();
+				if (!filePath) continue;
+				const lower = filePath.toLowerCase();
+				if (lower.startsWith("node:")) continue;
+				if (CALLER_SKIP_PATTERNS.some((p) => lower.includes(p))) continue;
+				const file = path.basename(filePath);
+				const line = frame.getLineNumber?.();
+				info.source = line ? `${file}:${line}` : file;
+				break;
+			}
+		}
+	} catch {
+		// ignore
+	}
+	return info;
 });
 
 const createFormatter = (opts: { colorizeLevelName: boolean }) =>
@@ -175,21 +176,34 @@ const baseLogger = winston.createLogger({
 	exitOnError: false,
 	defaultMeta: {},
 	transports: [
-        new DailyRotateFile({ ...logConfig, filename: `${logDir}/application-%DATE%.log`, format: winston.format.combine(
-            winston.format.timestamp({ format: "DD.MM.YYYY HH:mm:ss" }),
-            winston.format.errors({ stack: true }),
-            createFormatter({ colorizeLevelName: false }),
-        ) }),
-        new DailyRotateFile({ ...logConfig, filename: `${logDir}/error-%DATE%.log`, level: "error", format: winston.format.combine(
-            winston.format.timestamp({ format: "DD.MM.YYYY HH:mm:ss" }),
-            winston.format.errors({ stack: true }),
-            createFormatter({ colorizeLevelName: false }),
-        ) }),
-        new winston.transports.File({ filename: `${logDir}/player-error.log`, level: "error", format: winston.format.combine(
-            winston.format.timestamp({ format: "DD.MM.YYYY HH:mm:ss" }),
-            winston.format.errors({ stack: true }),
-            createFormatter({ colorizeLevelName: false }),
-        ) }),
+		new DailyRotateFile({
+			...logConfig,
+			filename: `${logDir}/application-%DATE%.log`,
+			format: winston.format.combine(
+				winston.format.timestamp({ format: "DD.MM.YYYY HH:mm:ss" }),
+				winston.format.errors({ stack: true }),
+				createFormatter({ colorizeLevelName: false }),
+			),
+		}),
+		new DailyRotateFile({
+			...logConfig,
+			filename: `${logDir}/error-%DATE%.log`,
+			level: "error",
+			format: winston.format.combine(
+				winston.format.timestamp({ format: "DD.MM.YYYY HH:mm:ss" }),
+				winston.format.errors({ stack: true }),
+				createFormatter({ colorizeLevelName: false }),
+			),
+		}),
+		new winston.transports.File({
+			filename: `${logDir}/player-error.log`,
+			level: "error",
+			format: winston.format.combine(
+				winston.format.timestamp({ format: "DD.MM.YYYY HH:mm:ss" }),
+				winston.format.errors({ stack: true }),
+				createFormatter({ colorizeLevelName: false }),
+			),
+		}),
 	],
 }) as winston.Logger;
 
@@ -310,12 +324,10 @@ export function createLogger(
 	const cached = loggerCache.get(key);
 	if (cached) return cached as winston.Logger;
 
-    const childLogger = baseLogger.child(
-		{
-			module: nameModule || "",
-			state: moduleState || "",
-		},
-	);
+	const childLogger = baseLogger.child({
+		module: nameModule || "",
+		state: moduleState || "",
+	});
 
 	childLogger.playerError = function (error: unknown, url?: string) {
 		const message = error instanceof Error ? error.message : String(error);

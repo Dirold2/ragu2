@@ -12,11 +12,6 @@ import {
 	TrackResultSchema,
 } from "../types/index.js";
 import { bot } from "../bot.js";
-import { config } from "@dotenvx/dotenvx";
-import { resolve } from "path";
-import { dirname } from "dirname-filename-esm";
-
-config({ path: resolve(dirname(import.meta), "../../.env") });
 
 export interface TrackYandex {
 	id: number | string;

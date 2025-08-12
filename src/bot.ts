@@ -8,7 +8,6 @@ import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
-import { config } from "@dotenvx/dotenvx";
 
 import {
 	CacheQueueService,
@@ -19,14 +18,9 @@ import {
 } from "./services/index.js";
 
 import { dirname } from "dirname-filename-esm";
-import { resolve } from "path";
 import translations from "./locales/en.json" with { type: "json" };
 import { createLogger, createLocale } from "./utils/index.js";
 import { MusicServicePlugin } from "./interfaces/index.js";
-
-config({ path: resolve(dirname(import.meta), "../.env") });
-
-// Удалён импорт dotenvx
 
 /**
  * Bot class

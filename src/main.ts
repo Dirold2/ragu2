@@ -1,6 +1,4 @@
 import { dirname } from "dirname-filename-esm";
-import { config } from "@dotenvx/dotenvx";
-import { resolve } from "path";
 
 import { importx } from "@discordx/importer";
 
@@ -8,6 +6,9 @@ import { bot } from "./bot.js";
 import { createLocale, createLogger } from "./utils/index.js";
 import { registerShutdownHandlers } from "./utils/gracefulShutdown.js";
 import translations from "./locales/en.json" with { type: "json" };
+
+import { config } from "@dotenvx/dotenvx";
+import { resolve } from "path";
 
 config({ path: resolve(dirname(import.meta), "../.env") });
 
