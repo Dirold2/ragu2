@@ -313,6 +313,7 @@
 				"failed_to_initialize": "Failed to initialize Yandex Music plugin",
 				"retrying_search": "Retrying search for {trackName}",
 				"url_processing": "Error processing URL in plugin {plugin}: {error}",
+				"get_track_url": "Error getting track URL: {trackId} - {error}",
 				"track": {
 					"processing": "Error processing track: {error}",
 					"url_not_found": "Track URL not found: {trackId} | {error}",

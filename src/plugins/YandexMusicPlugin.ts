@@ -221,9 +221,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 			return [];
 		} catch (error) {
-			this.logError("plugins.yandex.errors.url_processing", error, {
-				name: this.name,
-			});
+			bot.logger.error(bot.locale.t("plugins.yandex.errors.url_processing", {plugin: this.name, error: (error as Error).message}));
 			return [];
 		}
 	}
@@ -260,7 +258,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 			return url;
 		} catch (error) {
-			this.logError("plugins.yandex.errors.get_track_url", error, { trackId });
+			bot.logger.error(bot.locale.t("plugins.yandex.errors.get_track_url", { trackId, error: (error as Error).message }), error);
 			return null;
 		}
 	}
@@ -306,7 +304,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
-			this.logError("plugins.yandex.errors.playlist.processing", error);
+			bot.logger.error(bot.locale.t("plugins.yandex.errors.playlist.processing"), error);
 			return [];
 		}
 	}
@@ -321,14 +319,14 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			const albumInfo = await this.api.getAlbumWithTracks(Number(albumId));
 			const results = albumInfo.volumes
 				.flat()
-				.map((track) => this.formatTrackInfo(track))
-				.map((track) => this.validateTrackResult(track))
+				.map((track: TrackYandex) => this.formatTrackInfo(track))
+				.map((track: { id: string; title: string; artists: { name: string; }[]; source: string; albums?: { title?: string | undefined; }[] | undefined; durationMs?: number | undefined; cover?: string | undefined; url?: string | undefined; items?: string | undefined; }) => this.validateTrackResult(track))
 				.filter((t): t is SearchTrackResult => t !== null);
 
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
-			this.logError("plugins.yandex.errors.track.processing", error);
+			bot.logger.error(bot.locale.t("plugins.yandex.errors.track.processing"), error);
 			return [];
 		}
 	}
@@ -351,17 +349,16 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			}
 
 			const results = similarTracks.similarTracks
-				.map((track) => this.formatTrackInfo(track))
-				.map((track) => this.validateTrackResult(track))
+				.map((track: TrackYandex) => this.formatTrackInfo(track))
+				.map((track: { id: string; title: string; artists: { name: string; }[]; source: string; albums?: { title?: string | undefined; }[] | undefined; durationMs?: number | undefined; cover?: string | undefined; url?: string | undefined; items?: string | undefined; }) => this.validateTrackResult(track))
 				.filter((t): t is SearchTrackResult => t !== null);
 
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
-			this.logError(
-				"plugins.yandex.errors.error_fetching_similar_tracks",
+			bot.logger.error(bot.locale.t(
+				"plugins.yandex.errors.error_fetching_similar_tracks", {trackId}),
 				error,
-				{ trackId },
 			);
 			return [];
 		}
@@ -409,6 +406,8 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	private loadConfig(): Config {
 		const access_token = process.env.YM_API_KEY;
 		const uid = Number(process.env.YM_USER_ID);
+		const username = process.env.YM_USER_NAME;
+		const password = process.env.YM_USER_PASSWORD;
 
 		if (!access_token || isNaN(uid)) {
 			throw new Error(
@@ -416,7 +415,11 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			);
 		}
 
-		const config = { access_token, uid };
+		let config
+		if(username! || password!){
+			config = { access_token, uid, username, password };
+		}
+		config = { access_token, uid };
 		const validation = ConfigSchema.safeParse(config);
 
 		if (!validation.success) {
@@ -442,7 +445,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			await Promise.all([this.wrapper.init(config), this.api.init(config)]);
 			this.initialized = true;
 		} catch (error) {
-			this.logError("plugins.yandex.errors.error_initializing_service", error);
+			bot.logger.error(bot.locale.t("plugins.yandex.errors.error_initializing_service"), error);
 			throw new Error(
 				bot.locale.t("plugins.yandex.errors.failed_to_initialize"),
 			);
@@ -521,22 +524,5 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		});
 
 		this.startCacheCleanup();
-	}
-
-	private logError(
-		fullKey: string,
-		error: unknown,
-		extra: Record<string, unknown> = {},
-	): void {
-		const msg = (bot.locale as any).t(fullKey, {
-			...extra,
-			error: error instanceof Error ? error.message : String(error),
-		});
-		bot.logger.error(msg, {
-			...(error instanceof Error
-				? { stack: error.stack, error: error.message }
-				: { error: String(error) }),
-			...extra,
-		});
 	}
 }

@@ -31,12 +31,6 @@ export class TrackManager extends EventEmitter {
 
 			const url = await plugin.getTrackUrl(trackId);
 			if (!url) {
-				this.bot?.logger.warn(
-					this.bot.locale.t(
-						"messages.playerService.player.warning.url_not_found",
-						{ trackId, source },
-					),
-				);
 				return null;
 			}
 

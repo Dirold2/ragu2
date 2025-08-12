@@ -316,6 +316,7 @@
 				"failed_to_initialize": "Не удалось инициализировать плагин Яндекс Музыки",
 				"retrying_search": "Повторная попытка поиска для {trackName}",
 				"url_processing": "Ошибка обработки URL в плагине {plugin}: {error}",
+				"get_track_url": "Ошибка получения URL трека: {trackId} - {error}",
 				"track": {
 					"processing": "Ошибка обработки трека: {error}",
 					"url_not_found": "URL трека не найден: {trackId} | {error}",

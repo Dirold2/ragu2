@@ -291,9 +291,9 @@ export default class YouTubeMusicPlugin implements MusicServicePlugin {
 		} catch (error) {
 			bot.logger.error(
 				bot.locale.t("plugins.youtube.errors.url_processing", {
-					name: this.name,
-				}),
-				error,
+					plugin: this.name,
+					error: (error as Error).message
+				})
 			);
 			return [];
 		}
@@ -385,7 +385,7 @@ export default class YouTubeMusicPlugin implements MusicServicePlugin {
 			bot.logger.error(
 				bot.locale.t("plugins.youtube.errors.get_track_url", {
 					trackId,
-					errmsg,
+					error: errmsg,
 				}),
 			);
 			return null;

@@ -47,6 +47,8 @@ export type Track = z.infer<typeof TrackSchema>;
 export const ConfigSchema = z.object({
 	access_token: z.string(),
 	uid: z.number(),
+	username: z.string().optional(),
+	password: z.string().optional(),
 });
 
 // Type definition inferred from the ConfigSchema
