@@ -10,13 +10,14 @@ import { EventEmitter } from "eventemitter3";
 import { AudioService } from "../audio/AudioService.js";
 import { TrackManager } from "./TrackManager.js";
 import { ConnectionManager } from "./ConnectionManager.js";
-import type { Track, PlayerState } from "../../types/audio.js";
+import type { PlayerState } from "../../types/audio.js";
 import { PlayerServiceEvents } from "../../types/audio.js";
 import config from "../../../config.json" with { type: "json" };
 import { ErrorHandler } from "../../utils/errorHandler.js";
 import { type Bot } from "../../bot.js";
 import { PlayerQueue } from "./PlayerQueue.js";
 import { PlayerEffects } from "./PlayerEffects.js";
+import { Track } from "../../types/index.js";
 
 export default class PlayerService extends EventEmitter {
 	private readonly player = createAudioPlayer({
@@ -176,9 +177,11 @@ export default class PlayerService extends EventEmitter {
 			this.state.currentTrack = track;
 			this.player.play(resource);
 			await this.effects.fadeIn(this.state.volume);
-			this.fadeOutTimer = await this.effects.scheduleFadeOut(
-				() => this.trackManager.getDuration(trackUrl),
-				() => this.effects.setVolume(0, 2000, false),
+			const durationMs = track.durationMs
+				? track.durationMs
+				: await this.trackManager.getDuration(trackUrl);
+			this.fadeOutTimer = await this.effects.scheduleFadeOut(durationMs, () =>
+				this.effects.setVolume(0, 2000, false),
 			);
 			this.emit(PlayerServiceEvents.TRACK_STARTED, track);
 			return true;

@@ -1,5 +1,5 @@
 import { EventEmitter } from "eventemitter3";
-import type { Track } from "../../types/audio.js";
+import type { Track } from "../../types/index.js";
 import { getAudioDurationInSeconds } from "get-audio-duration";
 import { Bot } from "../../bot.js";
 
@@ -45,7 +45,7 @@ export class TrackManager extends EventEmitter {
 			this.bot?.logger.error(
 				this.bot.locale.t("messages.playerService.player.error.get_track_url", {
 					trackId,
-					error: error instanceof Error ? error.message : String(error),
+					error: (error as Error).message,
 				}),
 			);
 			return null;

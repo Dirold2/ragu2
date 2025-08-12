@@ -1,3 +1,5 @@
+import { Track } from "./index.js";
+
 export interface AudioProcessingOptions {
 	volume: number;
 	bass: number;
@@ -10,14 +12,6 @@ export interface AudioProcessingOptions {
 		fadein: number;
 		fadeout: number;
 	};
-}
-
-export interface Track {
-	source: string;
-	trackId: string;
-	info: string;
-	requestedBy?: string;
-	url?: string;
 }
 
 export interface PlayerState {

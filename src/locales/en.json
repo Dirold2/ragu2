@@ -328,6 +328,31 @@
 					"invalid_config": "Invalid plugin configuration: {errors}"
 				}
 			}
+		},
+		"youtube": {
+			"errors": {
+				"no_similar_tracks_found": "No similar tracks found for track ID: {trackId}",
+				"error_fetching_similar_tracks": "Error fetching similar tracks for track ID: {trackId}",
+				"error_initializing_service": "Error initializing YouTube Music service",
+				"failed_to_initialize": "Failed to initialize YouTube Music plugin",
+				"retrying_search": "Retrying search for {trackName}",
+				"url_processing": "Error processing URL in plugin {plugin}: {error}",
+				"get_track_url": "Error getting track URL: {trackId} - {error}",
+				"track": {
+					"processing": "Error processing track: {error}",
+					"url_not_found": "Track URL not found: {trackId} | {error}",
+					"invalid_data": "Invalid track data: {error}",
+					"search": "Error searching for {query}"
+				},
+				"playlist": {
+					"not_found": "Playlist not found or empty",
+					"processing": "Error processing playlist: {error}"
+				},
+				"plugin": {
+					"missing_config": "Missing plugin configuration",
+					"invalid_config": "Invalid plugin configuration: {errors}"
+				}
+			}
 		}
 	}
 }

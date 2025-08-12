@@ -385,7 +385,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			title: trackInfo.title,
 			artists: trackInfo.artists.map((artist) => ({ name: artist.name })),
 			albums: trackInfo.albums.map((album) => ({ title: album.title })),
-			duration: this.formatDuration(trackInfo.durationMs ?? 0),
+			durationMs: trackInfo.durationMs ?? 0,
 			cover: trackInfo.coverUri || "",
 			source: "yandex",
 		};
@@ -488,17 +488,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			);
 			return [];
 		}
-	}
-
-	private formatDuration(durationMs: number): string {
-		if (!Number.isFinite(durationMs) || durationMs < 0) {
-			return "0:00";
-		}
-		const minutes = Math.floor(durationMs / 60000);
-		const seconds = Math.floor((durationMs % 60000) / 1000)
-			.toString()
-			.padStart(2, "0");
-		return `${minutes}:${seconds}`;
 	}
 
 	public async destroy(): Promise<void> {

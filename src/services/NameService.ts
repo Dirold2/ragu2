@@ -157,8 +157,8 @@ export default class NameService {
 		);
 
 		await Promise.all([
-			this.playerManager.playOrQueueTrack(guildId, track, interaction) || null,
 			this.playerManager.joinChannel(interaction) || null,
+			this.playerManager.playOrQueueTrack(guildId, track, interaction) || null,
 		]);
 	}
 
@@ -419,6 +419,7 @@ export default class NameService {
 			source: track.source,
 			priority: isPriority,
 			requestedBy: interaction.user.id,
+			durationMs: track.durationMs,
 		};
 	}
 

@@ -87,6 +87,9 @@
 					"no_recommendations": "Нет доступных рекомендаций для источника: {source}",
 					"empty_channel": "Покинул пустой голосовой канал"
 				},
+				"warning": {
+					"url_not_found": "URL трека не найден: {trackId} | {error}"
+				},
 				"error": {
 					"plugin_not_found": "Плагин не найден для источника: {source}",
 					"get_track_url": "Ошибка получения URL трека: {trackId} - {error}",
@@ -313,6 +316,31 @@
 				"failed_to_initialize": "Не удалось инициализировать плагин Яндекс Музыки",
 				"retrying_search": "Повторная попытка поиска для {trackName}",
 				"url_processing": "Ошибка обработки URL в плагине {plugin}: {error}",
+				"track": {
+					"processing": "Ошибка обработки трека: {error}",
+					"url_not_found": "URL трека не найден: {trackId} | {error}",
+					"invalid_data": "Недействительные данные трека: {error}",
+					"search": "Ошибка поиска: {query}"
+				},
+				"playlist": {
+					"not_found": "Плейлист не найден или пуст",
+					"processing": "Ошибка обработки плейлиста: {error}"
+				},
+				"plugin": {
+					"missing_config": "Отсутствует конфигурация плагина",
+					"invalid_config": "Недействительная конфигурация плагина: {errors}"
+				}
+			}
+		},
+		"youtube": {
+			"errors": {
+				"no_similar_tracks_found": "Не найдено похожих треков для ID трека: {trackId}",
+				"error_fetching_similar_tracks": "Ошибка получения похожих треков для ID трека: {trackId}",
+				"error_initializing_service": "Ошибка инициализации сервиса YouTube Музыки",
+				"failed_to_initialize": "Не удалось инициализировать плагин YouTube Музыки",
+				"retrying_search": "Повторная попытка поиска для {trackName}",
+				"url_processing": "Ошибка обработки URL в плагине {plugin}: {error}",
+				"get_track_url": "Ошибка получения URL трека: {trackId} - {error}",
 				"track": {
 					"processing": "Ошибка обработки трека: {error}",
 					"url_not_found": "URL трека не найден: {trackId} | {error}",

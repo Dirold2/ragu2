@@ -10,11 +10,10 @@ export class PlayerEffects {
 	}
 
 	async scheduleFadeOut(
-		getDuration: () => Promise<number | null>,
+		duration: number,
 		action: () => Promise<void>,
 	): Promise<NodeJS.Timeout | null> {
 		try {
-			const duration = await getDuration();
 			if (duration && duration > DEFAULT_FADEOUT) {
 				return setTimeout(async () => {
 					await action();

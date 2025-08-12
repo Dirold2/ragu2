@@ -17,7 +17,7 @@ export const TrackResultSchema = z.object({
 			}),
 		)
 		.optional(),
-	duration: z.string().optional(),
+	durationMs: z.number().optional(),
 	cover: z.string().optional(),
 	source: z.string(),
 	url: z.string().optional(),
@@ -37,6 +37,7 @@ export const TrackSchema = z.object({
 	waveStatus: z.boolean().optional(),
 	requestedBy: z.string().optional(),
 	priority: z.boolean().optional(),
+	durationMs: z.number().optional(),
 });
 
 // Type definition inferred from the TrackSchema

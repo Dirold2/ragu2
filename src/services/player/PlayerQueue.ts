@@ -1,4 +1,4 @@
-import type { Track } from "../../types/audio.js";
+import type { Track } from "../../types/index.js";
 import { PlayerServiceEvents } from "../../types/audio.js";
 import type { Bot } from "../../bot.js";
 import { TrackManager } from "./TrackManager.js";
