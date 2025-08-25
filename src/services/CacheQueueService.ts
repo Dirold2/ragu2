@@ -34,6 +34,8 @@ export default class CacheQueueService {
 
 	async getTrack(guildId: string): Promise<Track | null> {
 		try {
+			this.logger.debug(`[CacheQueueService] getTrack called for guild ${guildId}`);
+			
 			const guildCache = this.trackCache.get(guildId);
 			if (guildCache?.size) {
 				const firstEntry = guildCache.entries().next();
@@ -42,6 +44,7 @@ export default class CacheQueueService {
 					guildCache.delete(trackId);
 					if (!guildCache.size) this.trackCache.delete(guildId);
 					this.cache.delete(`track:${guildId}`);
+					this.logger.debug(`[CacheQueueService] Returning track from guildCache: ${track.info}`);
 					return track;
 				}
 			}
@@ -50,8 +53,11 @@ export default class CacheQueueService {
 			const track = this.cache.get(key);
 			if (track) {
 				this.cache.delete(key);
+				this.logger.debug(`[CacheQueueService] Returning track from cache: ${track.info}`);
 				return track as Track;
 			}
+			
+			this.logger.debug(`[CacheQueueService] No track found for guild ${guildId}`);
 			return null;
 		} catch (error) {
 			this.logger.error(
@@ -66,16 +72,21 @@ export default class CacheQueueService {
 
 	async getTrackWithPriority(guildId: string): Promise<Track | null> {
 		try {
+			this.logger.debug(`[CacheQueueService] getTrackWithPriority called for guild ${guildId}`);
+			
 			const guildCache = this.trackCache.get(guildId);
 			if (guildCache) {
 				for (const [trackId, track] of guildCache.entries()) {
 					if (track.priority) {
 						guildCache.delete(trackId);
 						if (!guildCache.size) this.trackCache.delete(guildId);
+						this.logger.debug(`[CacheQueueService] Returning priority track: ${track.info}`);
 						return track;
 					}
 				}
 			}
+			
+			this.logger.debug(`[CacheQueueService] No priority track found for guild ${guildId}`);
 			return null;
 		} catch (error) {
 			this.logger.error(
@@ -90,6 +101,8 @@ export default class CacheQueueService {
 
 	async setTrack(guildId: string, track: Omit<Track, "id">): Promise<void> {
 		try {
+			this.logger.debug(`[CacheQueueService] setTrack called for guild ${guildId}, track: ${track.info}`);
+			
 			const validatedTrack = TrackSchema.parse(track);
 			let guildCache = this.trackCache.get(guildId) || new Map<string, Track>();
 			guildCache.set(track.trackId, validatedTrack);
@@ -101,6 +114,8 @@ export default class CacheQueueService {
 			if (track.source === "yandex") {
 				this.setLastTrackID(guildId, track.trackId);
 			}
+			
+			this.logger.debug(`[CacheQueueService] Track added to queue for guild ${guildId}, cache size: ${guildCache.size}`);
 		} catch (error) {
 			this.logger.error(
 				this.locale.t(`messages.cacheQueueService.errors.set_track`, {
@@ -113,6 +128,8 @@ export default class CacheQueueService {
 
 	async setTracks(guildId: string, tracks: Omit<Track, "id">[]): Promise<void> {
 		try {
+			this.logger.debug(`[CacheQueueService] setTracks called for guild ${guildId}, tracks count: ${tracks.length}`);
+			
 			if (!tracks || tracks.length === 0) return;
 
 			const validatedTracks = tracks.map((track) => TrackSchema.parse(track));
@@ -141,6 +158,7 @@ export default class CacheQueueService {
 			}
 
 			this.invalidateQueueCache(guildId);
+			this.logger.debug(`[CacheQueueService] Tracks added to queue for guild ${guildId}, cache size: ${guildCache.size}`);
 		} catch (error) {
 			this.logger.error(
 				this.locale.t("messages.cacheQueueService.errors.set_tracks", {
@@ -153,14 +171,21 @@ export default class CacheQueueService {
 
 	async getQueue(guildId: string): Promise<EnhancedQueueResult> {
 		try {
+			this.logger.debug(`[CacheQueueService] getQueue called for guild ${guildId}`);
+			
 			const cachedQueue = this.queueCache.get(guildId);
-			if (cachedQueue) return cachedQueue;
+			if (cachedQueue) {
+				this.logger.debug(`[CacheQueueService] Returning cached queue for guild ${guildId}`);
+				return cachedQueue;
+			}
 
 			const tracks = Array.from(this.trackCache.get(guildId)?.values() || []);
 			const lastTrackId = this.getLastTrackID(guildId);
 			const waveStatus = this.getWave(guildId);
 			const volume = this.getVolume(guildId);
 			const loop = this.getLoop(guildId);
+
+			this.logger.debug(`[CacheQueueService] Building queue for guild ${guildId}: ${tracks.length} tracks, wave: ${waveStatus}, loop: ${loop}`);
 
 			const result: EnhancedQueueResult = {
 				tracks,
@@ -177,24 +202,35 @@ export default class CacheQueueService {
 			this.logger.error(
 				this.locale.t("messages.cacheQueueService.errors.get_queue", {
 					guildId,
-					error: error instanceof Error ? error.message : String(error),
 				}),
+				error instanceof Error ? error.message : String(error),
 			);
-			return { tracks: [], waveStatus: false, loop: false };
+			return {
+				tracks: [],
+				lastTrackId: undefined,
+				waveStatus: false,
+				volume: CacheQueueService.DEFAULT_VOLUME,
+				loop: false,
+			};
 		}
 	}
 
 	async getQueueLength(guildId: string): Promise<number> {
 		try {
+			this.logger.debug(`[CacheQueueService] getQueueLength called for guild ${guildId}`);
+			
 			// Если есть кэшированная очередь, используем её
 			const cachedQueue = this.queueCache.get(guildId);
 			if (cachedQueue) {
+				this.logger.debug(`[CacheQueueService] Returning queue length from cache: ${cachedQueue.tracks.length}`);
 				return cachedQueue.tracks.length;
 			}
 
 			// Иначе получаем из trackCache
 			const tracks = this.trackCache.get(guildId);
-			return tracks ? tracks.size : 0;
+			const length = tracks ? tracks.size : 0;
+			this.logger.debug(`[CacheQueueService] Returning queue length from trackCache: ${length}`);
+			return length;
 		} catch (error) {
 			this.logger.error(
 				this.locale.t("messages.cacheQueueService.errors.get_queue_length", {
@@ -208,8 +244,13 @@ export default class CacheQueueService {
 
 	async shuffleTracks(guildId: string): Promise<number> {
 		try {
+			this.logger.debug(`[CacheQueueService] shuffleTracks called for guild ${guildId}`);
+			
 			const guildCache = this.trackCache.get(guildId);
-			if (!guildCache || guildCache.size <= 1) return 0;
+			if (!guildCache || guildCache.size <= 1) {
+				this.logger.debug(`[CacheQueueService] No tracks to shuffle for guild ${guildId}`);
+				return 0;
+			}
 
 			const tracks = Array.from(guildCache.values());
 			const trackIds = Array.from(guildCache.keys());
@@ -228,7 +269,7 @@ export default class CacheQueueService {
 
 			this.invalidateQueueCache(guildId);
 			this.logger.debug(
-				`Shuffled ${tracks.length} tracks for guild ${guildId}`,
+				`[CacheQueueService] Shuffled ${tracks.length} tracks for guild ${guildId}`,
 			);
 
 			return tracks.length;
@@ -244,11 +285,15 @@ export default class CacheQueueService {
 	}
 
 	getLastTrackID(guildId: string): string | null {
+		this.logger.debug(`[CacheQueueService] getLastTrackID called for guild ${guildId}`);
 		const key = `lastTrack:${guildId}`;
-		return this.cache.get(key) || null;
+		const lastTrackId = this.cache.get(key) || null;
+		this.logger.debug(`[CacheQueueService] Returning lastTrackId: ${lastTrackId}`);
+		return lastTrackId;
 	}
 
 	setLastTrackID(guildId: string, trackId?: string): void {
+		this.logger.debug(`[CacheQueueService] setLastTrackID called for guild ${guildId}, trackId: ${trackId}`);
 		const key = `lastTrack:${guildId}`;
 		trackId ? this.cache.set(key, trackId) : this.cache.delete(key);
 
@@ -260,11 +305,15 @@ export default class CacheQueueService {
 	}
 
 	getLoop(guildId: string): boolean {
+		this.logger.debug(`[CacheQueueService] getLoop called for guild ${guildId}`);
 		const key = `loop:${guildId}`;
-		return this.cache.get(key) || false;
+		const loopStatus = this.cache.get(key) || false;
+		this.logger.debug(`[CacheQueueService] Returning loop status: ${loopStatus}`);
+		return loopStatus;
 	}
 
 	setLoop(guildId: string, loop: boolean): void {
+		this.logger.debug(`[CacheQueueService] setLoop called for guild ${guildId}, loop: ${loop}`);
 		this.cache.set(`loop:${guildId}`, loop);
 
 		const queueData = this.queueCache.get(guildId);
@@ -276,11 +325,18 @@ export default class CacheQueueService {
 
 	getWave(guildId: string): boolean {
 		try {
+			this.logger.debug(`[CacheQueueService] getWave called for guild ${guildId}`);
+			
 			const queueData = this.queueCache.get(guildId);
-			if (queueData) return queueData.waveStatus || false;
+			if (queueData) {
+				this.logger.debug(`[CacheQueueService] Returning wave status from queue cache: ${queueData.waveStatus}`);
+				return queueData.waveStatus || false;
+			}
 
 			const key = `wave:${guildId}`;
-			return this.cache.get(key) || false;
+			const waveStatus = this.cache.get(key) || false;
+			this.logger.debug(`[CacheQueueService] Returning wave status from cache: ${waveStatus}`);
+			return waveStatus;
 		} catch (error) {
 			this.logger.error(
 				this.locale.t("messages.cacheQueueService.errors.get_wave", {
@@ -294,6 +350,7 @@ export default class CacheQueueService {
 
 	setWave(guildId: string, wave: boolean): void {
 		try {
+			this.logger.debug(`[CacheQueueService] setWave called for guild ${guildId}, wave: ${wave}`);
 			const key = `wave:${guildId}`;
 			this.cache.set(key, wave);
 
@@ -314,12 +371,18 @@ export default class CacheQueueService {
 
 	getVolume(guildId: string): number {
 		try {
+			this.logger.debug(`[CacheQueueService] getVolume called for guild ${guildId}`);
+			
 			const queueData = this.queueCache.get(guildId);
-			if (queueData)
+			if (queueData) {
+				this.logger.debug(`[CacheQueueService] Returning volume from queue cache: ${queueData.volume}`);
 				return queueData.volume || CacheQueueService.DEFAULT_VOLUME;
+			}
 
 			const key = `volume:${guildId}`;
-			return this.cache.get(key) || CacheQueueService.DEFAULT_VOLUME;
+			const volume = this.cache.get(key) || CacheQueueService.DEFAULT_VOLUME;
+			this.logger.debug(`[CacheQueueService] Returning volume from cache: ${volume}`);
+			return volume;
 		} catch (error) {
 			this.logger.error(
 				this.locale.t("messages.cacheQueueService.errors.get_volume", {
@@ -333,6 +396,7 @@ export default class CacheQueueService {
 
 	setVolume(guildId: string, volume: number): void {
 		try {
+			this.logger.debug(`[CacheQueueService] setVolume called for guild ${guildId}, volume: ${volume}`);
 			const key = `volume:${guildId}`;
 			this.cache.set(key, Number(volume));
 
@@ -353,8 +417,11 @@ export default class CacheQueueService {
 
 	countMusicTracks(guildId: string): number {
 		try {
+			this.logger.debug(`[CacheQueueService] countMusicTracks called for guild ${guildId}`);
 			const guildCache = this.trackCache.get(guildId);
-			return guildCache?.size || 0;
+			const count = guildCache?.size || 0;
+			this.logger.debug(`[CacheQueueService] Track count for guild ${guildId}: ${count}`);
+			return count;
 		} catch (error) {
 			this.logger.error(
 				this.locale.t("messages.cacheQueueService.errors.count_tracks", {
@@ -368,10 +435,12 @@ export default class CacheQueueService {
 
 	async removeTrack(guildId: string, trackId: string): Promise<void> {
 		try {
+			this.logger.debug(`[CacheQueueService] removeTrack called for guild ${guildId}, trackId: ${trackId}`);
 			const guildCache = this.trackCache.get(guildId);
 			if (guildCache) {
 				guildCache.delete(trackId);
 				if (guildCache.size === 0) this.trackCache.delete(guildId);
+				this.logger.debug(`[CacheQueueService] Track removed, remaining tracks: ${guildCache.size}`);
 			}
 			this.invalidateQueueCache(guildId);
 		} catch (error) {
@@ -387,6 +456,7 @@ export default class CacheQueueService {
 
 	async clearQueue(guildId: string): Promise<void> {
 		try {
+			this.logger.debug(`[CacheQueueService] clearQueue called for guild ${guildId}`);
 			this.trackCache.delete(guildId);
 			this.queueCache.delete(guildId);
 
@@ -415,6 +485,7 @@ export default class CacheQueueService {
 		trackId: string,
 		trackInfo: string,
 	): Promise<void> {
+		this.logger.debug(`[CacheQueueService] logTrackPlay called for user ${userId}, trackId: ${trackId}, trackInfo: ${trackInfo}`);
 		this.logger.debug(
 			this.locale.t("messages.cacheQueueService.track_played", {
 				userId,
@@ -426,19 +497,51 @@ export default class CacheQueueService {
 
 	async getLastPlayedTracks(userId: string, limit = 10): Promise<Track[]> {
 		this.logger.debug(
-			`Requested last played tracks for user ${userId} (limit: ${limit}), but not available in cache implementation`,
+			`[CacheQueueService] getLastPlayedTracks called for user ${userId} with limit ${limit}, but not available in cache implementation`,
 		);
 		return [];
 	}
 
 	async getTopPlayedTracks(limit = 10): Promise<Track[]> {
 		this.logger.debug(
-			`Requested top played tracks (limit: ${limit}), but not available in cache implementation`,
+			`[CacheQueueService] getTopPlayedTracks called with limit ${limit}, but not available in cache implementation`,
 		);
 		return [];
 	}
 
+	async peekTrack(guildId: string): Promise<Track | null> {
+		try {
+			this.logger.debug(`[CacheQueueService] peekTrack called for guild ${guildId}`);
+			const guildCache = this.trackCache.get(guildId);
+			if (guildCache?.size) {
+				const firstEntry = guildCache.entries().next();
+				if (!firstEntry.done) {
+					const [, track] = firstEntry.value;
+					this.logger.debug(`[CacheQueueService] Peek track from guildCache: ${track.info}`);
+					return track;
+				}
+			}
+			const key = `track:${guildId}`;
+			const track = this.cache.get(key) as Track | undefined;
+			if (track) {
+				this.logger.debug(`[CacheQueueService] Peek track from cache: ${track.info}`);
+				return track;
+			}
+			this.logger.debug(`[CacheQueueService] No track to peek for guild ${guildId}`);
+			return null;
+		} catch (error) {
+			this.logger.error(
+				this.locale.t(`messages.cacheQueueService.errors.get_track`, {
+					guildId,
+				}),
+				error instanceof Error ? error.message : String(error),
+			);
+			return null;
+		}
+	}
+
 	clearGuildCache(guildId: string): void {
+		this.logger.debug(`[CacheQueueService] clearGuildCache called for guild ${guildId}`);
 		this.trackCache.delete(guildId);
 		this.queueCache.delete(guildId);
 		const keys = [
@@ -452,12 +555,14 @@ export default class CacheQueueService {
 	}
 
 	clearAllCache(): void {
+		this.logger.debug(`[CacheQueueService] clearAllCache called`);
 		this.trackCache.clear();
 		this.queueCache.clear();
 		this.cache.clear();
 	}
 
 	private invalidateQueueCache(guildId: string): void {
+		this.logger.debug(`[CacheQueueService] Invalidating queue cache for guild ${guildId}`);
 		this.queueCache.delete(guildId);
 	}
 }

@@ -198,8 +198,10 @@ export default class PlayerManager {
 	public async setVolume(guildId: string, volume: number): Promise<void> {
 		if (guildId) {
 			try {
-				// Получаем плеер и ждем завершения установки громкости
-				await this.getPlayer(guildId).effects.setVolume(volume);
+				const player = this.getPlayer(guildId);
+				await player.effects.setVolume(volume);
+				player.state.volume = volume;
+				this.queueService.setVolume(guildId, volume);
 				this.logger.debug(`Volume for guild ${guildId} set to ${volume}%`);
 			} catch (error) {
 				this.logger.error(

@@ -42,6 +42,7 @@ export default class PlayerService extends EventEmitter {
 		this.trackManager = new TrackManager(bot);
 		this.connectionManager = new ConnectionManager(guildId, bot);
 		this.state = this.getInitialState();
+		this.state.volume = this.bot.queueService.getVolume(this.guildId);
 		this.queue = new PlayerQueue(
 			guildId,
 			bot,
@@ -55,22 +56,26 @@ export default class PlayerService extends EventEmitter {
 
 	private setupEvents(): void {
 		this.player.on(AudioPlayerStatus.Playing, () => {
+			this.bot?.logger.debug("[PlayerService] AudioPlayerStatus.Playing event received");
 			this.state.isPlaying = true;
 			this.state.pause = false;
 			this.emit(PlayerServiceEvents.PLAYING);
 		});
 
 		this.player.on(AudioPlayerStatus.Paused, () => {
+			this.bot?.logger.debug("[PlayerService] AudioPlayerStatus.Paused event received");
 			this.state.isPlaying = false;
 			this.state.pause = true;
 			this.emit(PlayerServiceEvents.PAUSED);
 		});
 
 		this.player.on(AudioPlayerStatus.Idle, () => {
+			this.bot?.logger.debug("[PlayerService] AudioPlayerStatus.Idle event received");
 			this.handleTrackEnd();
 		});
 
-		this.player.on("error", () => {
+		this.player.on("error", (error) => {
+			this.bot?.logger.error("[PlayerService] AudioPlayer error event received:", error);
 			this.handleTrackEnd();
 		});
 
@@ -88,6 +93,7 @@ export default class PlayerService extends EventEmitter {
 		});
 
 		this.connectionManager.on("disconnected", () => {
+			this.bot?.logger.debug("[PlayerService] Disconnected event received");
 			this.handleDisconnection();
 		});
 
@@ -118,6 +124,7 @@ export default class PlayerService extends EventEmitter {
 	}
 
 	private handleDisconnection(): void {
+		this.bot?.logger.debug("[PlayerService] handleDisconnection called");
 		this.player.stop();
 		this.audioService.destroyCurrentStreamSafe();
 		this.resetState();
@@ -126,42 +133,60 @@ export default class PlayerService extends EventEmitter {
 
 	async playOrQueueTrack(track: Track, interaction?: CommandInteraction) {
 		if (!track) return;
+		
+		this.bot?.logger.debug(`[PlayerService] playOrQueueTrack called for track: ${track.info}`);
+		this.bot?.logger.debug(`[PlayerService] Current state - isPlaying: ${this.state.isPlaying}, isConnected: ${!!this.connectionManager.getConnection()}`);
+		
 		const isConnected = !!this.connectionManager.getConnection();
 		if (!isConnected && interaction) {
+			this.bot?.logger.debug(`[PlayerService] Not connected, joining channel`);
 			await this.joinChannel(interaction);
 		}
 		if (this.state.isPlaying) {
+			this.bot?.logger.debug(`[PlayerService] Currently playing, adding to queue`);
 			await this.queue.queueTrack(track);
 		} else {
+			this.bot?.logger.debug(`[PlayerService] Not playing, starting playback`);
 			const success = await this.playTrack(track);
 			if (!success) return;
 		}
 		if (!this.state.nextTrack) {
-			this.state.nextTrack = await this.queue.loadNextTrack();
+			this.bot?.logger.debug(`[PlayerService] Loading next track for display`);
+			this.state.nextTrack = await this.queue.peekNextTrack();
 		}
 	}
 
 	async skip(): Promise<void> {
 		try {
+			this.bot?.logger.debug("[PlayerService] skip called");
 			this.state.loop = false;
 			this.bot?.queueService.setLoop(this.guildId, false);
 			await this.effects.setVolume(0, 1000, false);
 			await new Promise((resolve) => setTimeout(resolve, 2000));
 			this.player.stop();
 			await this.audioService.destroyCurrentStreamSafe();
+			await this.queue.playNextTrack(
+				this.state.currentTrack,
+				this.state.loop,
+				this.playTrack.bind(this),
+				this.tryPlayRecommendations.bind(this),
+			);
 		} catch (error) {
-			this.emit(PlayerServiceEvents.ERROR, error);
+			this.bot?.logger.error("Failed to skip track:", error);
 		}
 	}
 
 	async playTrack(track: Track): Promise<boolean> {
 		try {
+			this.bot?.logger.debug(`[PlayerService] playTrack called for track: ${track.info}`);
+
 			await this.audioService.destroyCurrentStreamSafe();
 			const trackUrl = await this.trackManager.getTrackUrl(
 				track.trackId,
 				track.source,
 			);
 			if (!trackUrl) {
+				this.bot?.logger.debug(`[PlayerService] No track URL found, trying next track`);
 				await this.queue.playNextTrack(
 					this.state.currentTrack,
 					this.state.loop,
@@ -184,8 +209,10 @@ export default class PlayerService extends EventEmitter {
 				this.effects.setVolume(0, 2000, false),
 			);
 			this.emit(PlayerServiceEvents.TRACK_STARTED, track);
+			this.bot?.logger.debug(`[PlayerService] Track started successfully: ${track.info}`);
 			return true;
 		} catch (error) {
+			this.bot?.logger.error(`[PlayerService] Error playing track: ${error}`);
 			await this.queue.playNextTrack(
 				this.state.currentTrack,
 				this.state.loop,
@@ -200,12 +227,17 @@ export default class PlayerService extends EventEmitter {
 		if (!this.state.connection) return;
 
 		try {
+			this.bot?.logger.debug("[PlayerService] togglePause called");
 			const status = this.player.state.status;
+			this.bot?.logger.debug(`[PlayerService] Current player status: ${status}`);
+			
 			switch (status) {
 				case AudioPlayerStatus.Playing:
+					this.bot?.logger.debug("[PlayerService] Pausing player");
 					this.player.pause();
 					break;
 				case AudioPlayerStatus.Paused:
+					this.bot?.logger.debug("[PlayerService] Unpausing player");
 					this.player.unpause();
 					break;
 			}
@@ -215,6 +247,8 @@ export default class PlayerService extends EventEmitter {
 	}
 
 	private async handleTrackEnd() {
+		this.bot?.logger.debug("[PlayerService] handleTrackEnd called");
+
 		if (this.fadeOutTimer) {
 			clearTimeout(this.fadeOutTimer);
 			this.fadeOutTimer = null;
@@ -224,6 +258,10 @@ export default class PlayerService extends EventEmitter {
 		this.state.isPlaying = false;
 		this.state.pause = false;
 		this.emit(PlayerServiceEvents.TRACK_ENDED, prevTrack);
+
+		this.bot?.logger.debug(`[PlayerService] Previous track: ${prevTrack?.info || 'unknown'}`);
+		this.bot?.logger.debug(`[PlayerService] Loop enabled: ${this.state.loop}`);
+
 		await this.queue.playNextTrack(
 			prevTrack,
 			this.state.loop,
@@ -233,6 +271,7 @@ export default class PlayerService extends EventEmitter {
 	}
 
 	private async tryPlayRecommendations() {
+		this.bot?.logger.debug("[PlayerService] tryPlayRecommendations called");
 		await this.queue.tryPlayRecommendations(
 			this.state.currentTrack,
 			this.playTrack.bind(this),
@@ -240,8 +279,10 @@ export default class PlayerService extends EventEmitter {
 	}
 
 	async joinChannel(interaction: CommandInteraction) {
+		this.bot?.logger.debug("[PlayerService] joinChannel called");
 		const connection = await this.connectionManager.joinChannel(interaction);
 		connection.subscribe(this.player);
+		this.bot?.logger.debug("[PlayerService] Channel joined and player subscribed");
 	}
 
 	async destroy(): Promise<void> {
@@ -266,10 +307,12 @@ export default class PlayerService extends EventEmitter {
 	}
 
 	private resetState() {
+		this.bot?.logger.debug("[PlayerService] resetState called");
 		this.state = this.getInitialState();
 	}
 
 	private getInitialState(): PlayerState {
+		this.bot?.logger.debug("[PlayerService] getInitialState called");
 		return {
 			connection: null,
 			isPlaying: false,
