@@ -102,6 +102,8 @@ export default class CacheQueueService {
 	async setTrack(guildId: string, track: Omit<Track, "id">): Promise<void> {
 		try {
 			this.logger.debug(`[CacheQueueService] setTrack called for guild ${guildId}, track: ${track.info}`);
+			// Adding explicit track implies new user intent: reset wave state
+			this.clearWaveState(guildId);
 			
 			const validatedTrack = TrackSchema.parse(track);
 			let guildCache = this.trackCache.get(guildId) || new Map<string, Track>();
@@ -129,6 +131,8 @@ export default class CacheQueueService {
 	async setTracks(guildId: string, tracks: Omit<Track, "id">[]): Promise<void> {
 		try {
 			this.logger.debug(`[CacheQueueService] setTracks called for guild ${guildId}, tracks count: ${tracks.length}`);
+			// Adding a batch (e.g., playlist) also resets wave state
+			this.clearWaveState(guildId);
 			
 			if (!tracks || tracks.length === 0) return;
 
@@ -330,11 +334,11 @@ export default class CacheQueueService {
 			const queueData = this.queueCache.get(guildId);
 			if (queueData) {
 				this.logger.debug(`[CacheQueueService] Returning wave status from queue cache: ${queueData.waveStatus}`);
-				return queueData.waveStatus || false;
+				return queueData.waveStatus ?? false;
 			}
 
 			const key = `wave:${guildId}`;
-			const waveStatus = this.cache.get(key) || false;
+			const waveStatus = (this.cache.get(key) as boolean | undefined) ?? false;
 			this.logger.debug(`[CacheQueueService] Returning wave status from cache: ${waveStatus}`);
 			return waveStatus;
 		} catch (error) {
@@ -348,11 +352,20 @@ export default class CacheQueueService {
 		}
 	}
 
+	clearWaveState(guildId: string): void {
+		this.logger.debug(`[CacheQueueService] clearWaveState called for guild ${guildId}`);
+		this.cache.delete(`waveSeed:${guildId}`);
+		this.cache.delete(`wavePos:${guildId}`);
+	}
+
 	setWave(guildId: string, wave: boolean): void {
 		try {
 			this.logger.debug(`[CacheQueueService] setWave called for guild ${guildId}, wave: ${wave}`);
 			const key = `wave:${guildId}`;
 			this.cache.set(key, wave);
+			if (!wave) {
+				this.clearWaveState(guildId);
+			}
 
 			const queueData = this.queueCache.get(guildId);
 			if (queueData) {
@@ -466,6 +479,8 @@ export default class CacheQueueService {
 				`loop:${guildId}`,
 				`wave:${guildId}`,
 				`volume:${guildId}`,
+				`waveSeed:${guildId}`,
+				`wavePos:${guildId}`,
 			];
 			keys.forEach((key) => this.cache.delete(key));
 

@@ -19,13 +19,13 @@ export class WaveCommand {
 				);
 			}
 
-			player.state.wave = !player.state.wave;
+			const newWave = !player.state.wave;
 
-			await bot.playerManager.setWave(interaction.guildId!, player.state.wave);
+			await bot.playerManager.setWave(interaction.guildId!, newWave);
 
 			return await bot.commandService.reply(
 				interaction,
-				player.state.wave ? "commands.wave.enabled" : "commands.wave.disabled",
+				newWave ? "commands.wave.enabled" : "commands.wave.disabled",
 			);
 		} catch (error) {
 			bot.logger.error(

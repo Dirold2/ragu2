@@ -77,7 +77,23 @@ export default class CommandService {
 				});
 			}
 
-			await interaction.editReply({ content });
+			try {
+				await interaction.editReply({ content });
+			} catch (err) {
+				// Fallback: if the original reply cannot be edited (expired/already acknowledged), send follow-up
+				if (err instanceof DiscordAPIError && [10008, 10062, 40060].includes(Number(err.code))) {
+					try {
+						await interaction.followUp({
+							content,
+							flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
+						});
+					} catch (followErr) {
+						this.handleError(followErr, interaction);
+					}
+				} else {
+					throw err;
+				}
+			}
 
 			// Обновление кэша
 			this.interactionCache.set(cacheKey, { content, timestamp: Date.now() });

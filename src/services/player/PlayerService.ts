@@ -104,11 +104,12 @@ export default class PlayerService extends EventEmitter {
 				// Stop current playback gracefully and move to next track
 				this.player.stop();
 				await this.audioService.destroyCurrentStreamSafe();
+				const lastTrack = this.state.currentTrack;
 				await this.queue.playNextTrack(
-					this.state.currentTrack,
+					lastTrack,
 					this.state.loop,
 					this.playTrack.bind(this),
-					this.tryPlayRecommendations.bind(this),
+					() => this.queue.tryPlayRecommendations(lastTrack, this.playTrack.bind(this)),
 				);
 			} catch (e) {
 				this.bot?.logger.error(
@@ -159,17 +160,22 @@ export default class PlayerService extends EventEmitter {
 	async skip(): Promise<void> {
 		try {
 			this.bot?.logger.debug("[PlayerService] skip called");
+			if (this.fadeOutTimer) {
+				clearTimeout(this.fadeOutTimer);
+				this.fadeOutTimer = null;
+			}
 			this.state.loop = false;
 			this.bot?.queueService.setLoop(this.guildId, false);
 			await this.effects.setVolume(0, 1000, false);
 			await new Promise((resolve) => setTimeout(resolve, 2000));
 			this.player.stop();
 			await this.audioService.destroyCurrentStreamSafe();
+			const lastTrack = this.state.currentTrack;
 			await this.queue.playNextTrack(
-				this.state.currentTrack,
+				lastTrack,
 				this.state.loop,
 				this.playTrack.bind(this),
-				this.tryPlayRecommendations.bind(this),
+				() => this.queue.tryPlayRecommendations(lastTrack, this.playTrack.bind(this)),
 			);
 		} catch (error) {
 			this.bot?.logger.error("Failed to skip track:", error);
@@ -187,11 +193,12 @@ export default class PlayerService extends EventEmitter {
 			);
 			if (!trackUrl) {
 				this.bot?.logger.debug(`[PlayerService] No track URL found, trying next track`);
+				const lastTrack = this.state.currentTrack;
 				await this.queue.playNextTrack(
-					this.state.currentTrack,
+					lastTrack,
 					this.state.loop,
 					this.playTrack.bind(this),
-					this.tryPlayRecommendations.bind(this),
+					() => this.queue.tryPlayRecommendations(lastTrack, this.playTrack.bind(this)),
 				);
 				return false;
 			}
@@ -213,11 +220,12 @@ export default class PlayerService extends EventEmitter {
 			return true;
 		} catch (error) {
 			this.bot?.logger.error(`[PlayerService] Error playing track: ${error}`);
+			const lastTrack = this.state.currentTrack;
 			await this.queue.playNextTrack(
-				this.state.currentTrack,
+				lastTrack,
 				this.state.loop,
 				this.playTrack.bind(this),
-				this.tryPlayRecommendations.bind(this),
+				() => this.queue.tryPlayRecommendations(lastTrack, this.playTrack.bind(this)),
 			);
 			return false;
 		}
@@ -266,15 +274,7 @@ export default class PlayerService extends EventEmitter {
 			prevTrack,
 			this.state.loop,
 			this.playTrack.bind(this),
-			this.tryPlayRecommendations.bind(this),
-		);
-	}
-
-	private async tryPlayRecommendations() {
-		this.bot?.logger.debug("[PlayerService] tryPlayRecommendations called");
-		await this.queue.tryPlayRecommendations(
-			this.state.currentTrack,
-			this.playTrack.bind(this),
+			() => this.queue.tryPlayRecommendations(prevTrack, this.playTrack.bind(this)),
 		);
 	}
 

@@ -14,6 +14,9 @@ export class PlayerQueue {
 	async queueTrack(track: Track): Promise<void> {
 		this.bot.logger.debug(`[PlayerQueue] queueTrack called for guild ${this.guildId}, track: ${track.info}`);
 		
+		// User explicitly queued a track: reset wave state
+		this.bot.queueService.clearWaveState(this.guildId);
+		
 		if (this.guildId) {
 			await this.bot.queueService.setTrack(this.guildId, {
 				...track,
@@ -68,6 +71,8 @@ export class PlayerQueue {
 			const nextTrack = await this.loadNextTrack();
 			if (nextTrack) {
 				this.bot.logger.debug(`[PlayerQueue] Found next track: ${nextTrack.info}`);
+				// Playing a real queued track: reset wave state so new intent takes precedence
+				this.bot.queueService.clearWaveState(this.guildId);
 				await playTrack(nextTrack);
 			} else {
 				this.bot.logger.debug(`[PlayerQueue] No next track found, trying recommendations`);
@@ -87,20 +92,37 @@ export class PlayerQueue {
 			const waveEnabled = this.bot.queueService.getWave(this.guildId);
 			this.bot.logger.debug(`[PlayerQueue] Wave enabled: ${waveEnabled}`);
 			
-			if (waveEnabled && lastTrack?.trackId && lastTrack.source === "yandex") {
-				this.bot.logger.debug(`[PlayerQueue] Getting recommendations for Yandex track`);
+			if (
+				waveEnabled &&
+				lastTrack?.trackId &&
+				lastTrack.source === "yandex"
+			) {
+				this.bot.logger.debug(
+					`[PlayerQueue] Getting recommendations for track: ${lastTrack.trackId}`,
+				);
 				const recommendations = await this.trackmanager.getRecommendations(
 					lastTrack.trackId,
 				);
 				if (recommendations.length > 0) {
-					const nextTrack = {
-						...recommendations[0],
+					// Enqueue recommendations so they play in order, not just one
+					const tracksToQueue = recommendations.map((r) => ({
+						...r,
 						requestedBy: lastTrack.requestedBy,
-					};
-					this.bot.logger.debug(`[PlayerQueue] Playing recommendation: ${nextTrack.info}`);
-					await playTrack(nextTrack);
-					this.bot.queueService.setLastTrackID(this.guildId, nextTrack.trackId);
-					return;
+						waveStatus: true,
+					}));
+					await this.bot.queueService.setTracks(this.guildId, tracksToQueue);
+					const nextTrack = await this.loadNextTrack();
+					if (nextTrack) {
+						this.bot.logger.debug(
+							`[PlayerQueue] Playing first enqueued recommendation: ${nextTrack.info}`,
+						);
+						await playTrack(nextTrack);
+						this.bot.queueService.setLastTrackID(
+							this.guildId,
+							nextTrack.trackId,
+						);
+						return;
+					}
 				}
 			}
 			this.bot.logger.debug(`[PlayerQueue] No recommendations available, emitting QUEUE_EMPTY`);

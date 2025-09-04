@@ -333,31 +333,53 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 	async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
 		await this.ensureInitialized();
+		const cacheKey = `recommendations_${trackId}`;
+		const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
+		if (cachedResults) return cachedResults;
+
+		// Сначала пробуем станцию через официальный метод API
 		try {
-			const cacheKey = `recommendations_${trackId}`;
-			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-			if (cachedResults) return cachedResults;
+			bot.logger.debug(`[Yandex] recommendations via station: track:${trackId}`);
+			const stationId = `track:${trackId}`;
+			const station = await this.api.getStationTracks(stationId);
+			const collected: SearchTrackResult[] = (station.sequence ?? [])
+				.map((item: any) => item?.track)
+				.filter(Boolean)
+				.slice(0, 5)
+				.map((t: any) => ({
+					id: String(t.id),
+					title: t.title,
+					artists: (t.artists ?? []).map((a: any) => ({ name: a.name })),
+					source: "yandex",
+				}))
+				.map((track: any) => this.validateTrackResult(track))
+				.filter((t: any): t is SearchTrackResult => t !== null);
 
-			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
-			if (!similarTracks?.similarTracks) {
-				bot.logger.warn(
-					bot.locale.t("plugins.yandex.errors.no_similar_tracks_found", {
-						trackId,
-					}),
-				);
-				return [];
+			if (collected.length > 0) {
+				bot.logger.debug(`[Yandex] station collected=${collected.length}`);
+				this.cache.set(cacheKey, collected);
+				return collected;
 			}
-
+		} catch (e) {
+			bot.logger.warn(
+				bot.locale.t("plugins.yandex.errors.error_fetching_similar_tracks", { trackId }),
+				e as Error,
+			);
+		}
+		
+		try {
+			bot.logger.debug(`[Yandex] recommendations via similar: track:${trackId}`);
+			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
+			if (!similarTracks?.similarTracks) return [];
 			const results = similarTracks.similarTracks
 				.map((track: TrackYandex) => this.formatTrackInfo(track))
-				.map((track: { id: string; title: string; artists: { name: string; }[]; source: string; albums?: { title?: string | undefined; }[] | undefined; durationMs?: number | undefined; cover?: string | undefined; url?: string | undefined; items?: string | undefined; }) => this.validateTrackResult(track))
-				.filter((t): t is SearchTrackResult => t !== null);
-
+				.map((track: any) => this.validateTrackResult(track))
+				.filter((t: any): t is SearchTrackResult => t !== null);
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
-			bot.logger.error(bot.locale.t(
-				"plugins.yandex.errors.error_fetching_similar_tracks", {trackId}),
+			bot.logger.error(
+				bot.locale.t("plugins.yandex.errors.error_fetching_similar_tracks", { trackId }),
 				error,
 			);
 			return [];
