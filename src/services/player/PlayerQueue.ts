@@ -104,25 +104,17 @@ export class PlayerQueue {
 					lastTrack.trackId,
 				);
 				if (recommendations.length > 0) {
-					// Enqueue recommendations so they play in order, not just one
-					const tracksToQueue = recommendations.map((r) => ({
-						...r,
+					const nextTrack = {
+						...recommendations[0],
 						requestedBy: lastTrack.requestedBy,
 						waveStatus: true,
-					}));
-					await this.bot.queueService.setTracks(this.guildId, tracksToQueue);
-					const nextTrack = await this.loadNextTrack();
-					if (nextTrack) {
-						this.bot.logger.debug(
-							`[PlayerQueue] Playing first enqueued recommendation: ${nextTrack.info}`,
-						);
-						await playTrack(nextTrack);
-						this.bot.queueService.setLastTrackID(
-							this.guildId,
-							nextTrack.trackId,
-						);
-						return;
-					}
+					};
+					this.bot.logger.debug(
+						`[PlayerQueue] Playing recommendation: ${nextTrack.info}`,
+					);
+					await playTrack(nextTrack);
+					this.bot.queueService.setLastTrackID(this.guildId, nextTrack.trackId);
+					return;
 				}
 			}
 			this.bot.logger.debug(`[PlayerQueue] No recommendations available, emitting QUEUE_EMPTY`);

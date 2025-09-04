@@ -9,6 +9,7 @@ import translations from "./locales/en.json" with { type: "json" };
 
 import { config } from "@dotenvx/dotenvx";
 import { resolve } from "path";
+import { setGlobalDispatcher, Agent } from "undici";
 
 config({ path: resolve(dirname(import.meta), "../.env") });
 
@@ -24,6 +25,11 @@ locale.load();
 async function run() {
 	// Регистрируем обработчики graceful shutdown
 	registerShutdownHandlers();
+
+	// Increase undici connect timeout to reduce Discord connection timeouts
+	try {
+		setGlobalDispatcher(new Agent({ connect: { timeout: 20000 } }));
+	} catch {}
 
 	await bot.initialize();
 

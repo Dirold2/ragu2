@@ -22,6 +22,10 @@ export interface TrackYandex {
 	coverUri: string | undefined;
 }
 
+type YMArtistLite = { name: string };
+type YMTrackLite = { id: number | string; title: string; artists: YMArtistLite[] };
+type YMSequenceItem = { track?: YMTrackLite | null }
+
 type KeyType = string;
 type ValueType = any;
 type ContextType = undefined;
@@ -337,44 +341,80 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
 		if (cachedResults) return cachedResults;
 
-		// Сначала пробуем станцию через официальный метод API
 		try {
-			bot.logger.debug(`[Yandex] recommendations via station: track:${trackId}`);
-			const stationId = `track:${trackId}`;
-			const station = await this.api.getStationTracks(stationId);
-			const collected: SearchTrackResult[] = (station.sequence ?? [])
-				.map((item: any) => item?.track)
-				.filter(Boolean)
-				.slice(0, 5)
-				.map((t: any) => ({
-					id: String(t.id),
-					title: t.title,
-					artists: (t.artists ?? []).map((a: any) => ({ name: a.name })),
-					source: "yandex",
-				}))
-				.map((track: any) => this.validateTrackResult(track))
-				.filter((t: any): t is SearchTrackResult => t !== null);
+			bot.logger.debug(`recommendations via rotor session create (track:${trackId})`, { module: "Yandex" });
+
+			// --- START OF REWRITE ---
+			const session = await this.api.createRotorSession([`track:${trackId}`], true);
+
+			const seq = (session.sequence ?? []) as YMSequenceItem[];
+			let collected: SearchTrackResult[] = [];
+
+			// Собираем до 5 треков из первой последовательности
+			for (const item of seq) {
+				if (item.track && collected.length < 5) {
+					const t = item.track;
+					const result: SearchTrackResult | null = this.validateTrackResult({
+						id: String(t.id),
+						title: t.title,
+						artists: t.artists.map((a) => ({ name: a.name })),
+						source: "yandex",
+					});
+					if (result) {
+						collected.push(result);
+					}
+				}
+				if (collected.length >= 5) break;
+			}
+
+			const stationIdFromSession: string = session.radioSessionId;
+
+			// Если есть radioSessionId, пробуем получить еще треков
+			if (stationIdFromSession) {
+				try {
+					const st = await this.api.getStationTracks(stationIdFromSession);
+					const moreSeq = (st.sequence ?? []) as YMSequenceItem[];
+					for (const item of moreSeq) {
+						if (item.track && collected.length < 10) {
+							const t = item.track;
+							const result: SearchTrackResult | null = this.validateTrackResult({
+								id: String(t.id),
+								title: t.title,
+								artists: t.artists.map((a) => ({ name: a.name })),
+								source: "yandex",
+							});
+							if (result) {
+								collected.push(result);
+							}
+						}
+						if (collected.length >= 10) break;
+					}
+				} catch {
+					// ignore
+				}
+			}
 
 			if (collected.length > 0) {
-				bot.logger.debug(`[Yandex] station collected=${collected.length}`);
+				bot.logger.debug(`[Yandex] rotor session collected=${collected.length}`);
 				this.cache.set(cacheKey, collected);
 				return collected;
 			}
+			// --- END OF REWRITE ---
 		} catch (e) {
 			bot.logger.warn(
 				bot.locale.t("plugins.yandex.errors.error_fetching_similar_tracks", { trackId }),
 				e as Error,
 			);
 		}
-		
+
 		try {
 			bot.logger.debug(`[Yandex] recommendations via similar: track:${trackId}`);
 			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
 			if (!similarTracks?.similarTracks) return [];
 			const results = similarTracks.similarTracks
 				.map((track: TrackYandex) => this.formatTrackInfo(track))
-				.map((track: any) => this.validateTrackResult(track))
-				.filter((t: any): t is SearchTrackResult => t !== null);
+				.map((track) => this.validateTrackResult(track))
+				.filter((t): t is SearchTrackResult => t !== null);
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {

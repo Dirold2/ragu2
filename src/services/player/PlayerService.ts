@@ -212,8 +212,13 @@ export default class PlayerService extends EventEmitter {
 			const durationMs = track.durationMs
 				? track.durationMs
 				: await this.trackManager.getDuration(trackUrl);
-			this.fadeOutTimer = await this.effects.scheduleFadeOut(durationMs, () =>
-				this.effects.setVolume(0, 2000, false),
+			const scheduledForTrackId = track.trackId;
+			this.fadeOutTimer = await this.effects.scheduleFadeOut(
+				durationMs,
+				async () => {
+					if (this.state.currentTrack?.trackId !== scheduledForTrackId) return;
+					await this.effects.setVolume(0, 2000, false);
+				},
 			);
 			this.emit(PlayerServiceEvents.TRACK_STARTED, track);
 			this.bot?.logger.debug(`[PlayerService] Track started successfully: ${track.info}`);

@@ -85,6 +85,38 @@ const SHOW_SOURCE = (() => {
 	return !(lowered === "0" || lowered === "false" || lowered === "off");
 })();
 
+// Debug filtering by module
+let DEBUG_ALL = false;
+let debugInclude = new Set<string>();
+let debugExclude = new Set<string>();
+
+const parseCsv = (v?: string | null): string[] =>
+	(v ?? "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+
+(() => {
+	const includeRaw = process.env.DEBUG_MODULES?.trim();
+	const excludeRaw = process.env.DEBUG_EXCLUDE?.trim();
+	if (includeRaw) {
+		const list = parseCsv(includeRaw);
+		if (list.includes("*")) DEBUG_ALL = true;
+		for (const m of list) if (m !== "*") debugInclude.add(m.toLowerCase());
+	}
+	if (excludeRaw) {
+		for (const m of parseCsv(excludeRaw)) debugExclude.add(m.toLowerCase());
+	}
+})();
+
+const isDebugEnabledForModule = (moduleName?: string): boolean => {
+	const m = (moduleName || "").toLowerCase();
+	if (debugExclude.has(m)) return false;
+	if (DEBUG_ALL) return true;
+	if (debugInclude.size === 0) return true; // default: allow unless include set is defined
+	return debugInclude.has(m);
+};
+
 async function ensureLogDirExists(): Promise<void> {
 	try {
 		await fs.access(logDir);
@@ -154,6 +186,10 @@ const addCallerInfo = winston.format((info: ExtendedLogInfo) => {
 
 const createFormatter = (opts: { colorizeLevelName: boolean }) =>
 	winston.format.printf((info: ExtendedLogInfo) => {
+		// Drop debug logs not enabled for the module
+		if (String(info.level).toLowerCase() === "debug") {
+			if (!isDebugEnabledForModule(info.module)) return "";
+		}
 		const timestamp = info.timestamp as string;
 		const levelStr = opts.colorizeLevelName
 			? colorizeLevel(info.level)

@@ -18,8 +18,8 @@ export class SkipCommand {
 					"commands.skip.errors.not_found",
 				);
 			}
-			await bot.playerManager.skip(interaction.guildId!);
 			await bot.commandService.reply(interaction, "commands.skip.skipped");
+			await bot.playerManager.skip(interaction.guildId!);
 		} catch (error) {
 			bot.logger.error(
 				bot.locale.t("commands.skip.errors.playback", {
