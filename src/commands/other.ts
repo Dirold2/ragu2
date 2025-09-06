@@ -21,8 +21,7 @@ export class OtherCommand {
 	): Promise<void> {
 		switch (command) {
 			case "history": {
-				const userId = interaction.user.id;
-				const tracks = await bot.queueService.getLastPlayedTracks(userId);
+				const tracks = await bot.queueService.getLastPlayedTracks();
 
 				if (tracks.length === 0) {
 					await bot.commandService.reply(

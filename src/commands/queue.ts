@@ -10,7 +10,6 @@ import { Discord, Slash } from "discordx";
 import { bot } from "../bot.js";
 
 interface Track {
-	url: string;
 	info: string;
 	source: string;
 	trackId?: string;
