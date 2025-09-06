@@ -120,8 +120,10 @@
 				"clear_queue": "Ошибка очистки очереди для сервера {guildId}",
 				"count_tracks": "Ошибка подсчета треков для сервера {guildId}",
 				"remove_track": "Ошибка удаления трека {trackId} из сервера {guildId}",
-				"shuffle_tracks": "",
-				"get_queue_length": ""
+				"shuffle_tracks": "Ошибка перемешивания треков для сервера {guildId}: {error}",
+				"get_queue_length": "Ошибка получения длины очереди для сервера {guildId}: {error}",
+				"get_track_with_priority": "",
+				"peek_track": ""
 			}
 		},
 		"bot": {

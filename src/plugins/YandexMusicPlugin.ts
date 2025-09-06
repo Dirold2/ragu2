@@ -22,10 +22,6 @@ export interface TrackYandex {
 	coverUri: string | undefined;
 }
 
-type YMArtistLite = { name: string };
-type YMTrackLite = { id: number | string; title: string; artists: YMArtistLite[] };
-type YMSequenceItem = { track?: YMTrackLite | null }
-
 type KeyType = string;
 type ValueType = any;
 type ContextType = undefined;
@@ -125,6 +121,21 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 	private initialized = false;
 	private initMutex = new Mutex();
 	private cacheCleanupInterval: NodeJS.Timeout | null = null;
+	// Сессии по trackId
+	private radioSessions = new Map<string, string>();
+	private radioBatchIds = new Map<string, string>();
+	private radioTrackIds = new Map<string, string[]>();
+	private radioPlayedTracks = new Map<string, Set<string>>();
+	// Локи для сессий
+	private radioSessionPromises = new Map<string, Promise<string | null>>();
+
+	// Кэш результатов
+	private recommendationsCache = new Map<string, SearchTrackResult[]>();
+	// Локи для рекомендаций
+	private recommendationsPromises = new Map<
+		string,
+		Promise<SearchTrackResult[]>
+	>();
 
 	hasAvailableResults = (): boolean => this.results.length > 0;
 
@@ -190,42 +201,24 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 			// Обработка треков (корневой и другие паттерны)
 			if (this.urlTrackRootPattern.test(parsedUrl.pathname)) {
-				const trackId = this.extractId(parsedUrl, this.urlTrackRootPattern);
-				if (trackId) {
-					const [trackInfo] = await this.api.getTrack(Number(trackId));
-					if (!trackInfo) return [];
-					const formatted = this.formatTrackInfo({
-						id: trackInfo.id,
-						title: trackInfo.title,
-						artists: trackInfo.artists,
-						albums: trackInfo.albums,
-						durationMs: trackInfo.durationMs,
-						coverUri: trackInfo.coverUri,
-					});
-					const validated = this.validateTrackResult(formatted);
-					return validated ? [validated] : [];
-				}
+				return await this.processTrackFromUrl(
+					parsedUrl,
+					this.urlTrackRootPattern,
+				);
 			}
 
-			const trackId = this.extractId(parsedUrl, this.urlTrackPattern);
-			if (trackId) {
-				const [trackInfo] = await this.api.getTrack(Number(trackId));
-				if (!trackInfo) return [];
-				const formatted = this.formatTrackInfo({
-					id: trackInfo.id,
-					title: trackInfo.title,
-					artists: trackInfo.artists,
-					albums: trackInfo.albums,
-					durationMs: trackInfo.durationMs,
-					coverUri: trackInfo.coverUri,
-				});
-				const validated = this.validateTrackResult(formatted);
-				return validated ? [validated] : [];
+			if (this.urlTrackPattern.test(parsedUrl.pathname)) {
+				return await this.processTrackFromUrl(parsedUrl, this.urlTrackPattern);
 			}
 
 			return [];
 		} catch (error) {
-			bot.logger.error(bot.locale.t("plugins.yandex.errors.url_processing", {plugin: this.name, error: (error as Error).message}));
+			bot.logger.error(
+				bot.locale.t("plugins.yandex.errors.url_processing", {
+					plugin: this.name,
+					error: (error as Error).message,
+				}),
+			);
 			return [];
 		}
 	}
@@ -262,7 +255,13 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 			return url;
 		} catch (error) {
-			bot.logger.error(bot.locale.t("plugins.yandex.errors.get_track_url", { trackId, error: (error as Error).message }), error);
+			bot.logger.error(
+				bot.locale.t("plugins.yandex.errors.get_track_url", {
+					trackId,
+					error: (error as Error).message,
+				}),
+				error,
+			);
 			return null;
 		}
 	}
@@ -308,7 +307,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
-			bot.logger.error(bot.locale.t("plugins.yandex.errors.playlist.processing"), error);
+			bot.logger.error(
+				bot.locale.t("plugins.yandex.errors.playlist.processing"),
+				error,
+			);
 			return [];
 		}
 	}
@@ -324,111 +326,198 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			const results = albumInfo.volumes
 				.flat()
 				.map((track: TrackYandex) => this.formatTrackInfo(track))
-				.map((track: { id: string; title: string; artists: { name: string; }[]; source: string; albums?: { title?: string | undefined; }[] | undefined; durationMs?: number | undefined; cover?: string | undefined; url?: string | undefined; items?: string | undefined; }) => this.validateTrackResult(track))
-				.filter((t): t is SearchTrackResult => t !== null);
-
-			this.cache.set(cacheKey, results);
-			return results;
-		} catch (error) {
-			bot.logger.error(bot.locale.t("plugins.yandex.errors.track.processing"), error);
-			return [];
-		}
-	}
-
-	async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
-		await this.ensureInitialized();
-		const cacheKey = `recommendations_${trackId}`;
-		const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-		if (cachedResults) return cachedResults;
-
-		try {
-			bot.logger.debug(`recommendations via rotor session create (track:${trackId})`, { module: "Yandex" });
-
-			// --- START OF REWRITE ---
-			const session = await this.api.createRotorSession([`track:${trackId}`], true);
-
-			const seq = (session.sequence ?? []) as YMSequenceItem[];
-			let collected: SearchTrackResult[] = [];
-
-			// Собираем до 5 треков из первой последовательности
-			for (const item of seq) {
-				if (item.track && collected.length < 5) {
-					const t = item.track;
-					const result: SearchTrackResult | null = this.validateTrackResult({
-						id: String(t.id),
-						title: t.title,
-						artists: t.artists.map((a) => ({ name: a.name })),
-						source: "yandex",
-					});
-					if (result) {
-						collected.push(result);
-					}
-				}
-				if (collected.length >= 5) break;
-			}
-
-			const stationIdFromSession: string = session.radioSessionId;
-
-			// Если есть radioSessionId, пробуем получить еще треков
-			if (stationIdFromSession) {
-				try {
-					const st = await this.api.getStationTracks(stationIdFromSession);
-					const moreSeq = (st.sequence ?? []) as YMSequenceItem[];
-					for (const item of moreSeq) {
-						if (item.track && collected.length < 10) {
-							const t = item.track;
-							const result: SearchTrackResult | null = this.validateTrackResult({
-								id: String(t.id),
-								title: t.title,
-								artists: t.artists.map((a) => ({ name: a.name })),
-								source: "yandex",
-							});
-							if (result) {
-								collected.push(result);
-							}
-						}
-						if (collected.length >= 10) break;
-					}
-				} catch {
-					// ignore
-				}
-			}
-
-			if (collected.length > 0) {
-				bot.logger.debug(`[Yandex] rotor session collected=${collected.length}`);
-				this.cache.set(cacheKey, collected);
-				return collected;
-			}
-			// --- END OF REWRITE ---
-		} catch (e) {
-			bot.logger.warn(
-				bot.locale.t("plugins.yandex.errors.error_fetching_similar_tracks", { trackId }),
-				e as Error,
-			);
-		}
-
-		try {
-			bot.logger.debug(`[Yandex] recommendations via similar: track:${trackId}`);
-			const similarTracks = await this.api.getSimilarTracks(Number(trackId));
-			if (!similarTracks?.similarTracks) return [];
-			const results = similarTracks.similarTracks
-				.map((track: TrackYandex) => this.formatTrackInfo(track))
 				.map((track) => this.validateTrackResult(track))
 				.filter((t): t is SearchTrackResult => t !== null);
+
 			this.cache.set(cacheKey, results);
 			return results;
 		} catch (error) {
 			bot.logger.error(
-				bot.locale.t("plugins.yandex.errors.error_fetching_similar_tracks", { trackId }),
+				bot.locale.t("plugins.yandex.errors.track.processing"),
 				error,
 			);
 			return [];
 		}
 	}
 
+	async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
+		await this.ensureInitialized();
+
+		if (this.recommendationsPromises.has(trackId)) {
+			bot.logger.debug(
+				`[Yandex] waiting for in-progress recommendations for track:${trackId}`,
+				{ module: "Yandex" },
+			);
+			return this.recommendationsPromises.get(trackId)!;
+		}
+
+		const promise = (async (): Promise<SearchTrackResult[]> => {
+			try {
+				const fetchStationTracks = async (
+					retry = true,
+				): Promise<SearchTrackResult[]> => {
+					let sessionIdToUse: string | null =
+						this.radioSessions.get(trackId) ?? null;
+
+					if (!sessionIdToUse) {
+						if (!this.radioSessionPromises.has(trackId)) {
+							bot.logger.info(
+								`[Yandex] creating new rotor session for track:${trackId}`,
+								{ module: "Yandex" },
+							);
+
+							const sessionPromise = this.api
+								.createRotorSession([`track:${trackId}`], false)
+								.then((session) => {
+									bot.logger.info(
+										`[Yandex] rotor session created, radioSessionId: ${session.radioSessionId}`,
+										{
+											module: "Yandex",
+										},
+									);
+									this.radioSessions.set(trackId, session.radioSessionId);
+									this.radioBatchIds.set(trackId, session.batchId);
+									this.radioPlayedTracks.set(trackId, new Set()); // Set для отслеживания проигранных
+									return session.radioSessionId;
+								})
+								.catch((err) => {
+									bot.logger.warn(
+										`[Yandex] failed to create rotor session: ${err}`,
+										{ module: "Yandex" },
+									);
+									return null;
+								})
+								.finally(() => {
+									this.radioSessionPromises.delete(trackId);
+								});
+
+							this.radioSessionPromises.set(trackId, sessionPromise);
+						}
+
+						sessionIdToUse = await this.radioSessionPromises.get(trackId)!;
+					}
+
+					if (!sessionIdToUse) {
+						bot.logger.warn(
+							`[Yandex] no valid sessionId for track:${trackId}`,
+							{
+								module: "Yandex",
+							},
+						);
+						return [];
+					}
+
+					try {
+						const queue = this.radioTrackIds.get(trackId) ?? [];
+						bot.logger.info(
+							`[Yandex] fetching station tracks for sessionId: ${sessionIdToUse}`,
+							{ module: "Yandex" },
+						);
+						const st = await this.api.postRotorSessionTracks(sessionIdToUse, {
+							batchId: this.radioBatchIds.get(trackId),
+							queue,
+						});
+
+						const collected: SearchTrackResult[] = [];
+						const playedTracks =
+							this.radioPlayedTracks.get(trackId) ?? new Set<string>();
+
+						for (const item of st.sequence ?? []) {
+							if (!item.track) continue;
+							const t = item.track;
+							const trackIdStr = String(t.id);
+							const trackAlbumIdStr = String(t.albums[0].id);
+
+							const result = this.validateTrackResult({
+								id: trackIdStr,
+								title: t.title,
+								artists: t.artists.map((a) => ({ name: a.name })),
+								durationMs: t.durationMs,
+								source: "yandex",
+								generation: true,
+							});
+
+							if (result) {
+								collected.push(result);
+								playedTracks.add(`${trackIdStr}:${trackAlbumIdStr}`);
+
+								const currentQueue = this.radioTrackIds.get(trackId) ?? [];
+								currentQueue.push(`${result.id}:${result.id}`);
+								this.radioTrackIds.set(trackId, currentQueue);
+
+								bot.logger.debug(
+									`[Yandex] added track: ${trackIdStr} - ${t.title}`,
+									{ module: "Yandex" },
+								);
+							}
+							if (collected.length >= 1) break;
+						}
+
+						this.radioPlayedTracks.set(trackId, playedTracks);
+
+						bot.logger.info(
+							`[Yandex] collected=${collected.length} recommendations for track:${trackId}`,
+							{
+								module: "Yandex",
+								trackIds: collected.map((t) => t.id),
+							},
+						);
+
+						return collected;
+					} catch (err: any) {
+						if (retry && err?.response?.status === 400) {
+							bot.logger.warn(
+								`[Yandex] sessionId=${sessionIdToUse} invalid, regenerating session for track:${trackId}`,
+								{ module: "Yandex" },
+							);
+							this.radioSessions.delete(trackId);
+							this.radioBatchIds.delete(trackId);
+							this.radioPlayedTracks.delete(trackId);
+							this.radioTrackIds.delete(trackId);
+							return fetchStationTracks(false);
+						}
+						return [];
+					}
+				};
+
+				const results = await fetchStationTracks(true);
+
+				if (results.length > 0) {
+					this.recommendationsCache.set(trackId, results);
+				}
+
+				return results;
+			} catch (e) {
+				bot.logger.warn(
+					`[Yandex] error fetching recommendations for trackId:${trackId}`,
+					e as Error,
+				);
+				this.radioSessions.delete(trackId);
+				this.radioBatchIds.delete(trackId);
+				this.radioPlayedTracks.delete(trackId);
+				this.radioTrackIds.delete(trackId);
+				return [];
+			} finally {
+				this.recommendationsPromises.delete(trackId);
+			}
+		})();
+
+		this.recommendationsPromises.set(trackId, promise);
+		return promise;
+	}
+
 	clearCache(): void {
 		this.cache.clear();
 		this.results = [];
+	}
+
+	/**
+	 * Сбрасывает radioSessions для создания новой сессии при следующем запросе рекомендаций
+	 */
+	resetRadioSession(): void {
+		this.radioSessions.clear();
+		this.radioSessionPromises.clear();
+		bot.logger.info(`[Yandex] radioSessions reset`, { module: "Yandex" });
 	}
 
 	getResults = (): SearchTrackResult[] => [...this.results];
@@ -438,7 +527,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		return match?.[1] ?? null;
 	}
 
-	private formatTrackInfo(trackInfo: TrackYandex): SearchTrackResult {
+	private formatTrackInfo(
+		trackInfo: TrackYandex,
+		generation = false,
+	): SearchTrackResult {
 		return {
 			id: trackInfo.id.toString(),
 			title: trackInfo.title,
@@ -447,6 +539,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			durationMs: trackInfo.durationMs ?? 0,
 			cover: trackInfo.coverUri || "",
 			source: "yandex",
+			generation: generation,
 		};
 	}
 
@@ -477,11 +570,13 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			);
 		}
 
-		let config
-		if(username! || password!){
+		let config: any;
+		if (username || password) {
 			config = { access_token, uid, username, password };
+		} else {
+			config = { access_token, uid };
 		}
-		config = { access_token, uid };
+
 		const validation = ConfigSchema.safeParse(config);
 
 		if (!validation.success) {
@@ -507,7 +602,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			await Promise.all([this.wrapper.init(config), this.api.init(config)]);
 			this.initialized = true;
 		} catch (error) {
-			bot.logger.error(bot.locale.t("plugins.yandex.errors.error_initializing_service"), error);
+			bot.logger.error(
+				bot.locale.t("plugins.yandex.errors.error_initializing_service"),
+				error,
+			);
 			throw new Error(
 				bot.locale.t("plugins.yandex.errors.failed_to_initialize"),
 			);
@@ -577,6 +675,34 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 				this.cache.clear();
 			}
 		}, CACHE_CHECK_PERIOD);
+	}
+
+	private async processTrackFromUrl(
+		parsedUrl: URL,
+		pattern: RegExp,
+	): Promise<SearchTrackResult[]> {
+		const trackId = this.extractId(parsedUrl, pattern);
+		if (!trackId) return [];
+
+		try {
+			const [trackInfo] = await this.api.getTrack(Number(trackId));
+			if (!trackInfo) return [];
+
+			const formatted = this.formatTrackInfo({
+				id: trackInfo.id,
+				title: trackInfo.title,
+				artists: trackInfo.artists,
+				albums: trackInfo.albums,
+				durationMs: trackInfo.durationMs,
+				coverUri: trackInfo.coverUri,
+			});
+
+			const validated = this.validateTrackResult(formatted);
+			return validated ? [validated] : [];
+		} catch (error) {
+			bot.logger.error(`Error processing track ${trackId}:`, error);
+			return [];
+		}
 	}
 
 	constructor() {

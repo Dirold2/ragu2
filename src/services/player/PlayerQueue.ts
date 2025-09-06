@@ -12,44 +12,56 @@ export class PlayerQueue {
 	) {}
 
 	async queueTrack(track: Track): Promise<void> {
-		this.bot.logger.debug(`[PlayerQueue] queueTrack called for guild ${this.guildId}, track: ${track.info}`);
-		
+		this.bot.logger.debug(
+			`[PlayerQueue] queueTrack called for guild ${this.guildId}, track: ${track.info}`,
+		);
+
 		// User explicitly queued a track: reset wave state
 		this.bot.queueService.clearWaveState(this.guildId);
-		
+
 		if (this.guildId) {
 			await this.bot.queueService.setTrack(this.guildId, {
 				...track,
 				priority: true,
 			});
 			this.emit(PlayerServiceEvents.TRACK_QUEUED, track);
-			this.bot.logger.debug(`[PlayerQueue] Track queued successfully for guild ${this.guildId}`);
+			this.bot.logger.debug(
+				`[PlayerQueue] Track queued successfully for guild ${this.guildId}`,
+			);
 		} else {
 			this.bot.logger.warn(`[PlayerQueue] No guildId provided for queueTrack`);
 		}
 	}
 
 	async loadNextTrack(): Promise<Track | null> {
-		this.bot.logger.debug(`[PlayerQueue] loadNextTrack called for guild ${this.guildId}`);
-		
+		this.bot.logger.debug(
+			`[PlayerQueue] loadNextTrack called for guild ${this.guildId}`,
+		);
+
 		if (!this.guildId) {
 			this.bot.logger.debug(`[PlayerQueue] No guildId, returning null`);
 			return null;
 		}
-		
+
 		const nextTrack = await this.bot.queueService.getTrack(this.guildId);
-		this.bot.logger.debug(`[PlayerQueue] Next track loaded: ${nextTrack?.info || 'null'}`);
+		this.bot.logger.debug(
+			`[PlayerQueue] Next track loaded: ${nextTrack?.info || "null"}`,
+		);
 		return nextTrack ?? null;
 	}
 
 	async peekNextTrack(): Promise<Track | null> {
-		this.bot.logger.debug(`[PlayerQueue] peekNextTrack called for guild ${this.guildId}`);
+		this.bot.logger.debug(
+			`[PlayerQueue] peekNextTrack called for guild ${this.guildId}`,
+		);
 		if (!this.guildId) {
 			this.bot.logger.debug(`[PlayerQueue] No guildId, returning null`);
 			return null;
 		}
 		const nextTrack = await this.bot.queueService.peekTrack(this.guildId);
-		this.bot.logger.debug(`[PlayerQueue] Peek next track: ${nextTrack?.info || 'null'}`);
+		this.bot.logger.debug(
+			`[PlayerQueue] Peek next track: ${nextTrack?.info || "null"}`,
+		);
 		return nextTrack ?? null;
 	}
 
@@ -59,23 +71,33 @@ export class PlayerQueue {
 		playTrack: (track: Track) => Promise<boolean>,
 		tryPlayRecommendations: () => Promise<void>,
 	): Promise<void> {
-		this.bot.logger.debug(`[PlayerQueue] playNextTrack called for guild ${this.guildId}`);
-		this.bot.logger.debug(`[PlayerQueue] Current track: ${currentTrack?.info || 'unknown'}`);
+		this.bot.logger.debug(
+			`[PlayerQueue] playNextTrack called for guild ${this.guildId}`,
+		);
+		this.bot.logger.debug(
+			`[PlayerQueue] Current track: ${currentTrack?.info || "unknown"}`,
+		);
 		this.bot.logger.debug(`[PlayerQueue] Loop enabled: ${loop}`);
-		
-		if (loop && currentTrack) {
-			this.bot.logger.debug(`[PlayerQueue] Playing current track again due to loop`);
+
+		if (loop && currentTrack && !currentTrack.generation) {
+			this.bot.logger.debug(
+				`[PlayerQueue] Playing current track again due to loop`,
+			);
 			await playTrack(currentTrack);
 		} else {
 			this.bot.logger.debug(`[PlayerQueue] Loading next track from queue`);
 			const nextTrack = await this.loadNextTrack();
 			if (nextTrack) {
-				this.bot.logger.debug(`[PlayerQueue] Found next track: ${nextTrack.info}`);
+				this.bot.logger.debug(
+					`[PlayerQueue] Found next track: ${nextTrack.info}`,
+				);
 				// Playing a real queued track: reset wave state so new intent takes precedence
 				this.bot.queueService.clearWaveState(this.guildId);
 				await playTrack(nextTrack);
 			} else {
-				this.bot.logger.debug(`[PlayerQueue] No next track found, trying recommendations`);
+				this.bot.logger.debug(
+					`[PlayerQueue] No next track found, trying recommendations`,
+				);
 				await tryPlayRecommendations();
 			}
 		}
@@ -86,23 +108,24 @@ export class PlayerQueue {
 		playTrack: (track: Track) => Promise<boolean>,
 	): Promise<void> {
 		try {
-			this.bot.logger.debug(`[PlayerQueue] tryPlayRecommendations called for guild ${this.guildId}`);
-			this.bot.logger.debug(`[PlayerQueue] Last track: ${lastTrack?.info || 'unknown'}`);
-			
+			this.bot.logger.debug(
+				`[PlayerQueue] tryPlayRecommendations called for guild ${this.guildId}`,
+			);
+			this.bot.logger.debug(
+				`[PlayerQueue] Last track: ${lastTrack?.info || "unknown"}`,
+			);
+
 			const waveEnabled = this.bot.queueService.getWave(this.guildId);
 			this.bot.logger.debug(`[PlayerQueue] Wave enabled: ${waveEnabled}`);
-			
-			if (
-				waveEnabled &&
-				lastTrack?.trackId &&
-				lastTrack.source === "yandex"
-			) {
+
+			if (waveEnabled && lastTrack?.trackId && lastTrack.source === "yandex") {
 				this.bot.logger.debug(
 					`[PlayerQueue] Getting recommendations for track: ${lastTrack.trackId}`,
 				);
 				const recommendations = await this.trackmanager.getRecommendations(
 					lastTrack.trackId,
 				);
+
 				if (recommendations.length > 0) {
 					const nextTrack = {
 						...recommendations[0],
@@ -113,14 +136,17 @@ export class PlayerQueue {
 						`[PlayerQueue] Playing recommendation: ${nextTrack.info}`,
 					);
 					await playTrack(nextTrack);
-					this.bot.queueService.setLastTrackID(this.guildId, nextTrack.trackId);
 					return;
 				}
 			}
-			this.bot.logger.debug(`[PlayerQueue] No recommendations available, emitting QUEUE_EMPTY`);
+			this.bot.logger.debug(
+				`[PlayerQueue] No recommendations available, emitting QUEUE_EMPTY`,
+			);
 			this.emit(PlayerServiceEvents.QUEUE_EMPTY);
 		} catch (error) {
-			this.bot.logger.error(`[PlayerQueue] Error in tryPlayRecommendations: ${error}`);
+			this.bot.logger.error(
+				`[PlayerQueue] Error in tryPlayRecommendations: ${error}`,
+			);
 			this.emit(PlayerServiceEvents.QUEUE_EMPTY);
 		}
 	}

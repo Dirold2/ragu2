@@ -81,7 +81,10 @@ export default class CommandService {
 				await interaction.editReply({ content });
 			} catch (err) {
 				// Fallback: if the original reply cannot be edited (expired/already acknowledged), send follow-up
-				if (err instanceof DiscordAPIError && [10008, 10062, 40060].includes(Number(err.code))) {
+				if (
+					err instanceof DiscordAPIError &&
+					[10008, 10062, 40060].includes(Number(err.code))
+				) {
 					try {
 						await interaction.followUp({
 							content,

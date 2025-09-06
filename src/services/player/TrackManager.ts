@@ -71,15 +71,17 @@ export class TrackManager extends EventEmitter {
 				return [];
 			}
 
-			const recommendations = await plugin.getRecommendations(trackId);
-			return recommendations.map(
-				(rec: { id: string; title: string; artists: any[] }) => ({
-					source: "yandex",
-					trackId: rec.id,
-					info: `${rec.title} - ${rec.artists.map((a: { name: string }) => a.name).join(", ")}`,
-					requestedBy: undefined,
-				}),
-			);
+			const rawRecommendations = await plugin.getRecommendations(trackId);
+
+			const recommendations: Track[] = rawRecommendations.map((rec: any) => ({
+				trackId: rec.id,
+				info: `${rec.title} - ${rec.artists?.map((a: any) => a.name).join(", ")}`,
+				source: rec.source,
+				priority: false,
+				durationMs: rec.durationMs,
+				generation: rec.generation,
+			}));
+			return recommendations;
 		} catch (error) {
 			this.bot?.logger.error(
 				`Failed to get recommendations for ${trackId}:`,

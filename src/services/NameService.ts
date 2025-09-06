@@ -353,6 +353,7 @@ export default class NameService {
 				source: track.source || "unknown",
 				priority: false,
 				...(requestedBy && { requestedBy }),
+				generation: false,
 			};
 		});
 
@@ -420,6 +421,7 @@ export default class NameService {
 			priority: isPriority,
 			requestedBy: interaction.user.id,
 			durationMs: track.durationMs,
+			generation: track.generation,
 		};
 	}
 

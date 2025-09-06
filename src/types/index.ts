@@ -22,6 +22,7 @@ export const TrackResultSchema = z.object({
 	source: z.string(),
 	url: z.string().optional(),
 	items: z.string().optional(),
+	generation: z.boolean().default(false),
 });
 
 // Type definition inferred from the TrackResultSchema
@@ -38,6 +39,8 @@ export const TrackSchema = z.object({
 	requestedBy: z.string().optional(),
 	priority: z.boolean().optional(),
 	durationMs: z.number().optional(),
+	stationId: z.string().optional(),
+	generation: z.boolean().default(false),
 });
 
 // Type definition inferred from the TrackSchema

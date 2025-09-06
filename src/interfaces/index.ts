@@ -21,11 +21,13 @@ export interface Track {
 	waveStatus?: boolean;
 	requestedBy?: string;
 	durationMs?: number;
+	generation: boolean;
 }
 
 export interface QueueResult {
 	tracks: Track[];
 	lastTrackId?: string;
+	lastTrack?: Track;
 	waveStatus?: boolean;
 	volume?: number;
 }

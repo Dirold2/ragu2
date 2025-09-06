@@ -21,6 +21,7 @@ export interface PlayerState {
 	volume: number;
 	currentTrack: Track | null;
 	nextTrack: Track | null;
+	lastUserTrack: Track | null;
 	loop: boolean;
 	pause: boolean;
 	wave: boolean;

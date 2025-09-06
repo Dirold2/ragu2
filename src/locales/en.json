@@ -118,7 +118,9 @@
 				"count_tracks": "Error counting tracks for guild {guildId}",
 				"remove_track": "Error removing track {trackId} from guild {guildId}",
 				"shuffle_tracks": "",
-				"get_queue_length": ""
+				"get_queue_length": "",
+				"get_track_with_priority": "",
+				"peek_track": ""
 			}
 		},
 		"bot": {
