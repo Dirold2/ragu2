@@ -361,20 +361,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 					if (!sessionIdToUse) {
 						if (!this.radioSessionPromises.has(trackId)) {
-							bot.logger.info(
-								`[Yandex] creating new rotor session for track:${trackId}`,
-								{ module: "Yandex" },
-							);
-
 							const sessionPromise = this.api
 								.createRotorSession([`track:${trackId}`], false)
 								.then((session) => {
-									bot.logger.info(
-										`[Yandex] rotor session created, radioSessionId: ${session.radioSessionId}`,
-										{
-											module: "Yandex",
-										},
-									);
 									this.radioSessions.set(trackId, session.radioSessionId);
 									this.radioBatchIds.set(trackId, session.batchId);
 									this.radioPlayedTracks.set(trackId, new Set()); // Set для отслеживания проигранных
@@ -409,10 +398,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 					try {
 						const queue = this.radioTrackIds.get(trackId) ?? [];
-						bot.logger.info(
-							`[Yandex] fetching station tracks for sessionId: ${sessionIdToUse}`,
-							{ module: "Yandex" },
-						);
 						const st = await this.api.postRotorSessionTracks(sessionIdToUse, {
 							batchId: this.radioBatchIds.get(trackId),
 							queue,
@@ -454,14 +439,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 						}
 
 						this.radioPlayedTracks.set(trackId, playedTracks);
-
-						bot.logger.info(
-							`[Yandex] collected=${collected.length} recommendations for track:${trackId}`,
-							{
-								module: "Yandex",
-								trackIds: collected.map((t) => t.id),
-							},
-						);
 
 						return collected;
 					} catch (err: any) {

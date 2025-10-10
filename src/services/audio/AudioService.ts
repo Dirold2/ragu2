@@ -1,4 +1,7 @@
-import type { Readable } from "readable-stream";
+import type {
+	Readable as NodeReadable,
+	Transform as NodeTransform,
+} from "stream";
 import type { SimpleFFmpeg } from "./SimpleFfmpegWrapper.js";
 import { request } from "undici";
 import { EventEmitter } from "eventemitter3";
@@ -25,7 +28,7 @@ import type { IncomingHttpHeaders } from "http";
  */
 export class AudioService extends EventEmitter {
 	private processor: AudioProcessor | null = null;
-	private currentInputStream: Readable | null = null;
+	private currentInputStream: NodeReadable | null = null;
 	private ffmpegManager = new FFmpegManager();
 	private currentFFmpegCommand: SimpleFFmpeg | null = null;
 	private currentOptions: AudioProcessingOptions;
@@ -181,7 +184,7 @@ export class AudioService extends EventEmitter {
 		return Math.sign(v) * Math.pow(Math.abs(v), 0.5) * maxDb;
 	}
 
-	async createAudioStreamFromUrl(url: string): Promise<Readable> {
+	async createAudioStreamFromUrl(url: string): Promise<NodeTransform> {
 		// Перед новым стримом очищаем предыдущий
 		await this.destroyCurrentStreamSafe().catch(() => {});
 
@@ -196,7 +199,7 @@ export class AudioService extends EventEmitter {
 			inputFormat = undefined;
 		}
 
-		let body: Readable;
+		let body: NodeReadable;
 		try {
 			// Используем увеличенные таймауты для всех аудио-запросов
 			const requestOptions = {
@@ -205,7 +208,10 @@ export class AudioService extends EventEmitter {
 				bodyTimeout: 120000, // 2 минуты для всех запросов
 			};
 
-			body = await safeRequestStreamWithRetry(url, requestOptions);
+			body = (await safeRequestStreamWithRetry(
+				url,
+				requestOptions,
+			)) as unknown as NodeReadable;
 		} catch (err) {
 			const error = err as Error;
 
@@ -261,13 +267,13 @@ export class AudioService extends EventEmitter {
 	}
 
 	async createProcessedStream(
-		inputStream: Readable,
+		inputStream: NodeReadable,
 		inputFormat?: string,
-	): Promise<Readable> {
+	): Promise<NodeTransform> {
 		const filters = this.buildAudioFilters();
 
 		const ffmpegCommand = (await this.ffmpegManager.createCommand())
-			.inputs(inputStream)
+			.inputs(inputStream as any)
 			.options("-fflags", "nobuffer")
 			.options("-flags", "low_delay")
 			.options("-f", inputFormat ?? "mp3")
@@ -399,7 +405,9 @@ export class AudioService extends EventEmitter {
 		});
 
 		// Pipe ffmpeg output into processor
-		output.pipe(this.processor);
+		(output as unknown as NodeReadable).pipe(
+			this.processor as unknown as NodeTransform,
+		);
 
 		// Optional: if you want to react when ffmpeg finishes/error
 		done.catch((e) => {
@@ -473,7 +481,7 @@ export class AudioService extends EventEmitter {
 		});
 
 		this.emit("streamCreated", this.processor);
-		return this.processor;
+		return this.processor as unknown as NodeTransform;
 	}
 
 	private buildAudioFilters(): string[] {
@@ -501,7 +509,7 @@ export class AudioService extends EventEmitter {
 
 	async createAudioStreamForDiscord(
 		url: string,
-	): Promise<{ stream: Readable; type: StreamType }> {
+	): Promise<{ stream: NodeReadable | NodeTransform; type: StreamType }> {
 		let inputFormat: string | undefined;
 		try {
 			inputFormat = await this.getInputFormatFromHeaders(url);
@@ -518,10 +526,16 @@ export class AudioService extends EventEmitter {
 			};
 
 			if (inputFormat === "opus" || inputFormat === "ogg") {
-				const body = await safeRequestStream(url, requestOptions);
+				const body = (await safeRequestStream(
+					url,
+					requestOptions,
+				)) as unknown as NodeReadable;
 				return { stream: body, type: StreamType.OggOpus };
 			} else if (inputFormat === "webm") {
-				const body = await safeRequestStream(url, requestOptions);
+				const body = (await safeRequestStream(
+					url,
+					requestOptions,
+				)) as unknown as NodeReadable;
 				return { stream: body, type: StreamType.WebmOpus };
 			} else {
 				const processed = await this.createAudioStreamFromUrl(url);

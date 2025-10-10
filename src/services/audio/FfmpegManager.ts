@@ -3,12 +3,13 @@ import {
 	SimpleFFmpeg,
 	type SimpleFFmpegOptions,
 } from "./SimpleFfmpegWrapper.js";
-import { bot } from "../../bot.js";
 
 export interface FFmpegManagerOptions {
 	maxConcurrentProcesses?: number;
 	defaultTimeout?: number;
 	enableMetrics?: boolean;
+	timeoutRetries?: number;
+	timeoutGracePeriod?: number;
 	logger?: {
 		debug: (message: string, meta?: any) => void;
 		warn: (message: string, meta?: any) => void;
@@ -33,23 +34,49 @@ export interface ProcessInfo {
 	status: "running" | "completed" | "failed" | "terminated";
 }
 
+const TERMINATION_ERROR_PATTERNS = [
+	"sigkill",
+	"sigterm",
+	"was killed",
+	"premature close",
+	"err_stream_premature_close",
+	"other side closed",
+	"econnreset",
+	"socketerror",
+	"timeout",
+	"request aborted",
+	"aborted",
+	"write after end",
+	"epipe",
+	"operation timed out",
+	"connection timeout",
+] as const;
+
+const TIMEOUT_ERROR_PATTERNS = [
+	"timeout",
+	"operation timed out",
+	"connection timeout",
+	"request timeout",
+] as const;
+
+type ProcessStatus = "totalCompleted" | "totalFailed" | "totalTerminated";
+
+interface ActiveProcess {
+	command: SimpleFFmpeg;
+	startTime: Date;
+	timeout?: NodeJS.Timeout;
+}
+
+interface QueuedProcess {
+	id: string;
+	factory: () => SimpleFFmpeg;
+	resolve: (command: SimpleFFmpeg) => void;
+	reject: (error: Error) => void;
+}
+
 export class FFmpegManager extends EventEmitter {
-	private activeProcesses = new Map<
-		string,
-		{
-			command: SimpleFFmpeg;
-			startTime: Date;
-			timeout?: NodeJS.Timeout;
-		}
-	>();
-
-	private processQueue: Array<{
-		id: string;
-		factory: () => SimpleFFmpeg;
-		resolve: (command: SimpleFFmpeg) => void;
-		reject: (error: Error) => void;
-	}> = [];
-
+	private activeProcesses = new Map<string, ActiveProcess>();
+	private processQueue: QueuedProcess[] = [];
 	private metrics: ProcessMetrics = {
 		totalCreated: 0,
 		totalCompleted: 0,
@@ -58,7 +85,6 @@ export class FFmpegManager extends EventEmitter {
 		averageExecutionTime: 0,
 		peakConcurrency: 0,
 	};
-
 	private executionTimes: number[] = [];
 	private readonly options: Required<FFmpegManagerOptions>;
 
@@ -66,9 +92,11 @@ export class FFmpegManager extends EventEmitter {
 		super();
 		this.options = {
 			maxConcurrentProcesses: options.maxConcurrentProcesses ?? 5,
-			defaultTimeout: options.defaultTimeout ?? 300000, // 5 minutes
+			defaultTimeout: options.defaultTimeout ?? 300000,
 			enableMetrics: options.enableMetrics ?? true,
-			logger: bot.logger ?? console,
+			timeoutRetries: options.timeoutRetries ?? 1,
+			timeoutGracePeriod: options.timeoutGracePeriod ?? 5000,
+			logger: options.logger ?? console,
 		};
 	}
 
@@ -78,164 +106,210 @@ export class FFmpegManager extends EventEmitter {
 		const processId = this.generateProcessId();
 
 		if (this.activeProcesses.size >= this.options.maxConcurrentProcesses) {
-			return new Promise((resolve, reject) => {
-				this.processQueue.push({
-					id: processId,
-					factory: () => this.createCommandInternal(processId, commandOptions),
-					resolve,
-					reject,
-				});
-				this.options.logger.debug(
-					`[FFmpegManager] Process queued: ${processId}`,
-				);
-			});
+			return this.queueProcess(processId, commandOptions);
 		}
 
 		return this.createCommandInternal(processId, commandOptions);
+	}
+
+	private queueProcess(
+		processId: string,
+		commandOptions: SimpleFFmpegOptions,
+	): Promise<SimpleFFmpeg> {
+		return new Promise((resolve, reject) => {
+			this.processQueue.push({
+				id: processId,
+				factory: () => this.createCommandInternal(processId, commandOptions),
+				resolve,
+				reject,
+			});
+			this.options.logger.debug(`[FFmpegManager] Process queued: ${processId}`);
+		});
 	}
 
 	private createCommandInternal(
 		processId: string,
 		commandOptions: SimpleFFmpegOptions,
 	): SimpleFFmpeg {
-		const command = new SimpleFFmpeg({
-			...commandOptions,
-			loggerTag: commandOptions.loggerTag ?? processId,
-			// Forward manager logger to the SimpleFFmpeg instance unless explicitly provided
-			logger: commandOptions.logger ?? this.options.logger,
-		});
+		try {
+			const command = new SimpleFFmpeg({
+				...commandOptions,
+				loggerTag: commandOptions.loggerTag ?? processId,
+				logger: commandOptions.logger ?? this.options.logger,
+			});
 
+			this.setupProcess(processId, command);
+			this.updateConcurrencyMetrics();
+			this.emitProcessStarted(processId, command);
+
+			return command;
+		} catch (error) {
+			this.handleError(processId, error as Error, "creation");
+			throw error;
+		}
+	}
+
+	private setupProcess(processId: string, command: SimpleFFmpeg): void {
 		const startTime = new Date();
-		const processInfo = {
+		const processInfo: ActiveProcess = {
 			command,
 			startTime,
-			timeout:
-				this.options.defaultTimeout > 0
-					? setTimeout(
-							() => this.handleTimeout(processId),
-							this.options.defaultTimeout,
-						)
-					: undefined,
+			timeout: this.createTimeout(processId),
 		};
 
 		this.activeProcesses.set(processId, processInfo);
-		this.updateMetrics("created");
+		this.updateMetrics("totalCreated");
+		this.setupEventHandlers(processId, command);
+	}
 
-		const cleanup = (
-			reason: string,
-			status: "completed" | "failed" | "terminated",
-		) => {
-			const info = this.activeProcesses.get(processId);
-			if (info) {
-				if (info.timeout) {
-					clearTimeout(info.timeout);
-				}
+	private createTimeout(processId: string): NodeJS.Timeout | undefined {
+		return this.options.defaultTimeout > 0
+			? setTimeout(
+					() => this.handleTimeout(processId),
+					this.options.defaultTimeout,
+				)
+			: undefined;
+	}
 
-				const executionTime = Date.now() - info.startTime.getTime();
-				if (this.options.enableMetrics) {
-					this.executionTimes.push(executionTime);
-					this.updateAverageExecutionTime();
-				}
+	private setupEventHandlers(processId: string, command: SimpleFFmpeg): void {
+		const cleanup = (reason: string, status: ProcessStatus) =>
+			this.cleanupProcess(processId, reason, status);
 
-				this.activeProcesses.delete(processId);
-				this.updateMetrics(status);
-				this.options.logger.debug(
-					`[FFmpegManager] Process ${processId} removed: ${reason}`,
-				);
-
-				this.emit("processEnded", {
-					id: processId,
-					reason,
-					status,
-					executionTime,
-				});
-
-				this.processNextInQueue();
-			}
-		};
-
-		// Enhanced event handling
-		command.once("end", () => cleanup("natural end", "completed"));
-		command.once("close", () => cleanup("close", "completed"));
-		command.once("exit", () => cleanup("exit", "completed"));
+		command.once("end", () => cleanup("end", "totalCompleted"));
+		command.once("close", () => cleanup("close", "totalCompleted"));
+		command.once("exit", () => cleanup("exit", "totalCompleted"));
 
 		command.on("error", (error: Error) => {
-			if (!this.isTerminationError(error)) {
-				cleanup("error", "failed");
-				this.emit("error", { processId, error });
-			} else {
-				cleanup("terminated", "terminated");
-				this.options.logger.debug(
-					`[FFmpegManager] Process ${processId} terminated: ${error.message}`,
-				);
-			}
-		});
+			const status = this.categorizeError(error);
+			cleanup("error", status);
 
-		// Track peak concurrency
-		if (this.options.enableMetrics) {
-			const currentConcurrency = this.activeProcesses.size;
-			if (currentConcurrency > this.metrics.peakConcurrency) {
-				this.metrics.peakConcurrency = currentConcurrency;
-			}
+			this.emit("error", {
+				processId,
+				error,
+				status,
+				isTimeout: this.isTimeoutError(error),
+				isTermination: this.isTerminationError(error),
+			});
+		});
+	}
+
+	private categorizeError(error: Error): ProcessStatus {
+		if (this.isTimeoutError(error)) return "totalTerminated";
+		if (this.isTerminationError(error)) return "totalTerminated";
+		return "totalFailed";
+	}
+
+	private isTimeoutError(error: Error): boolean {
+		const msg = error.message.toLowerCase();
+		return TIMEOUT_ERROR_PATTERNS.some((pattern) => msg.includes(pattern));
+	}
+
+	private cleanupProcess(
+		processId: string,
+		reason: string,
+		status: ProcessStatus,
+	): void {
+		const info = this.activeProcesses.get(processId);
+		if (!info) return;
+
+		try {
+			if (info.timeout) clearTimeout(info.timeout);
+
+			const executionTime = Date.now() - info.startTime.getTime();
+			this.updateExecutionMetrics(executionTime);
+
+			this.activeProcesses.delete(processId);
+			this.updateMetrics(status);
+
+			this.options.logger.debug(
+				`[FFmpegManager] Process ${processId} ${status}: ${reason}`,
+			);
+
+			this.emit("processEnded", {
+				id: processId,
+				reason,
+				status,
+				executionTime,
+			});
+			this.processNextInQueue();
+		} catch (error) {
+			this.handleError(processId, error as Error, "cleanup");
 		}
+	}
 
-		this.emit("processStarted", {
-			id: processId,
-			pid: command.pid,
-			startTime,
-			command: command.toString?.() ?? "unknown",
-		});
+	private updateExecutionMetrics(executionTime: number): void {
+		if (!this.options.enableMetrics) return;
 
-		return command;
+		this.executionTimes.push(executionTime);
+		if (this.executionTimes.length > 100) {
+			this.executionTimes = this.executionTimes.slice(-100);
+		}
+		this.updateAverageExecutionTime();
+	}
+
+	private updateConcurrencyMetrics(): void {
+		if (this.options.enableMetrics) {
+			this.metrics.peakConcurrency = Math.max(
+				this.metrics.peakConcurrency,
+				this.activeProcesses.size,
+			);
+		}
 	}
 
 	private processNextInQueue(): void {
 		if (
-			this.processQueue.length > 0 &&
-			this.activeProcesses.size < this.options.maxConcurrentProcesses
+			this.processQueue.length === 0 ||
+			this.activeProcesses.size >= this.options.maxConcurrentProcesses
 		) {
-			const next = this.processQueue.shift()!;
-			try {
-				const command = next.factory();
-				next.resolve(command);
-			} catch (error) {
-				next.reject(error as Error);
-			}
+			return;
+		}
+
+		const next = this.processQueue.shift()!;
+		try {
+			next.resolve(next.factory());
+		} catch (error) {
+			next.reject(error as Error);
 		}
 	}
 
 	private handleTimeout(processId: string): void {
 		const info = this.activeProcesses.get(processId);
-		if (info) {
-			this.options.logger.warn(
-				`[FFmpegManager] Process ${processId} timed out, terminating`,
-			);
-			this.terminateProcess(info.command).catch((err) => {
-				this.options.logger.error(
-					`[FFmpegManager] Failed to terminate timed out process ${processId}:`,
-					err,
-				);
-			});
-		}
+		if (!info) return;
+
+		const executionTime = Date.now() - info.startTime.getTime();
+
+		this.options.logger.warn(`[FFmpegManager] Process ${processId} timed out`, {
+			processId,
+			executionTime: `${Math.round(executionTime / 1000)}s`,
+			timeout: `${this.options.defaultTimeout / 1000}s`,
+			command: info.command.toString?.() ?? "unknown",
+		});
+
+		this.terminateProcessGracefully(processId, info.command).catch((err) =>
+			this.handleError(processId, err, "timeout termination"),
+		);
 	}
 
-	private isTerminationError(error: Error): boolean {
-		const msg = error.message.toLowerCase();
-		return [
-			"sigkill",
-			"sigterm",
-			"was killed",
-			"premature close",
-			"err_stream_premature_close",
-			"other side closed",
-			"econnreset",
-			"socketerror",
-			"timeout",
-			"request aborted",
-			"aborted",
-			"write after end",
-			"epipe",
-		].some((pattern) => msg.includes(pattern));
+	private async terminateProcessGracefully(
+		processId: string,
+		command: SimpleFFmpeg,
+	): Promise<void> {
+		try {
+			await Promise.race([
+				this.terminateProcess(command, "SIGTERM"),
+				new Promise((_, reject) =>
+					setTimeout(
+						() => reject(new Error("Graceful termination timeout")),
+						this.options.timeoutGracePeriod,
+					),
+				),
+			]);
+		} catch {
+			this.options.logger.warn(
+				`[FFmpegManager] Force killing process ${processId}`,
+			);
+			await this.terminateProcess(command, "SIGKILL");
+		}
 	}
 
 	async terminateProcess(
@@ -243,113 +317,74 @@ export class FFmpegManager extends EventEmitter {
 		signal: NodeJS.Signals = "SIGTERM",
 	): Promise<void> {
 		const processId = this.findProcessId(command);
-		if (!processId) {
-			this.options.logger.debug(
-				"[FFmpegManager] Process not found or already terminated",
-			);
-			return;
-		}
+		if (!processId) return;
 
 		this.options.logger.debug(
-			`[FFmpegManager] Initiating termination for process ${processId}`,
+			`[FFmpegManager] Terminating process ${processId} with ${signal}`,
 		);
 
 		return new Promise<void>((resolve) => {
-			let finished = false;
-			const finish = (reason: string) => {
-				if (!finished) {
-					finished = true;
-					const info = this.activeProcesses.get(processId);
-					if (info?.timeout) {
-						clearTimeout(info.timeout);
+			let resolved = false;
+			const finish = (_event: string) => {
+				if (resolved) return;
+				resolved = true;
+				this.cleanupTermination(processId);
+				resolve();
+			};
+
+			const events = ["error", "end", "close", "exit"];
+			events.forEach((event) => command.once(event, () => finish(event)));
+
+			this.sendTerminationSignal(command, processId, signal, finish);
+		});
+	}
+
+	private sendTerminationSignal(
+		command: SimpleFFmpeg,
+		processId: string,
+		signal: NodeJS.Signals,
+		finish: (reason: string) => void,
+	): void {
+		try {
+			command.kill(signal);
+
+			if (signal !== "SIGKILL") {
+				setTimeout(() => {
+					try {
+						command.kill("SIGKILL");
+					} catch (err) {
+						this.options.logger.warn(
+							`[FFmpegManager] Failed to send SIGKILL to ${processId}:`,
+							err,
+						);
 					}
-					this.activeProcesses.delete(processId);
-					this.options.logger.debug(
-						`[FFmpegManager] Termination complete for ${processId}: ${reason}`,
-					);
-					resolve();
-				}
-			};
-
-			const cleanupListeners = () => {
-				command.off("error", errorHandler);
-				command.off("end", endHandler);
-				command.off("close", closeHandler);
-				command.off("exit", exitHandler);
-			};
-
-			const errorHandler = (error: Error) => {
-				this.options.logger.debug(
-					`[FFmpegManager] Error during termination of ${processId}: ${error.message}`,
-				);
-				cleanupListeners();
-				finish("error");
-			};
-
-			const endHandler = () => {
-				cleanupListeners();
-				finish("end");
-			};
-
-			const closeHandler = () => {
-				cleanupListeners();
-				finish("close");
-			};
-
-			const exitHandler = () => {
-				cleanupListeners();
-				finish("exit");
-			};
-
-			command.on("error", errorHandler);
-			command.once("end", endHandler);
-			command.once("close", closeHandler);
-			command.once("exit", exitHandler);
-
-			try {
-				this.options.logger.debug(
-					`[FFmpegManager] Sending ${signal} to process ${processId}`,
-				);
-				command.kill(signal);
-
-				// Escalate to SIGKILL if needed
-				if (signal !== "SIGKILL") {
-					setTimeout(() => {
-						if (!finished) {
-							this.options.logger.debug(
-								`[FFmpegManager] Escalating to SIGKILL for process ${processId}`,
-							);
-							try {
-								command.kill("SIGKILL");
-							} catch (err) {
-								this.options.logger.warn(
-									`[FFmpegManager] SIGKILL failed for ${processId}:`,
-									err,
-								);
-							}
-						}
-					}, 2000);
-				}
-			} catch (err) {
-				this.options.logger.warn(
-					`[FFmpegManager] Error sending signals to ${processId}:`,
-					err,
-				);
-				cleanupListeners();
-				finish("exception");
+				}, 2000);
 			}
 
-			// Final timeout
-			setTimeout(() => {
-				if (!finished) {
-					this.options.logger.warn(
-						`[FFmpegManager] Termination timeout for process ${processId}`,
-					);
-					cleanupListeners();
-					finish("timeout");
-				}
-			}, 5000);
-		});
+			setTimeout(() => finish("force_timeout"), 5000);
+		} catch (err) {
+			this.handleError(processId, err as Error, "signal_sending");
+			finish("signal_error");
+		}
+	}
+
+	private handleError(processId: string, error: Error, context: string): void {
+		this.options.logger.error(
+			`[FFmpegManager] ${context} error for ${processId}:`,
+			{
+				processId,
+				context,
+				error: error.message,
+				isTimeout: this.isTimeoutError(error),
+				isTermination: this.isTerminationError(error),
+				stack: error.stack,
+			},
+		);
+	}
+
+	private isTerminationError(error: Error): boolean {
+		const msg = error.message.toLowerCase();
+		return TERMINATION_ERROR_PATTERNS.some((pattern) => msg.includes(pattern));
 	}
 
 	async terminateAll(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
@@ -357,35 +392,39 @@ export class FFmpegManager extends EventEmitter {
 			(info) => info.command,
 		);
 		this.options.logger.debug(
-			`[FFmpegManager] Terminating all (${processes.length}) processes`,
+			`[FFmpegManager] Terminating all ${processes.length} processes`,
 		);
 
-		// Clear the queue
-		this.processQueue.forEach((item) => {
-			item.reject(new Error("Manager is terminating all processes"));
-		});
+		this.processQueue.forEach((item) =>
+			item.reject(new Error("Manager terminating all processes")),
+		);
 		this.processQueue.length = 0;
 
 		const results = await Promise.allSettled(
 			processes.map((p) => this.terminateProcess(p, signal)),
 		);
 
-		results.forEach((res, i) => {
-			if (res.status === "rejected") {
+		results.forEach((result, index) => {
+			if (result.status === "rejected") {
 				this.options.logger.warn(
-					`[FFmpegManager] Failed to terminate process #${i}:`,
-					res.reason,
+					`[FFmpegManager] Failed to terminate process #${index}:`,
+					result.reason,
 				);
 			}
 		});
 	}
 
-	// Utility methods
+	private cleanupTermination(processId: string): void {
+		const info = this.activeProcesses.get(processId);
+		if (info?.timeout) {
+			clearTimeout(info.timeout);
+		}
+		this.activeProcesses.delete(processId);
+	}
+
 	private findProcessId(command: SimpleFFmpeg): string | null {
 		for (const [id, info] of this.activeProcesses) {
-			if (info.command === command) {
-				return id;
-			}
+			if (info.command === command) return id;
 		}
 		return null;
 	}
@@ -395,23 +434,15 @@ export class FFmpegManager extends EventEmitter {
 	}
 
 	private updateMetrics(
-		type: "created" | "completed" | "failed" | "terminated",
+		type: keyof Pick<
+			ProcessMetrics,
+			"totalCreated" | "totalCompleted" | "totalFailed" | "totalTerminated"
+		>,
 	): void {
-		if (!this.options.enableMetrics) return;
-
-		switch (type) {
-			case "created":
-				this.metrics.totalCreated++;
-				break;
-			case "completed":
-				this.metrics.totalCompleted++;
-				break;
-			case "failed":
-				this.metrics.totalFailed++;
-				break;
-			case "terminated":
-				this.metrics.totalTerminated++;
-				break;
+		if (this.options.enableMetrics) {
+			this.metrics[
+				`total${type.charAt(0).toUpperCase() + type.slice(1)}` as keyof ProcessMetrics
+			]++;
 		}
 	}
 
@@ -420,14 +451,17 @@ export class FFmpegManager extends EventEmitter {
 
 		const sum = this.executionTimes.reduce((a, b) => a + b, 0);
 		this.metrics.averageExecutionTime = sum / this.executionTimes.length;
-
-		// Keep only last 100 execution times to prevent memory leak
-		if (this.executionTimes.length > 100) {
-			this.executionTimes = this.executionTimes.slice(-100);
-		}
 	}
 
-	// Public getters
+	private emitProcessStarted(processId: string, command: SimpleFFmpeg): void {
+		this.emit("processStarted", {
+			id: processId,
+			pid: command.pid,
+			startTime: new Date(),
+			command: command.toString?.() ?? "unknown",
+		});
+	}
+
 	getActiveProcessCount(): number {
 		return this.activeProcesses.size;
 	}
@@ -457,16 +491,18 @@ export class FFmpegManager extends EventEmitter {
 		await Promise.allSettled(promises);
 	}
 
-	// Health check
 	isHealthy(): boolean {
-		const failureRate =
-			this.metrics.totalCreated > 0
-				? this.metrics.totalFailed / this.metrics.totalCreated
-				: 0;
+		const { totalCreated, totalFailed, totalTerminated } = this.metrics;
+		const failureRate = totalCreated > 0 ? totalFailed / totalCreated : 0;
+		const terminationRate =
+			totalCreated > 0 ? totalTerminated / totalCreated : 0;
 
 		return (
 			failureRate < 0.1 &&
+			terminationRate < 0.2 &&
 			this.activeProcesses.size <= this.options.maxConcurrentProcesses
 		);
 	}
 }
+
+export { FFmpegManager as default };

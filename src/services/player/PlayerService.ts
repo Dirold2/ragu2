@@ -228,9 +228,6 @@ export default class PlayerService extends EventEmitter {
 			} catch (err: any) {
 				// 3. Если словили 401 → пробуем обновить URL
 				if (err.message?.includes("401") && track.source === "yandex") {
-					this.bot?.logger.warn(
-						`[PlayerService] Yandex URL expired, refreshing for ${track.trackId}`,
-					);
 					trackUrl = await this.trackManager.getTrackUrl(
 						track.trackId,
 						track.source,

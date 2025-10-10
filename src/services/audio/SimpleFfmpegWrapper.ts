@@ -1,14 +1,7 @@
 import { EventEmitter } from "eventemitter3";
-import {
-	type Readable,
-	PassThrough,
-	pipeline as pipelineCallback,
-} from "readable-stream";
-import { promisify } from "util";
+import { type Readable, PassThrough } from "stream";
+import { pipeline } from "stream";
 import { execa, type Subprocess } from "execa";
-import { bot } from "../../bot.js";
-
-const pipeline = promisify(pipelineCallback);
 
 export interface SimpleFFmpegOptions {
 	ffmpegPath?: string;
@@ -81,7 +74,7 @@ export class SimpleFFmpeg extends EventEmitter {
 			timeout: options.timeout ?? 0,
 			maxStderrBuffer: options.maxStderrBuffer ?? 1024 * 1024,
 			enableProgressTracking: options.enableProgressTracking ?? false,
-			logger: bot.logger ?? console,
+			logger: options.logger ?? console,
 			abortSignal: options.abortSignal,
 		};
 
@@ -256,7 +249,7 @@ export class SimpleFFmpeg extends EventEmitter {
 
 	private cleanup(): void {
 		try {
-			this.outputStream?.end();
+			this.outputStream?.destroy();
 			this.process?.stdin?.end();
 			this.process?.stdout?.destroy();
 			this.process?.stderr?.destroy();
@@ -380,8 +373,8 @@ export class SimpleFFmpeg extends EventEmitter {
 				}
 			});
 
-			pipeline(firstInput.stream, this.process.stdin).catch((err) => {
-				if (!this.isIgnorableError(err)) {
+			pipeline(firstInput.stream, this.process.stdin, (err?: Error | null) => {
+				if (err && !this.isIgnorableError(err)) {
 					this.config.logger.error(`[SimpleFFmpeg] Pipeline failed:`, err);
 					this.emit("error", err as Error);
 				}
@@ -401,7 +394,17 @@ export class SimpleFFmpeg extends EventEmitter {
 			this.emit("data", chunk);
 		});
 
-		this.process.stdout?.pipe(this.outputStream);
+		if (this.process.stdout) {
+			pipeline(this.process.stdout, this.outputStream, (err?: Error | null) => {
+				if (err && !this.isIgnorableError(err)) {
+					this.config.logger.error(
+						`[SimpleFFmpeg] Output pipeline failed:`,
+						err,
+					);
+					this.emit("error", err);
+				}
+			});
+		}
 
 		// Enhanced stderr handling
 		this.process.stderr?.on("data", (chunk: Buffer) => {

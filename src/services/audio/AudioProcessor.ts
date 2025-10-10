@@ -1,4 +1,4 @@
-import * as RStream from "readable-stream";
+import { Transform } from "stream";
 import type { AudioProcessingOptions } from "../../types/audio.js";
 import {
 	VOLUME_MIN,
@@ -41,7 +41,7 @@ function compressSample(value: number, threshold = 0.8, ratio = 4): number {
 	return Math.sign(value) * compressed;
 }
 
-export class AudioProcessor extends RStream.Transform {
+export class AudioProcessor extends Transform {
 	private volume: number;
 	private bass: number; // предполагается в нормализованном диапазоне [-1,1]
 	private treble: number; // аналогично
@@ -329,7 +329,7 @@ export class AudioProcessor extends RStream.Transform {
 
 	_transform(
 		chunk: Buffer,
-		_encoding: string,
+		_encoding: BufferEncoding,
 		callback: (error?: Error | null, data?: any) => void,
 	): void {
 		if (this.isDestroyed || this.destroyed) {
@@ -396,6 +396,7 @@ export class AudioProcessor extends RStream.Transform {
 		if (this.isDestroyed) return this;
 		this.isDestroyed = true;
 		this.removeAllListeners();
-		return super.destroy(error);
+		super.destroy(error);
+		return this;
 	}
 }

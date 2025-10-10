@@ -1,10 +1,10 @@
 {
   "compilerOptions": {
-    "target": "ES2023",
+    "target": "es2022",
     "module": "nodenext",
     "lib": ["ES2023", "DOM"],
     "moduleResolution": "nodenext",
-    "rootDir": "./src",
+    "rootDir": "./",
     "outDir": "build",
     "allowSyntheticDefaultImports": true,
     "importHelpers": true,

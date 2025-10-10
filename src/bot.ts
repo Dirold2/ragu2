@@ -18,10 +18,9 @@ import {
 } from "./services/index.js";
 
 import { dirname } from "dirname-filename-esm";
-import translations from "./locales/en.json" with { type: "json" };
 import { createLogger, createLocale } from "./utils/index.js";
 import { MusicServicePlugin } from "./interfaces/index.js";
-
+import translations from "./locales/en.json" with { type: "json" };
 /**
  * Bot class
  */
@@ -210,7 +209,7 @@ export class Bot {
 			void this.client.executeCommand(message);
 		};
 
-		this.eventHandlers.set("ready", readyHandler);
+		this.eventHandlers.set("clientReady", readyHandler);
 		this.eventHandlers.set(
 			"interactionCreate",
 			interactionHandler as (...args: unknown[]) => void,
@@ -220,7 +219,7 @@ export class Bot {
 			messageHandler as (...args: unknown[]) => void,
 		);
 
-		this.client.once("ready", readyHandler);
+		this.client.once("clientReady", readyHandler);
 		this.client.on("interactionCreate", interactionHandler);
 		this.client.on("messageCreate", messageHandler);
 

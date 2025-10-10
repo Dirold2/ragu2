@@ -1,5 +1,5 @@
 import { request } from "undici";
-import type { Readable } from "readable-stream";
+import type { Readable } from "stream";
 import { bot } from "../bot.js";
 
 interface RequestOptions {
