@@ -1,8 +1,8 @@
 import { importx } from "@discordx/importer";
 import { Module } from "../../core/Module.js";
 import { ModuleState, type ModuleMetadata } from "../../types/index.js";
-import packageJson from "./package.json";
-import translations from "./src/locales/en.json";
+import packageJson from "./package.json" with { type: "json" };
+import translations from "./src/locales/en.json" with { type: "json" };
 import { createLocale } from "../../utils/index.js";
 
 import { dirname } from "dirname-filename-esm";
