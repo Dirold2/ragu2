@@ -233,10 +233,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		try {
 			const url = await retry(
 				() =>
-					this.wrapper.getMp3DownloadUrl(
+					this.wrapper.getMp3DownloadUrlNew(
 						Number(trackId),
 						false,
-						Types.DownloadTrackQuality.High,
+						Types.DownloadTrackQuality.Lossless,
 					),
 				{
 					retries: MAX_RETRIES,

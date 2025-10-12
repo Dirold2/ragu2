@@ -276,6 +276,9 @@ export class AudioService extends EventEmitter {
 			.inputs(inputStream as any)
 			.options("-fflags", "nobuffer")
 			.options("-flags", "low_delay")
+			.options("-thread_queue_size", "512")
+			.options("-probesize", "32")
+			.options("-analyzeduration", "0")
 			.options("-f", inputFormat ?? "mp3")
 			.options("-acodec", "pcm_s16le")
 			.options("-f", "s16le")
@@ -283,6 +286,7 @@ export class AudioService extends EventEmitter {
 			.options("-ac", "2")
 			.options("-af", filters.join(","))
 			.output("pipe:1");
+
 
 		this.currentFFmpegCommand = ffmpegCommand;
 		this.processor = new AudioProcessor(this.currentOptions);

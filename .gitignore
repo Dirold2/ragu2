@@ -46,6 +46,7 @@ test/
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+pnpm-workspace.yaml
 
 # Custom
 module.ts
