@@ -225,31 +225,53 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
 	async getTrackUrl(trackId: string): Promise<string | null> {
 		await this.ensureInitialized();
+
 		if (!trackId) {
 			bot.logger.error("YandexMusicPlugin: trackId is empty");
 			return null;
 		}
 
 		try {
-			const url = await retry(
-				() =>
-					this.wrapper.getMp3DownloadUrlNew(
-						Number(trackId),
-						false,
-						Types.DownloadTrackQuality.Lossless,
-					),
-				{
-					retries: MAX_RETRIES,
-					factor: 2,
-					minTimeout: MIN_TIMEOUT,
-					maxTimeout: MAX_TIMEOUT,
-				},
-			);
+			let url: string | null = null;
+
+			try {
+				url = await retry(
+					() =>
+						this.wrapper.getMp3DownloadUrlNew(
+							Number(trackId),
+							false,
+							Types.DownloadTrackQuality.Lossless,
+						),
+					{
+						retries: MAX_RETRIES,
+						factor: 2,
+						minTimeout: MIN_TIMEOUT,
+						maxTimeout: MAX_TIMEOUT,
+					},
+				);
+			} catch (err) {
+				
+			}
 
 			if (!url) {
-				bot.logger.warn(
-					`YandexMusicPlugin: No download URL for trackId ${trackId}`,
+				url = await retry(
+					() =>
+						this.wrapper.getMp3DownloadUrl(
+							Number(trackId),
+							false,
+							Types.DownloadTrackQuality.Lossless,
+						),
+					{
+						retries: MAX_RETRIES,
+						factor: 2,
+						minTimeout: MIN_TIMEOUT,
+						maxTimeout: MAX_TIMEOUT,
+					},
 				);
+			}
+
+			if (!url) {
+				bot.logger.warn(`YandexMusicPlugin: No download URL for trackId ${trackId}`);
 				return null;
 			}
 

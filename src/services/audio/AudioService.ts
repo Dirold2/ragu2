@@ -276,7 +276,6 @@ export class AudioService extends EventEmitter {
 			.inputs(inputStream as any)
 			.options("-fflags", "nobuffer")
 			.options("-flags", "low_delay")
-			.options("-thread_queue_size", "512")
 			.options("-probesize", "32")
 			.options("-analyzeduration", "0")
 			.options("-f", inputFormat ?? "mp3")
