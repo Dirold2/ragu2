@@ -206,49 +206,38 @@ export default class PlayerService extends EventEmitter {
 				`[PlayerService] playTrack called for track: ${track.info}`,
 			);
 
+			this.connectionManager.resetIdleTimeout();
+
 			await this.audioService.destroyCurrentStreamSafe();
 
-			// 1. Получаем свежий URL перед стартом
 			let trackUrl = await this.trackManager.getTrackUrl(
 				track.trackId,
 				track.source,
 			);
-			if (!trackUrl) {
-				this.bot?.logger.debug(
-					`[PlayerService] No track URL found, trying next track`,
-				);
-				return await this.playNextOrRecommendations();
-			}
+			if (!trackUrl) return await this.playNextOrRecommendations();
 
 			let streamResult;
 			try {
-				// 2. Пробуем создать стрим
 				streamResult =
 					await this.audioService.createAudioStreamForDiscord(trackUrl);
 			} catch (err: any) {
-				// 3. Если словили 401 → пробуем обновить URL
 				if (err.message?.includes("401") && track.source === "yandex") {
 					trackUrl = await this.trackManager.getTrackUrl(
 						track.trackId,
 						track.source,
 					);
-					if (!trackUrl) {
-						return await this.playNextOrRecommendations();
-					}
+					if (!trackUrl) return await this.playNextOrRecommendations();
 					streamResult =
 						await this.audioService.createAudioStreamForDiscord(trackUrl);
-				} else {
-					throw err;
-				}
+				} else throw err;
 			}
 
 			const { stream, type } = streamResult;
 			const resource = createAudioResource(stream, { inputType: type });
 
 			this.state.currentTrack = track;
-			if (!track.generation) {
+			if (!track.generation)
 				this.bot.queueService.setLastTrack(this.guildId, track);
-			}
 
 			await this.effects.setVolumeFast(0);
 			this.player.play(resource);
@@ -272,7 +261,6 @@ export default class PlayerService extends EventEmitter {
 			);
 			return true;
 		} catch (error) {
-			//   this.bot?.logger.error(`[PlayerService] Error playing track: ${error}`);
 			return await this.playNextOrRecommendations();
 		}
 	}

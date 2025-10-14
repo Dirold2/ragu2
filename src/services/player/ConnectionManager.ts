@@ -21,6 +21,7 @@ export class ConnectionManager extends EventEmitter {
 	private disconnectHandler: (() => Promise<void>) | null = null;
 	private emptyChannelInterval: NodeJS.Timeout | null = null;
 	private emptyChannelTimeout: NodeJS.Timeout | null = null;
+	private idleTimeout: NodeJS.Timeout | null = null;
 	private bot: Bot;
 	private isDestroyed = false;
 	private reconnectAttempts = 0;
@@ -69,6 +70,7 @@ export class ConnectionManager extends EventEmitter {
 		);
 		this.setupConnectionHandlers();
 		this.startEmptyCheck();
+		this.startIdleTimeout();
 		return this.connection;
 	}
 
@@ -191,6 +193,22 @@ export class ConnectionManager extends EventEmitter {
 		}
 	}
 
+	/** Автоотключение, если музыка не играет */
+	startIdleTimeout(): void {
+		if (this.idleTimeout) clearTimeout(this.idleTimeout);
+		this.idleTimeout = setTimeout(() => {
+			this.bot.logger.debug(
+				"[ConnectionManager] Idle for 10 minutes, leaving channel",
+			);
+			this.leaveChannel();
+		}, this.parseMs("10m"));
+	}
+
+	/** Сбрасываем таймер простоя (например, при начале нового трека) */
+	resetIdleTimeout(): void {
+		this.startIdleTimeout();
+	}
+
 	private async verifyActualConnection(): Promise<boolean> {
 		const channel = await this.getVoiceChannel();
 		const userId = this.bot.client.user?.id;
@@ -245,9 +263,11 @@ export class ConnectionManager extends EventEmitter {
 		this.disconnectHandler = null;
 		if (this.emptyChannelInterval) clearInterval(this.emptyChannelInterval);
 		if (this.emptyChannelTimeout) clearTimeout(this.emptyChannelTimeout);
+		if (this.idleTimeout) clearTimeout(this.idleTimeout);
 
 		this.emptyChannelInterval = null;
 		this.emptyChannelTimeout = null;
+		this.idleTimeout = null;
 		this.connection = null;
 		this.reconnectAttempts = 0;
 
