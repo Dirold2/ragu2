@@ -521,6 +521,13 @@ export class SimpleFFmpeg extends EventEmitter {
 		return this.donePromise;
 	}
 
+	get stdout(): Readable {
+		if (!this.process || !this.process.stdout) {
+			throw new Error("FFmpeg process not started or stdout unavailable");
+		}
+		return this.process.stdout;
+	}
+
 	// Enhanced event typing
 	override on(event: "start", listener: (cmd: string) => void): this;
 	override on(event: "end", listener: () => void): this;

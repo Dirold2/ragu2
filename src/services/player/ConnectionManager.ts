@@ -13,7 +13,7 @@ import {
 	type VoiceConnection,
 	VoiceConnectionStatus,
 } from "@discordjs/voice";
-import ms from "ms";
+import { ms } from "humanize-ms";
 import type { Bot } from "../../bot.js";
 
 export class ConnectionManager extends EventEmitter {
@@ -34,92 +34,49 @@ export class ConnectionManager extends EventEmitter {
 		this.bot = bot;
 	}
 
+	private parseMs(value: string | number): number {
+		const result = ms(value);
+		if (typeof result !== "number")
+			throw new Error(`Invalid time string: ${value}`);
+		return result;
+	}
+
 	async joinChannel(interaction: CommandInteraction): Promise<VoiceConnection> {
 		const member = interaction.member as GuildMember;
 		const voiceChannelId = member.voice.channel?.id;
 
-		this.bot.logger.debug(`[joinChannel] Member: ${member?.id}`);
-		this.bot.logger.debug(
-			`[joinChannel] Voice channel ID: ${member?.voice.channelId}`,
-		);
-
 		if (!voiceChannelId || !this.hasVoiceAccess(member)) {
-			this.bot.logger.debug("[joinChannel] No voice channel or access denied");
 			throw new Error("User not in voice channel or no access");
 		}
 
-		// Проверяем существующее подключение
 		const existingConnection = getVoiceConnection(this.guildId);
 		if (existingConnection) {
-			this.bot.logger.debug(
-				"[joinChannel] Found existing connection, checking status",
-			);
-
-			// Проверяем, действительно ли подключение активно
 			if (existingConnection.state.status === VoiceConnectionStatus.Destroyed) {
-				this.bot.logger.debug(
-					"[joinChannel] Existing connection is destroyed, cleaning up",
-				);
+				this.forceCleanup();
+			} else if (!(await this.verifyActualConnection())) {
+				existingConnection.destroy();
 				this.forceCleanup();
 			} else {
-				// Проверяем, находится ли бот действительно в канале
-				const isActuallyConnected = await this.verifyActualConnection();
-				if (!isActuallyConnected) {
-					this.bot.logger.debug(
-						"[joinChannel] Bot not actually in voice channel, destroying connection",
-					);
-					existingConnection.destroy();
-					this.forceCleanup();
-				} else {
-					this.bot.logger.debug("[joinChannel] Reusing existing connection");
-					this.connection = existingConnection;
-					this.setupConnectionHandlers();
-					return existingConnection;
-				}
+				this.connection = existingConnection;
+				this.setupConnectionHandlers();
+				return existingConnection;
 			}
 		}
 
-		try {
-			this.bot.logger.debug("[joinChannel] Establishing new connection...");
-			this.connection = await this.establishConnection(
-				voiceChannelId,
-				interaction,
-			);
-			this.bot.logger.debug("[joinChannel] Connection established");
-
-			this.setupConnectionHandlers();
-			this.startEmptyCheck();
-			this.emit("connected", voiceChannelId);
-			this.bot.logger.debug("[joinChannel] Emit connected");
-
-			return this.connection;
-		} catch (error) {
-			this.bot.logger.debug("[joinChannel] Error during connection:", error);
-			this.forceCleanup();
-			throw error;
-		}
-	}
-
-	private async verifyActualConnection(): Promise<boolean> {
-		try {
-			const channel = await this.getVoiceChannel();
-			const userId = this.bot?.client.user?.id;
-			return (
-				channel !== null && userId !== undefined && channel.members.has(userId)
-			);
-		} catch (error) {
-			this.bot.logger.debug("[verifyActualConnection] Error:", error);
-			return false;
-		}
+		this.connection = await this.establishConnection(
+			voiceChannelId,
+			interaction,
+		);
+		this.setupConnectionHandlers();
+		this.startEmptyCheck();
+		return this.connection;
 	}
 
 	private async establishConnection(
 		channelId: string,
 		interaction: CommandInteraction,
 	): Promise<VoiceConnection> {
-		if (!interaction.guild) {
-			throw new Error("Guild not found");
-		}
+		if (!interaction.guild) throw new Error("Guild not found");
 
 		const connection = joinVoiceChannel({
 			channelId,
@@ -130,222 +87,143 @@ export class ConnectionManager extends EventEmitter {
 			selfMute: false,
 		});
 
-		try {
-			await entersState(connection, VoiceConnectionStatus.Ready, 30000);
-			this.reconnectAttempts = 0; // Сбрасываем счетчик при успешном подключении
-			return connection;
-		} catch (error) {
-			connection.destroy();
-			throw error;
-		}
+		await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+		this.reconnectAttempts = 0;
+		return connection;
 	}
 
 	private hasVoiceAccess(member: GuildMember): boolean {
 		const voiceChannel = member.voice.channel;
-		return !!(
+		return Boolean(
 			voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) &&
-			voiceChannel.id
+				voiceChannel.id,
 		);
 	}
 
 	private setupConnectionHandlers(): void {
 		if (!this.connection || this.disconnectHandler) return;
 
-		// Обработчик отключения
 		this.disconnectHandler = async () => {
-			if (this.isDestroyed) return;
+			if (!this.connection || this.isDestroyed) return;
 
-			this.bot.logger.debug(
-				"[ConnectionManager] Connection disconnected, attempting recovery",
-			);
+			if (!(await this.verifyActualConnection())) {
+				this.emit("disconnected");
+				this.forceCleanup();
+				return;
+			}
 
-			try {
-				if (!this.connection) return;
-
-				// Проверяем, действительно ли бот был выкинут из канала
-				const isActuallyConnected = await this.verifyActualConnection();
-				if (!isActuallyConnected) {
-					this.bot.logger.debug(
-						"[ConnectionManager] Bot was kicked from channel",
-					);
-					this.emit("disconnected");
-					this.forceCleanup();
-					return;
-				}
-
-				// Пытаемся переподключиться
-				if (this.reconnectAttempts < this.maxReconnectAttempts) {
-					this.reconnectAttempts++;
-					this.bot.logger.debug(
-						`[ConnectionManager] Reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`,
-					);
-
-					await Promise.race([
-						entersState(
-							this.connection,
-							VoiceConnectionStatus.Signalling,
-							5000,
-						),
-						entersState(
-							this.connection,
-							VoiceConnectionStatus.Connecting,
-							5000,
-						),
-					]);
-
-					this.emit("reconnected");
-					this.reconnectAttempts = 0;
-				} else {
-					this.bot.logger.debug(
-						"[ConnectionManager] Max reconnect attempts reached",
-					);
-					this.emit("disconnected");
-					this.forceCleanup();
-				}
-			} catch (error) {
-				this.bot.logger.debug(
-					"[ConnectionManager] Reconnection failed:",
-					error,
-				);
+			if (this.reconnectAttempts < this.maxReconnectAttempts) {
+				this.reconnectAttempts++;
+				await Promise.race([
+					entersState(this.connection, VoiceConnectionStatus.Signalling, 5000),
+					entersState(this.connection, VoiceConnectionStatus.Connecting, 5000),
+				]);
+				this.emit("reconnected");
+				this.reconnectAttempts = 0;
+			} else {
 				this.emit("disconnected");
 				this.forceCleanup();
 			}
 		};
 
-		// Обработчик уничтожения подключения
 		const destroyHandler = () => {
-			this.bot.logger.debug("[ConnectionManager] Connection destroyed");
 			this.emit("disconnected");
 			this.forceCleanup();
 		};
 
-		this.connection?.on(
+		this.connection.on(
 			VoiceConnectionStatus.Disconnected,
 			this.disconnectHandler,
 		);
-		this.connection?.on(VoiceConnectionStatus.Destroyed, destroyHandler);
+		this.connection.on(VoiceConnectionStatus.Destroyed, destroyHandler);
 
-		// Дополнительная проверка состояния каждые 10 секунд
 		const statusCheckInterval = setInterval(async () => {
 			if (this.isDestroyed || !this.connection) {
 				clearInterval(statusCheckInterval);
 				return;
 			}
 
-			const isActuallyConnected = await this.verifyActualConnection();
 			if (
-				!isActuallyConnected &&
-				this.connection?.state?.status !== VoiceConnectionStatus.Destroyed
+				!(await this.verifyActualConnection()) &&
+				this.connection.state.status !== VoiceConnectionStatus.Destroyed
 			) {
-				this.bot.logger.debug(
-					"[ConnectionManager] Status check: Bot not in channel, cleaning up",
-				);
-				this.connection?.destroy();
+				this.connection.destroy();
 			}
-		}, 10000);
+		}, 10_000);
 
-		// Очищаем интервал при уничтожении
-		this.once("cleanup", () => {
-			clearInterval(statusCheckInterval);
-		});
+		this.once("cleanup", () => clearInterval(statusCheckInterval));
 	}
 
 	private startEmptyCheck(): void {
-		if (this.emptyChannelInterval) {
-			clearInterval(this.emptyChannelInterval);
-		}
+		if (this.emptyChannelInterval) clearInterval(this.emptyChannelInterval);
 
-		this.emptyChannelInterval = setInterval(() => {
-			this.checkEmpty();
-		}, ms("30s"));
+		this.emptyChannelInterval = setInterval(
+			() => this.checkEmpty(),
+			this.parseMs("30s"),
+		);
 	}
 
 	private async checkEmpty(): Promise<void> {
 		if (!this.connection || this.isDestroyed) return;
 
-		try {
-			const channel = await this.getVoiceChannel();
-			if (!channel) {
-				this.bot.logger.debug(
-					"[ConnectionManager] Channel not found during empty check",
-				);
-				this.emit("disconnected");
-				this.forceCleanup();
-				return;
-			}
-
-			const userId = this.bot?.client.user?.id;
-			const membersCount = channel.members.filter(
-				(m) => !m.user.bot && m.id !== userId,
-			).size;
-
-			if (membersCount === 0) {
-				if (!this.emptyChannelTimeout) {
-					this.bot.logger.debug(
-						"[ConnectionManager] Channel is empty, starting timeout",
-					);
-					this.emptyChannelTimeout = setTimeout(() => {
-						this.emit("empty");
-						this.leaveChannel();
-					}, ms("30s"));
-				}
-			} else if (this.emptyChannelTimeout) {
-				this.bot.logger.debug(
-					"[ConnectionManager] Channel no longer empty, clearing timeout",
-				);
-				clearTimeout(this.emptyChannelTimeout);
-				this.emptyChannelTimeout = null;
-			}
-		} catch (error) {
-			this.bot.logger.debug(
-				"[ConnectionManager] Error during empty check:",
-				error,
-			);
+		const channel = await this.getVoiceChannel();
+		if (!channel) {
 			this.emit("disconnected");
 			this.forceCleanup();
+			return;
 		}
+
+		const userId = this.bot.client.user?.id;
+		const membersCount = channel.members.filter(
+			(m) => !m.user.bot && m.id !== userId,
+		).size;
+
+		if (membersCount === 0) {
+			if (!this.emptyChannelTimeout) {
+				this.emptyChannelTimeout = setTimeout(() => {
+					this.emit("empty");
+					this.leaveChannel();
+				}, this.parseMs("30s"));
+			}
+		} else if (this.emptyChannelTimeout) {
+			clearTimeout(this.emptyChannelTimeout);
+			this.emptyChannelTimeout = null;
+		}
+	}
+
+	private async verifyActualConnection(): Promise<boolean> {
+		const channel = await this.getVoiceChannel();
+		const userId = this.bot.client.user?.id;
+		return Boolean(channel && userId && channel.members.has(userId));
 	}
 
 	private async getVoiceChannel(): Promise<VoiceChannel | null> {
 		try {
-			const guild = await this.bot?.client.guilds.fetch(this.guildId);
+			const guild = await this.bot.client.guilds.fetch(this.guildId);
 			const channels = await guild.channels.fetch();
-			const userId = this.bot?.client.user?.id;
+			const userId = this.bot.client.user?.id;
 
 			for (const [, channel] of channels) {
 				if (channel?.type === 2 && this.connection && userId) {
 					const voiceChannel = channel as VoiceChannel;
-					if (voiceChannel.members.has(userId)) {
-						return voiceChannel;
-					}
+					if (voiceChannel.members.has(userId)) return voiceChannel;
 				}
 			}
 
 			return null;
-		} catch (error) {
-			this.bot.logger.debug("[getVoiceChannel] Error:", error);
+		} catch {
 			return null;
 		}
 	}
 
 	leaveChannel(): void {
-		this.bot.logger.debug("[ConnectionManager] Leaving channel");
-		if (this.connection) {
-			this.connection?.destroy();
-		}
+		if (this.connection) this.connection.destroy();
 		this.forceCleanup();
 		this.emit("left");
 	}
 
 	getConnection(): VoiceConnection | null {
-		// Дополнительная проверка состояния подключения
-		if (
-			this.connection &&
-			this.connection?.state?.status === VoiceConnectionStatus.Destroyed
-		) {
-			this.bot.logger.debug(
-				"[getConnection] Connection is destroyed, cleaning up",
-			);
+		if (this.connection?.state.status === VoiceConnectionStatus.Destroyed) {
 			this.forceCleanup();
 			return null;
 		}
@@ -353,37 +231,30 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	private forceCleanup(): void {
-		this.bot.logger.debug("[ConnectionManager] Force cleanup");
-
-		if (this.disconnectHandler && this.connection) {
-			this.connection?.off(
+		if (this.connection && this.disconnectHandler) {
+			this.connection.off(
 				VoiceConnectionStatus.Disconnected,
 				this.disconnectHandler,
 			);
-			this.connection?.off(
+			this.connection.off(
 				VoiceConnectionStatus.Destroyed,
 				this.disconnectHandler,
 			);
-			this.disconnectHandler = null;
 		}
 
-		if (this.emptyChannelInterval) {
-			clearInterval(this.emptyChannelInterval);
-			this.emptyChannelInterval = null;
-		}
+		this.disconnectHandler = null;
+		if (this.emptyChannelInterval) clearInterval(this.emptyChannelInterval);
+		if (this.emptyChannelTimeout) clearTimeout(this.emptyChannelTimeout);
 
-		if (this.emptyChannelTimeout) {
-			clearTimeout(this.emptyChannelTimeout);
-			this.emptyChannelTimeout = null;
-		}
-
+		this.emptyChannelInterval = null;
+		this.emptyChannelTimeout = null;
 		this.connection = null;
 		this.reconnectAttempts = 0;
+
 		this.emit("cleanup");
 	}
 
 	destroy(): void {
-		this.bot.logger.debug("[ConnectionManager] Destroying");
 		this.isDestroyed = true;
 		this.forceCleanup();
 		this.removeAllListeners();

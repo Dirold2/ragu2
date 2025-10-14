@@ -1,6 +1,6 @@
 {
     "name": "ragu2",
-    "version": "0.1.4.9.3",
+    "version": "0.1.4.9.4",
     "description": "Discord bot module for RAGU2",
     "repository": {
         "type": "git",
@@ -35,6 +35,7 @@
         "eventemitter3": "^5.0.1",
         "execa": "^9.6.0",
         "get-audio-duration": "^4.0.1",
+        "humanize-ms": "^2.0.0",
         "lru-cache": "^11.2.2",
         "opusscript": "^0.1.1",
         "prom-client": "^15.1.3",
@@ -48,7 +49,7 @@
     },
     "devDependencies": {
         "@types/ms": "^2.1.0",
-        "@types/node": "^24.7.1",
+        "@types/node": "^24.7.2",
         "@types/readable-stream": "^4.0.21",
         "ansi-styles": "^6.2.3",
         "async-retry": "^1.3.3",

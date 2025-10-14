@@ -249,9 +249,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 						maxTimeout: MAX_TIMEOUT,
 					},
 				);
-			} catch (err) {
-				
-			}
+			} catch (err) {}
 
 			if (!url) {
 				url = await retry(
@@ -271,7 +269,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 			}
 
 			if (!url) {
-				bot.logger.warn(`YandexMusicPlugin: No download URL for trackId ${trackId}`);
+				bot.logger.warn(
+					`YandexMusicPlugin: No download URL for trackId ${trackId}`,
+				);
 				return null;
 			}
 

@@ -2,7 +2,7 @@ import type {
 	Readable as NodeReadable,
 	Transform as NodeTransform,
 } from "stream";
-import type { SimpleFFmpeg } from "./SimpleFfmpegWrapper.js";
+import type { SimpleFFmpeg } from "../ffmpeg/SimpleFfmpegWrapper.js";
 import { request } from "undici";
 import { EventEmitter } from "eventemitter3";
 import { StreamType } from "@discordjs/voice";
@@ -16,7 +16,7 @@ import {
 	DEFAULT_COMPRESSOR,
 	DEFAULT_NORMALIZE,
 } from "../../utils/constants.js";
-import { FFmpegManager } from "./FfmpegManager.js";
+import { FFmpegManager } from "../ffmpeg/FfmpegManager.js";
 import {
 	safeRequestStream,
 	safeRequestStreamWithRetry,
@@ -285,7 +285,6 @@ export class AudioService extends EventEmitter {
 			.options("-ac", "2")
 			.options("-af", filters.join(","))
 			.output("pipe:1");
-
 
 		this.currentFFmpegCommand = ffmpegCommand;
 		this.processor = new AudioProcessor(this.currentOptions);
