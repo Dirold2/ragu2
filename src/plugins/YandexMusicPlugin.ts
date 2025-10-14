@@ -2,7 +2,7 @@ import retry from "async-retry";
 import { Discord } from "discordx";
 import { LRUCache } from "lru-cache";
 import { URL } from "url";
-import { Types, WrappedYMApi, YMApi } from "ym-api-meowed";
+import { Types, WrappedYMApi, YMApi } from "ym-api-meowed-d2";
 
 import type { MusicServicePlugin, PlaylistTrack } from "../interfaces/index.js";
 import {

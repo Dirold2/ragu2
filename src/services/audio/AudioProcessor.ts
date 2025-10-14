@@ -1,402 +1,387 @@
-import { Transform } from "stream";
-import type { AudioProcessingOptions } from "../../types/audio.js";
-import {
-	VOLUME_MIN,
-	VOLUME_MAX,
-	BASS_MIN,
-	BASS_MAX,
-	TREBLE_MIN,
-	TREBLE_MAX,
-} from "../../utils/constants.js";
-import { bot } from "../../bot.js";
+import { Transform } from "stream"
+import type { AudioProcessingOptions } from "../../types/audio.js"
+import { VOLUME_MIN, VOLUME_MAX, BASS_MIN, BASS_MAX, TREBLE_MIN, TREBLE_MAX } from "../../utils/constants.js"
+import { bot } from "../../bot.js"
 
 /**
- * Преобразует пользовательское значение в диапазоне [-1, 1] в линейный gain,
- * используя промежуточное представление в децибелах с мягкой нелинейной кривой.
+ * Audio filter state for IIR filters.
+ */
+interface FilterState {
+  trebleL: number
+  trebleR: number
+  bass60L: number
+  bass60R: number
+  bass120L: number
+  bass120R: number
+  bassLowpassL: number
+  bassLowpassR: number
+}
+
+/**
+ * Sample rate for audio processing (48kHz).
+ */
+const SAMPLE_RATE = 48000
+
+/**
+ * Convert user value [-1, 1] to linear gain using dB curve.
  */
 function userToGainLinear(userVal: number, maxDb = 12): number {
-	const v = Math.max(-1, Math.min(1, userVal)); // clamp
-	const db = Math.sign(v) * Math.pow(Math.abs(v), 0.5) * maxDb; // мягкая кривая
-	return Math.pow(10, db / 20); // dB -> линейный коэффициент
+  const v = Math.max(-1, Math.min(1, userVal))
+  const db = Math.sign(v) * Math.pow(Math.abs(v), 0.5) * maxDb
+  return Math.pow(10, db / 20)
 }
 
 /**
- * Ожидает bass/treble в нормализованном диапазоне [-1,1].
- * Преобразует в dB с мягкой кривой.
+ * Convert user value [-1, 1] to dB with soft curve.
  */
 function userToGainDb(userVal: number, maxDb = 15): number {
-	const v = Math.max(-1, Math.min(1, userVal));
-	return Math.sign(v) * Math.pow(Math.abs(v), 0.5) * maxDb;
+  const v = Math.max(-1, Math.min(1, userVal))
+  return Math.sign(v) * Math.pow(Math.abs(v), 0.5) * maxDb
 }
 
 /**
- * Простой компрессор в плавающей точке.
- * threshold в нормализованной шкале (0..1), ratio >=1
+ * Simple dynamic range compressor.
  */
 function compressSample(value: number, threshold = 0.8, ratio = 4): number {
-	const abs = Math.abs(value);
-	if (abs <= threshold) return value;
-	const excess = abs - threshold;
-	const compressed = threshold + excess / ratio;
-	return Math.sign(value) * compressed;
+  const abs = Math.abs(value)
+  if (abs <= threshold) return value
+  const excess = abs - threshold
+  const compressed = threshold + excess / ratio
+  return Math.sign(value) * compressed
 }
 
+/**
+ * Real-time audio processor with dynamic effects.
+ *
+ * Processes PCM audio samples with volume control, EQ, and compression.
+ * All effects are applied in real-time without restarting the stream.
+ *
+ * @example
+ * \`\`\`typescript
+ * const processor = new AudioProcessor({ volume: 0.5, bass: 0.2, treble: 0.1 });
+ *
+ * // Pipe FFmpeg output through processor
+ * ffmpegOutput.pipe(processor).pipe(destination);
+ *
+ * // Adjust effects in real-time
+ * processor.setVolume(0.8);
+ * processor.setEqualizer(0.5, 0.3, true);
+ * \`\`\`
+ */
 export class AudioProcessor extends Transform {
-	private volume: number;
-	private bass: number; // предполагается в нормализованном диапазоне [-1,1]
-	private treble: number; // аналогично
-	private compressor: boolean;
-	private isFading = false;
-	private lastVolume: number;
-	private isDestroyed = false;
+  private volume: number
+  private bass: number
+  private treble: number
+  private compressor: boolean
+  private isFading = false
+  private lastVolume: number
+  private isDestroyed = false
 
-	// Fade (time-based)
-	private fadeStartTime: number | null = null;
-	private fadeDuration = 0;
-	private fadeFrom = 0;
-	private fadeTo = 0;
+  // Fade state
+  private fadeStartTime: number | null = null
+  private fadeDuration = 0
+  private fadeFrom = 0
+  private fadeTo = 0
 
-	// Filter states for dynamic EQ
-	private trebleHighPassStateL = 0;
-	private trebleHighPassStateR = 0;
+  // Filter states
+  private filterState: FilterState = {
+    trebleL: 0,
+    trebleR: 0,
+    bass60L: 0,
+    bass60R: 0,
+    bass120L: 0,
+    bass120R: 0,
+    bassLowpassL: 0,
+    bassLowpassR: 0,
+  }
 
-	// Enhanced bass filter states
-	private bassFilter60StateL = 0;
-	private bassFilter60StateR = 0;
-	private bassEq120StateL = 0;
-	private bassEq120StateR = 0;
-	private bassLowpassStateL = 0;
-	private bassLowpassStateR = 0;
+  constructor(options: AudioProcessingOptions) {
+    super()
+    this.volume = this.clampVolume(options.volume)
+    this.lastVolume = this.volume
+    this.bass = this.normalizeBass(options.bass)
+    this.treble = this.normalizeTreble(options.treble)
+    this.compressor = !!options.compressor
 
-	constructor(options: AudioProcessingOptions) {
-		super();
-		this.volume = this.clampVolume(options.volume);
-		this.lastVolume = this.volume;
-		// Приводим bass/treble к нормализованной шкале [-1,1] при необходимости
-		this.bass = this.clampBass(options.bass);
-		this.treble = this.clampTreble(options.treble);
-		this.compressor = !!options.compressor;
+    this.setupEventHandlers()
+  }
 
-		// Initialize filter states
-		this.trebleHighPassStateL = 0;
-		this.trebleHighPassStateR = 0;
+  // ==================== Public API ====================
 
-		// Initialize enhanced bass filter states
-		this.bassFilter60StateL = 0;
-		this.bassFilter60StateR = 0;
-		this.bassEq120StateL = 0;
-		this.bassEq120StateR = 0;
-		this.bassLowpassStateL = 0;
-		this.bassLowpassStateR = 0;
+  /**
+   * Set volume instantly.
+   */
+  setVolume(volume: number): void {
+    if (this.isDestroyed) return
+    this.lastVolume = this.volume
+    this.volume = this.clampVolume(volume)
+  }
 
-		// Обработчики состояния потока
-		this.on("error", (error) => {
-			bot?.logger.debug(
-				"[AudioProcessor] Stream error:",
-				error?.message ?? error,
-			);
-			if (!this.isDestroyed) {
-				this.safeDestroy();
-			}
-		});
+  /**
+   * Fade volume smoothly over duration.
+   */
+  startFade(targetVolume: number, duration: number): void {
+    if (this.isDestroyed) return
+    this.isFading = true
+    this.fadeFrom = this.volume
+    this.fadeTo = this.clampVolume(targetVolume)
+    this.fadeStartTime = Date.now()
+    this.fadeDuration = duration
+  }
 
-		this.on("close", () => {
-			bot?.logger.debug("[AudioProcessor] Stream closed");
-			this.isDestroyed = true;
-		});
+  /**
+   * Update equalizer settings (bass, treble, compression).
+   */
+  setEqualizer(bass: number, treble: number, compressor: boolean): void {
+    if (this.isDestroyed) return
+    this.bass = this.normalizeBass(bass)
+    this.treble = this.normalizeTreble(treble)
+    this.compressor = compressor
+  }
 
-		this.on("finish", () => {
-			bot?.logger.debug("[AudioProcessor] Stream finished");
-		});
-	}
+  /**
+   * Enable or disable dynamic range compression.
+   */
+  setCompressor(enabled: boolean): void {
+    if (this.isDestroyed) return
+    this.compressor = enabled
+  }
 
-	private clampVolume(volume: number): number {
-		return Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, volume));
-	}
+  // ==================== Stream Processing ====================
 
-	private clampBass(bass: number): number {
-		// ожидаем, что исходный bass в каком-то диапазоне, нормализуем в [-1,1]
-		// если BASS_MIN..BASS_MAX (-1..1 или -100..100), адаптировать под свой случай
-		const normalized =
-			BASS_MAX !== BASS_MIN
-				? ((bass - BASS_MIN) / (BASS_MAX - BASS_MIN)) * 2 - 1
-				: bass;
-		return Math.max(-1, Math.min(1, normalized));
-	}
+  _transform(chunk: Buffer, _encoding: string, callback: (error?: Error | null, data?: any) => void): void {
+    if (this.isDestroyed || this.destroyed) {
+      callback()
+      return
+    }
 
-	private clampTreble(treble: number): number {
-		const normalized =
-			TREBLE_MAX !== TREBLE_MIN
-				? ((treble - TREBLE_MIN) / (TREBLE_MAX - TREBLE_MIN)) * 2 - 1
-				: treble;
-		return Math.max(-1, Math.min(1, normalized));
-	}
+    try {
+      this.updateFadeVolume()
 
-	/**
-	 * Мгновенная установка громкости
-	 */
-	setVolume(volume: number): void {
-		if (this.isDestroyed) return;
-		this.lastVolume = this.volume;
-		this.volume = this.clampVolume(volume);
-	}
+      const samples = new Int16Array(chunk.buffer, chunk.byteOffset, chunk.length / 2)
 
-	/**
-	 * Плавное изменение громкости
-	 */
-	startFade(targetVolume: number, duration: number): void {
-		if (this.isDestroyed) return;
-		this.isFading = true;
-		this.fadeFrom = this.volume;
-		this.fadeTo = this.clampVolume(targetVolume);
-		this.fadeStartTime = Date.now();
-		this.fadeDuration = duration;
-	}
+      const frameCount = samples.length / 2
+      const volumeDelta = this.volume - this.lastVolume
+      const volumeStep = frameCount > 0 ? volumeDelta / frameCount : 0
 
-	setEqualizer(bass: number, treble: number, compressor: boolean): void {
-		if (this.isDestroyed) return;
-		this.bass = this.clampBass(bass);
-		this.treble = this.clampTreble(treble);
-		this.compressor = compressor;
-	}
+      for (let frame = 0; frame < frameCount; frame++) {
+        const idx = frame * 2
+        const left = samples[idx]
+        const right = samples[idx + 1] ?? left
+        const currentVolume = this.lastVolume + volumeStep * frame
 
-	setCompressor(enabled: boolean): void {
-		if (this.isDestroyed) return;
-		this.compressor = enabled;
-	}
+        const [processedLeft, processedRight] = this.processAudioSample(left, right, currentVolume)
 
-	private updateFadeVolume(): void {
-		if (!this.isFading || this.fadeStartTime === null) return;
+        samples[idx] = processedLeft
+        samples[idx + 1] = processedRight
+      }
 
-		const now = Date.now();
-		const elapsed = now - this.fadeStartTime;
+      this.lastVolume = this.volume
+      callback(null, chunk)
+    } catch (error) {
+      bot?.logger.error("[AudioProcessor] Transform error:", error)
+      this.safeDestroy()
+      callback()
+    }
+  }
 
-		if (elapsed >= this.fadeDuration) {
-			this.volume = this.fadeTo;
-			this.isFading = false;
-			this.fadeStartTime = null;
-		} else {
-			const progress = elapsed / this.fadeDuration;
-			this.volume = this.fadeFrom + (this.fadeTo - this.fadeFrom) * progress;
-		}
-	}
+  // ==================== Audio Processing ====================
 
-	private processAudioSample(
-		left: number,
-		right: number,
-		currentVolume: number,
-	): [number, number] {
-		// Переводим в float -1..1 нормализованно относительно 32768
-		let l = left / 32768;
-		let r = right / 32768;
+  /**
+   * Process a single stereo audio sample with all effects.
+   */
+  private processAudioSample(left: number, right: number, currentVolume: number): [number, number] {
+    // Convert to normalized float [-1, 1]
+    let l = left / 32768
+    let r = right / 32768
 
-		// Применяем громкость
-		l *= currentVolume;
-		r *= currentVolume;
+    // Apply volume
+    l *= currentVolume
+    r *= currentVolume
 
-		// --- Dynamic Bass/Treble Processing with simple IIR filters ---
-		// These are simplified single-pole filters. For more precise EQ, biquad filters are recommended.
-		const sampleRate = 48000; // Assuming 48kHz sample rate
-		const trebleCutoffFreq = 4000; // Hz for treble effect
+    // Apply bass boost/cut
+    if (Math.abs(this.bass) > 0.001) {
+      ;[l, r] = this.applyBassFilter(l, r)
+    }
 
-		// Enhanced Bass Processing (replacing the existing bass section)
-		if (Math.abs(this.bass) > 0.001) {
-			// Получаем усиление от пользователя, максимум 18 дБ
-			const bassGainDb = userToGainDb(this.bass, 18);
+    // Apply treble boost/cut
+    if (Math.abs(this.treble) > 0.001) {
+      ;[l, r] = this.applyTrebleFilter(l, r)
+    }
 
-			// Расчёт частоты среза lowpass: при положительном усилении срез ниже, при отрицательном — выше
-			let lowpassFreq: number;
-			if (bassGainDb >= 0) {
-				// 4000 ... 3890 Гц (чем выше усиление, тем ниже частота среза)
-				lowpassFreq = 4000 - (bassGainDb / 18) * 110;
-			} else {
-				// 4000 ... 5000 Гц (чем сильнее отрицательное усиление, тем выше частота среза)
-				lowpassFreq = 4000 + (Math.abs(bassGainDb) / 18) * 1000;
-			}
+    // Apply compression
+    if (this.compressor) {
+      l = compressSample(l)
+      r = compressSample(r)
+    }
 
-			// Расчёт Q-factor для lowpass: при положительном усилении Q выше (более резкий срез), при отрицательном — ниже
-			let lowpassQ: number;
-			if (bassGainDb >= 0) {
-				// 0.7 ... 2.5 (чем выше усиление, тем выше Q-factor для более резкого среза)
-				lowpassQ = 0.7 + (bassGainDb / 18) * 1.8;
-			} else {
-				// 0.7 ... 0.3 (чем сильнее отрицательное усиление, тем ниже Q-factor для более мягкого среза)
-				lowpassQ = 0.7 - (Math.abs(bassGainDb) / 18) * 0.4;
-			}
+    // Clamp and convert back to int16
+    l = Math.max(-1, Math.min(1, l))
+    r = Math.max(-1, Math.min(1, r))
 
-			// Bass filter at 60Hz (equivalent to bass=g=X:f=60:w=1.0)
-			const bassGain60 = userToGainLinear(this.bass * 0.7, 18); // Apply 0.7 factor like in FFmpeg
-			const alpha60 = (2 * Math.PI * 60) / sampleRate;
+    return [Math.round(l * 32767), Math.round(r * 32767)]
+  }
 
-			this.bassFilter60StateL =
-				this.bassFilter60StateL + alpha60 * (l - this.bassFilter60StateL);
-			this.bassFilter60StateR =
-				this.bassFilter60StateR + alpha60 * (r - this.bassFilter60StateR);
+  /**
+   * Apply bass filter with multi-stage processing.
+   */
+  private applyBassFilter(l: number, r: number): [number, number] {
+    const bassGainDb = userToGainDb(this.bass, 18)
 
-			l = l + this.bassFilter60StateL * (bassGain60 - 1);
-			r = r + this.bassFilter60StateR * (bassGain60 - 1);
+    // Calculate adaptive lowpass frequency
+    const lowpassFreq =
+      bassGainDb >= 0
+        ? 4000 - (bassGainDb / 18) * 110 // 4000-3890 Hz
+        : 4000 + (Math.abs(bassGainDb) / 18) * 1000 // 4000-5000 Hz
 
-			// Equalizer at 120Hz (equivalent to equalizer=f=120:width_type=o:width=2.5:g=X)
-			const eqGain120 = userToGainLinear(this.bass * 0.5, 18); // Apply 0.5 factor like in FFmpeg
-			const alpha120 = (2 * Math.PI * 120) / sampleRate;
+    // Calculate adaptive Q-factor
+    const lowpassQ =
+      bassGainDb >= 0
+        ? 0.7 + (bassGainDb / 18) * 1.8 // 0.7-2.5
+        : 0.7 - (Math.abs(bassGainDb) / 18) * 0.4 // 0.7-0.3
 
-			this.bassEq120StateL =
-				this.bassEq120StateL + alpha120 * (l - this.bassEq120StateL);
-			this.bassEq120StateR =
-				this.bassEq120StateR + alpha120 * (r - this.bassEq120StateR);
+    // Stage 1: 60Hz bass filter
+    const bassGain60 = userToGainLinear(this.bass * 0.7, 18)
+    const alpha60 = (2 * Math.PI * 60) / SAMPLE_RATE
 
-			l = l + this.bassEq120StateL * (eqGain120 - 1);
-			r = r + this.bassEq120StateR * (eqGain120 - 1);
+    this.filterState.bass60L += alpha60 * (l - this.filterState.bass60L)
+    this.filterState.bass60R += alpha60 * (r - this.filterState.bass60R)
 
-			// Apply biquad filter (we need to store more state for this)
-			// For simplicity, using a modified single-pole approach with Q-factor influence
-			const effectiveAlpha = (2 * Math.PI * lowpassFreq) / sampleRate;
-			const qInfluence = Math.min(lowpassQ * 0.5, 0.95); // Limit Q influence
+    l += this.filterState.bass60L * (bassGain60 - 1)
+    r += this.filterState.bass60R * (bassGain60 - 1)
 
-			this.bassLowpassStateL =
-				this.bassLowpassStateL * (1 - effectiveAlpha * qInfluence) +
-				l * effectiveAlpha * qInfluence;
-			this.bassLowpassStateR =
-				this.bassLowpassStateR * (1 - effectiveAlpha * qInfluence) +
-				r * effectiveAlpha * qInfluence;
+    // Stage 2: 120Hz equalizer
+    const eqGain120 = userToGainLinear(this.bass * 0.5, 18)
+    const alpha120 = (2 * Math.PI * 120) / SAMPLE_RATE
 
-			// Apply lowpass with Q-factor influence (blend original and filtered)
-			const blendFactor = 0.3 + (lowpassQ - 0.7) * 0.2; // Adjust blend based on Q
-			l = this.bassLowpassStateL + (l - this.bassLowpassStateL) * blendFactor;
-			r = this.bassLowpassStateR + (r - this.bassLowpassStateR) * blendFactor;
+    this.filterState.bass120L += alpha120 * (l - this.filterState.bass120L)
+    this.filterState.bass120R += alpha120 * (r - this.filterState.bass120R)
 
-			// Simple limiter if bass gain is high (equivalent to limiterNeeded logic)
-			if (Math.abs(bassGainDb) > 6) {
-				const limiterThreshold = 0.85;
-				const limiterRatio = 8;
+    l += this.filterState.bass120L * (eqGain120 - 1)
+    r += this.filterState.bass120R * (eqGain120 - 1)
 
-				if (Math.abs(l) > limiterThreshold) {
-					const excess = Math.abs(l) - limiterThreshold;
-					const compressed = limiterThreshold + excess / limiterRatio;
-					l = Math.sign(l) * compressed;
-				}
+    // Stage 3: Adaptive lowpass with Q-factor
+    const effectiveAlpha = (2 * Math.PI * lowpassFreq) / SAMPLE_RATE
+    const qInfluence = Math.min(lowpassQ * 0.5, 0.95)
 
-				if (Math.abs(r) > limiterThreshold) {
-					const excess = Math.abs(r) - limiterThreshold;
-					const compressed = limiterThreshold + excess / limiterRatio;
-					r = Math.sign(r) * compressed;
-				}
-			}
-		}
+    this.filterState.bassLowpassL =
+      this.filterState.bassLowpassL * (1 - effectiveAlpha * qInfluence) + l * effectiveAlpha * qInfluence
+    this.filterState.bassLowpassR =
+      this.filterState.bassLowpassR * (1 - effectiveAlpha * qInfluence) + r * effectiveAlpha * qInfluence
 
-		// Treble (High-shelf simulation)
-		if (Math.abs(this.treble) > 0.001) {
-			const trebleGain = userToGainLinear(this.treble, 12); // Max 12dB for internal processing
-			// Alpha for a single-pole low-pass filter used to derive high-pass
-			const alphaTreble = (2 * Math.PI * trebleCutoffFreq) / sampleRate;
+    const blendFactor = 0.3 + (lowpassQ - 0.7) * 0.2
+    l = this.filterState.bassLowpassL + (l - this.filterState.bassLowpassL) * blendFactor
+    r = this.filterState.bassLowpassR + (r - this.filterState.bassLowpassR) * blendFactor
 
-			// Apply simple low-pass filter to get the low-frequency component for high-pass calculation
-			const lpStateL =
-				this.trebleHighPassStateL +
-				alphaTreble * (l - this.trebleHighPassStateL);
-			const lpStateR =
-				this.trebleHighPassStateR +
-				alphaTreble * (r - this.trebleHighPassStateR);
+    // Stage 4: Limiter for high bass gain
+    if (Math.abs(bassGainDb) > 6) {
+      l = this.applyLimiter(l)
+      r = this.applyLimiter(r)
+    }
 
-			// High-pass component is original signal minus low-pass component
-			const highPassL = l - lpStateL;
-			const highPassR = r - lpStateR;
+    return [l, r]
+  }
 
-			this.trebleHighPassStateL = lpStateL; // Update state for next iteration
-			this.trebleHighPassStateR = lpStateR;
+  /**
+   * Apply treble filter (high-shelf simulation).
+   */
+  private applyTrebleFilter(l: number, r: number): [number, number] {
+    const trebleGain = userToGainLinear(this.treble, 12)
+    const alphaTreble = (2 * Math.PI * 4000) / SAMPLE_RATE
 
-			// Boost/cut the high-frequency component
-			l = l + highPassL * (trebleGain - 1);
-			r = r + highPassR * (trebleGain - 1);
-		}
-		// --- End Dynamic Bass/Treble Processing ---
+    // Low-pass to derive high-pass component
+    const lpStateL = this.filterState.trebleL + alphaTreble * (l - this.filterState.trebleL)
+    const lpStateR = this.filterState.trebleR + alphaTreble * (r - this.filterState.trebleR)
 
-		// Компрессия
-		if (this.compressor) {
-			l = compressSample(l);
-			r = compressSample(r);
-		}
+    const highPassL = l - lpStateL
+    const highPassR = r - lpStateR
 
-		// Ограничение (в float) и перевод назад в int16
-		l = Math.max(-1, Math.min(1, l));
-		r = Math.max(-1, Math.min(1, r));
+    this.filterState.trebleL = lpStateL
+    this.filterState.trebleR = lpStateR
 
-		const outL = Math.round(l * 32767);
-		const outR = Math.round(r * 32767);
+    // Boost/cut high frequencies
+    l += highPassL * (trebleGain - 1)
+    r += highPassR * (trebleGain - 1)
 
-		return [outL, outR];
-	}
+    return [l, r]
+  }
 
-	_transform(
-		chunk: Buffer,
-		_encoding: BufferEncoding,
-		callback: (error?: Error | null, data?: any) => void,
-	): void {
-		if (this.isDestroyed || this.destroyed) {
-			callback();
-			return;
-		}
+  /**
+   * Apply simple limiter to prevent clipping.
+   */
+  private applyLimiter(value: number, threshold = 0.85, ratio = 8): number {
+    const abs = Math.abs(value)
+    if (abs <= threshold) return value
+    const excess = abs - threshold
+    const compressed = threshold + excess / ratio
+    return Math.sign(value) * compressed
+  }
 
-		try {
-			this.updateFadeVolume();
+  // ==================== Utilities ====================
 
-			const samples = new Int16Array(
-				chunk.buffer,
-				chunk.byteOffset,
-				chunk.length / 2,
-			);
+  private updateFadeVolume(): void {
+    if (!this.isFading || this.fadeStartTime === null) return
 
-			const frameCount = samples.length / 2; // количество стерео-кадров
-			const volumeDelta = this.volume - this.lastVolume;
-			const volumeStep = frameCount > 0 ? volumeDelta / frameCount : 0;
+    const elapsed = Date.now() - this.fadeStartTime
 
-			for (let frame = 0; frame < frameCount; frame++) {
-				const idx = frame * 2;
-				const left = samples[idx];
-				const right = samples[idx + 1] ?? left;
-				const currentVolume = this.lastVolume + volumeStep * frame; // Interpolate volume for smooth fades
+    if (elapsed >= this.fadeDuration) {
+      this.volume = this.fadeTo
+      this.isFading = false
+      this.fadeStartTime = null
+    } else {
+      const progress = elapsed / this.fadeDuration
+      this.volume = this.fadeFrom + (this.fadeTo - this.fadeFrom) * progress
+    }
+  }
 
-				const [processedLeft, processedRight] = this.processAudioSample(
-					left,
-					right,
-					currentVolume,
-				);
+  private clampVolume(volume: number): number {
+    return Math.max(VOLUME_MIN, Math.min(VOLUME_MAX, volume))
+  }
 
-				samples[idx] = processedLeft;
-				samples[idx + 1] = processedRight;
-			}
+  private normalizeBass(bass: number): number {
+    if (BASS_MAX === BASS_MIN) return bass
+    const normalized = ((bass - BASS_MIN) / (BASS_MAX - BASS_MIN)) * 2 - 1
+    return Math.max(-1, Math.min(1, normalized))
+  }
 
-			this.lastVolume = this.volume;
-			callback(null, chunk);
-		} catch (error) {
-			bot?.logger.error("[AudioProcessor] Error in transform:", error);
-			this.safeDestroy();
-			callback();
-		}
-	}
+  private normalizeTreble(treble: number): number {
+    if (TREBLE_MAX === TREBLE_MIN) return treble
+    const normalized = ((treble - TREBLE_MIN) / (TREBLE_MAX - TREBLE_MIN)) * 2 - 1
+    return Math.max(-1, Math.min(1, normalized))
+  }
 
-	private safeDestroy(): void {
-		if (this.isDestroyed) return;
+  private setupEventHandlers(): void {
+    this.on("error", (error) => {
+      bot?.logger.debug("[AudioProcessor] Error:", error?.message ?? error)
+      if (!this.isDestroyed) this.safeDestroy()
+    })
 
-		this.isDestroyed = true;
-		try {
-			this.removeAllListeners();
-			if (!this.destroyed) {
-				this.destroy();
-			}
-		} catch (error) {
-			bot?.logger.debug(
-				"[AudioProcessor] Error during safe destroy:",
-				(error as Error).message,
-			);
-		}
-	}
+    this.on("close", () => {
+      bot?.logger.debug("[AudioProcessor] Closed")
+      this.isDestroyed = true
+    })
 
-	override destroy(error?: Error): this {
-		if (this.isDestroyed) return this;
-		this.isDestroyed = true;
-		this.removeAllListeners();
-		super.destroy(error);
-		return this;
-	}
+    this.on("finish", () => {
+      bot?.logger.debug("[AudioProcessor] Finished")
+    })
+  }
+
+  private safeDestroy(): void {
+    if (this.isDestroyed) return
+    this.isDestroyed = true
+    try {
+      this.removeAllListeners()
+      if (!this.destroyed) this.destroy()
+    } catch (error) {
+      bot?.logger.debug("[AudioProcessor] Destroy error:", (error as Error).message)
+    }
+  }
+
+  override destroy(error?: Error): this {
+    if (this.isDestroyed) return this
+    this.isDestroyed = true
+    this.removeAllListeners()
+    super.destroy(error)
+    return this
+  }
 }
