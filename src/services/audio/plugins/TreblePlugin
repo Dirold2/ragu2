@@ -1,0 +1,44 @@
+import { AudioPlugin, AudioPluginBaseOptions } from "fluent-streamer";
+import { Transform } from "stream";
+
+export class TreblePlugin implements AudioPlugin {
+  constructor(private treble: number) {}
+
+  setTreble(t: number) {
+    this.treble = t;
+  }
+
+  createTransform(options: Required<AudioPluginBaseOptions>): Transform {
+    const { channels } = options;
+    const t = new Transform({
+      transform: (chunk: Buffer, _enc, cb) => {
+        try {
+          const samples = new Int16Array(
+            chunk.buffer,
+            chunk.byteOffset,
+            chunk.length / 2,
+          );
+
+          for (let i = 0; i < samples.length; i += channels) {
+            for (let c = 0; c < channels; c++) {
+              const idx = i + c;
+              let val = samples[idx] / 32768;
+
+              // Простая high-shelf имитация — усиливаем изменения (т.е. высокие частоты)
+              const prev = samples[idx - channels] / 32768 || 0;
+              val += (val - prev) * this.treble;
+
+              samples[idx] = Math.round(Math.max(-1, Math.min(1, val)) * 32767);
+            }
+          }
+          cb(null, chunk);
+        } catch (e) {
+          cb(e as Error);
+        }
+      },
+    }) as Transform & { _treble: number };
+
+    t._treble = this.treble;
+    return t;
+  }
+}

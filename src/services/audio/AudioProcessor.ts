@@ -1,7 +1,27 @@
 import { Transform } from "stream"
-import type { AudioProcessingOptions } from "../../types/audio.js"
-import { VOLUME_MIN, VOLUME_MAX, BASS_MIN, BASS_MAX, TREBLE_MIN, TREBLE_MAX } from "../../utils/constants.js"
-import { bot } from "../../bot.js"
+
+export interface AudioProcessingOptions {
+	volume: number;
+	bass: number;
+	treble: number;
+	compressor: boolean;
+	normalize: boolean;
+	headers?: Record<string, string>;
+	lowPassFrequency?: number;
+	lowPassQ?: number;
+	fade?: {
+		fadein: number;
+		fadeout: number;
+	};
+}
+
+export const VOLUME_MIN = 0;
+export const VOLUME_MAX = 1;
+export const BASS_MIN = -20;
+export const BASS_MAX = 20;
+export const TREBLE_MIN = -20;
+export const TREBLE_MAX = 20;
+
 
 /**
  * Audio filter state for IIR filters.
@@ -179,7 +199,7 @@ export class AudioProcessor extends Transform {
       this.lastVolume = this.volume
       callback(null, chunk)
     } catch (error) {
-      bot?.logger.error("[AudioProcessor] Transform error:", error)
+      console.error("[AudioProcessor] Transform error:", error)
       this.safeDestroy()
       callback()
     }
@@ -339,30 +359,32 @@ export class AudioProcessor extends Transform {
   }
 
   private normalizeBass(bass: number): number {
-    if (BASS_MAX === BASS_MIN) return bass
-    const normalized = ((bass - BASS_MIN) / (BASS_MAX - BASS_MIN)) * 2 - 1
+    const range = BASS_MAX - BASS_MIN
+    if (range === 0) return 0
+    const normalized = ((bass - BASS_MIN) / range) * 2 - 1
     return Math.max(-1, Math.min(1, normalized))
   }
 
   private normalizeTreble(treble: number): number {
-    if (TREBLE_MAX === TREBLE_MIN) return treble
-    const normalized = ((treble - TREBLE_MIN) / (TREBLE_MAX - TREBLE_MIN)) * 2 - 1
+    const range = TREBLE_MAX - TREBLE_MIN
+    if (range === 0) return 0
+    const normalized = ((treble - TREBLE_MIN) / range) * 2 - 1
     return Math.max(-1, Math.min(1, normalized))
   }
 
   private setupEventHandlers(): void {
     this.on("error", (error) => {
-      bot?.logger.debug("[AudioProcessor] Error:", error?.message ?? error)
+      console.debug("[AudioProcessor] Error:", error?.message ?? error)
       if (!this.isDestroyed) this.safeDestroy()
     })
 
     this.on("close", () => {
-      bot?.logger.debug("[AudioProcessor] Closed")
+      console.debug("[AudioProcessor] Closed")
       this.isDestroyed = true
     })
 
     this.on("finish", () => {
-      bot?.logger.debug("[AudioProcessor] Finished")
+      console.debug("[AudioProcessor] Finished")
     })
   }
 
@@ -373,7 +395,7 @@ export class AudioProcessor extends Transform {
       this.removeAllListeners()
       if (!this.destroyed) this.destroy()
     } catch (error) {
-      bot?.logger.debug("[AudioProcessor] Destroy error:", (error as Error).message)
+      console.debug("[AudioProcessor] Destroy error:", (error as Error).message)
     }
   }
 

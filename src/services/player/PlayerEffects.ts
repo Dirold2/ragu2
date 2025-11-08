@@ -6,7 +6,7 @@ export class PlayerEffects {
 
 	async fadeIn(targetVolume: number): Promise<void> {
 		await this.audioService.setVolume(0, 0, false);
-		await this.audioService.setVolume(targetVolume / 100, DEFAULT_FADEIN);
+		await this.audioService.setVolume(targetVolume / 100, DEFAULT_FADEIN, true);
 	}
 
 	async scheduleFadeOut(
@@ -41,9 +41,5 @@ export class PlayerEffects {
 
 	setCompressor(enabled: boolean): void {
 		this.audioService.setCompressor(enabled);
-	}
-
-	setLowPass(frequency: number, _q = 0.707): void {
-		this.audioService.setLowPassFrequency(frequency);
 	}
 }

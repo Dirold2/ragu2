@@ -139,17 +139,27 @@ export class ConnectionManager extends EventEmitter {
 		);
 		this.connection.on(VoiceConnectionStatus.Destroyed, destroyHandler);
 
+		// FIX: Defensive checks to prevent accessing .state of null during recurring interval
 		const statusCheckInterval = setInterval(async () => {
+			// Prevent further checks if destroyed or connection lost
 			if (this.isDestroyed || !this.connection) {
 				clearInterval(statusCheckInterval);
 				return;
 			}
 
+			let connection = this.connection;
+			// Defensive: ensure we still have a connection object before dereferencing state/status
 			if (
 				!(await this.verifyActualConnection()) &&
-				this.connection.state.status !== VoiceConnectionStatus.Destroyed
+				connection && 
+				connection.state &&
+				connection.state.status !== VoiceConnectionStatus.Destroyed
 			) {
-				this.connection.destroy();
+				try {
+					connection.destroy();
+				} catch (e) {
+					this.bot?.logger?.debug?.("[ConnectionManager] Error during connection.destroy in statusCheckInterval:", e);
+				}
 			}
 		}, 10_000);
 
@@ -241,7 +251,8 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	getConnection(): VoiceConnection | null {
-		if (this.connection?.state.status === VoiceConnectionStatus.Destroyed) {
+		// Defensive: only access state if this.connection is not null
+		if (this.connection && this.connection.state?.status === VoiceConnectionStatus.Destroyed) {
 			this.forceCleanup();
 			return null;
 		}
@@ -254,6 +265,7 @@ export class ConnectionManager extends EventEmitter {
 				VoiceConnectionStatus.Disconnected,
 				this.disconnectHandler,
 			);
+			// Defensive: make sure handler is removed only if handler was attached at this key
 			this.connection.off(
 				VoiceConnectionStatus.Destroyed,
 				this.disconnectHandler,

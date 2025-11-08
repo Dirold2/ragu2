@@ -34,6 +34,7 @@
         "eventemitter2": "^6.4.9",
         "eventemitter3": "^5.0.1",
         "execa": "^9.6.0",
+        "fluent-streamer": "github:Dirold2/fluent-streamer#__dist__",
         "get-audio-duration": "^4.0.1",
         "humanize-ms": "^2.0.0",
         "lru-cache": "^11.2.2",

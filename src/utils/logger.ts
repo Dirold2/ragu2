@@ -316,7 +316,6 @@ const registerErrorHandlers = (): void => {
 		try {
 			const msg = (error?.message || "").toLowerCase();
 			const ignorable = [
-				"premature close",
 				"err_stream_premature_close",
 				"write after end",
 				"epipe",

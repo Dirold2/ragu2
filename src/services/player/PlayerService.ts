@@ -13,7 +13,6 @@ import { ConnectionManager } from "./ConnectionManager.js";
 import type { PlayerState } from "../../types/audio.js";
 import { PlayerServiceEvents } from "../../types/audio.js";
 import config from "../../../config.json" with { type: "json" };
-import { ErrorHandler } from "../../utils/errorHandler.js";
 import type { Bot } from "../../bot.js";
 import { PlayerQueue } from "./PlayerQueue.js";
 import { PlayerEffects } from "./PlayerEffects.js";
@@ -36,7 +35,6 @@ export default class PlayerService extends EventEmitter {
 		private readonly bot: Bot,
 	) {
 		super();
-		ErrorHandler.initialize();
 
 		this.audioService = new AudioService();
 		this.trackManager = new TrackManager(bot);
@@ -116,7 +114,6 @@ export default class PlayerService extends EventEmitter {
 			try {
 				// Stop current playback gracefully and move to next track
 				this.player.stop();
-				await this.audioService.destroyCurrentStreamSafe();
 				const lastTrack = this.state.currentTrack;
 
 				await this.queue.playNextTrack(
@@ -145,7 +142,6 @@ export default class PlayerService extends EventEmitter {
 	private handleDisconnection(): void {
 		this.bot?.logger.debug("[PlayerService] handleDisconnection called");
 		this.player.stop();
-		this.audioService.destroyCurrentStreamSafe();
 		this.resetState();
 		this.emit(PlayerServiceEvents.DISCONNECTED);
 	}
@@ -193,7 +189,6 @@ export default class PlayerService extends EventEmitter {
 			await this.effects.setVolume(0, 1000, false);
 			await new Promise((resolve) => setTimeout(resolve, 1000));
 			this.player.stop();
-			await this.audioService.destroyCurrentStreamSafe();
 			await this.playNextOrRecommendations();
 		} catch (error) {
 			this.bot?.logger.error("Failed to skip track:", error);
@@ -208,38 +203,22 @@ export default class PlayerService extends EventEmitter {
 
 			this.connectionManager.resetIdleTimeout();
 
-			await this.audioService.destroyCurrentStreamSafe();
-
 			let trackUrl = await this.trackManager.getTrackUrl(
 				track.trackId,
 				track.source,
 			);
 			if (!trackUrl) return await this.playNextOrRecommendations();
 
-			let streamResult;
-			try {
-				streamResult =
-					await this.audioService.createAudioStreamForDiscord(trackUrl);
-			} catch (err: any) {
-				if (err.message?.includes("401") && track.source === "yandex") {
-					trackUrl = await this.trackManager.getTrackUrl(
-						track.trackId,
-						track.source,
-					);
-					if (!trackUrl) return await this.playNextOrRecommendations();
-					streamResult =
-						await this.audioService.createAudioStreamForDiscord(trackUrl);
-				} else throw err;
-			}
+			const streamResult = await this.audioService.createAudioStreamForDiscord(trackUrl);
 
 			const { stream, type } = streamResult;
+
 			const resource = createAudioResource(stream, { inputType: type });
 
 			this.state.currentTrack = track;
 			if (!track.generation)
 				this.bot.queueService.setLastTrack(this.guildId, track);
 
-			await this.effects.setVolumeFast(0);
 			this.player.play(resource);
 			await this.effects.fadeIn(this.state.volume);
 
@@ -331,7 +310,6 @@ export default class PlayerService extends EventEmitter {
 			}
 
 			this.player.stop();
-			await this.audioService.destroyCurrentStreamSafe();
 			this.connectionManager.destroy();
 			this.removeAllListeners();
 			this.resetState();

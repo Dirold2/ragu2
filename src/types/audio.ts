@@ -6,6 +6,7 @@ export interface AudioProcessingOptions {
 	treble: number;
 	compressor: boolean;
 	normalize: boolean;
+	headers?: Record<string, string>;
 	lowPassFrequency?: number;
 	lowPassQ?: number;
 	fade?: {
