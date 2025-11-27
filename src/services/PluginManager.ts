@@ -1,48 +1,62 @@
 import type { MusicServicePlugin } from "../interfaces/index.js";
 import { bot } from "../bot.js";
 
-/**
- * Manages music service plugins with improved caching and performance,
- * with ability to enable/disable plugins at runtime.
- */
 export default class PluginManager {
-	private readonly plugins: Map<string, MusicServicePlugin> = new Map();
-	private readonly disabledPlugins: Set<string> = new Set();
-	private readonly urlCache: Map<string, string> = new Map();
+	private readonly plugins = new Map<string, MusicServicePlugin>();
+	private readonly disabledPlugins = new Set<string>();
+	private readonly urlCache = new Map<string, string>();
+
 	private readonly logger = bot.logger;
 	private readonly locale = bot.locale;
+
 	private readonly MAX_URL_CACHE_SIZE = 1000;
-	private readonly CACHE_CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour
+	private readonly CACHE_CLEANUP_INTERVAL = 60 * 60 * 1000;
+	private readonly CACHE_TRIM_RATIO = 0.1;
+
+	private cacheCleanupInterval: NodeJS.Timeout | null = null;
 
 	constructor() {
-		setInterval(() => this.pruneUrlCache(), this.CACHE_CLEANUP_INTERVAL);
+		this.cacheCleanupInterval = setInterval(
+			() => this.pruneUrlCache(),
+			this.CACHE_CLEANUP_INTERVAL,
+		);
 	}
 
-	/**
-	 * Registers a new plugin with proper validation and error handling.
-	 * Honors plugin.disabled if set.
-	 */
-	registerPlugin(plugin: MusicServicePlugin): boolean {
+	registerPlugin(plugin: MusicServicePlugin | null | undefined): boolean {
 		try {
-			if (!plugin?.name) {
-				this.logger.error("Plugin name is required");
+			if (!plugin) {
+				this.logger?.error?.(
+					"PluginManager.registerPlugin: plugin is null/undefined",
+				);
 				return false;
 			}
 
-			if (this.plugins.has(plugin.name)) {
-				this.logger.warn(`Plugin "${plugin.name}" is already registered`);
+			const rawName = plugin.name;
+			const name = typeof rawName === "string" ? rawName.trim() : "";
+
+			if (!name) {
+				this.logger?.error?.(
+					"PluginManager.registerPlugin: Plugin name is required",
+				);
 				return false;
 			}
 
-			this.plugins.set(plugin.name, plugin);
+			if (this.plugins.has(name)) {
+				this.logger?.warn?.(`Plugin "${name}" is already registered`);
+				return false;
+			}
+
+			plugin.name = name;
+			this.plugins.set(name, plugin);
+
 			if (plugin.disabled) {
-				this.disabledPlugins.add(plugin.name);
-				this.logger.debug(
-					`Plugin "${plugin.name}" registered as disabled (initial state)`,
+				this.disabledPlugins.add(name);
+				this.logger?.debug?.(
+					`Plugin "${name}" registered as disabled (initial state)`,
 				);
 			} else {
-				this.disabledPlugins.delete(plugin.name);
-				this.logger.debug(`Plugin "${plugin.name}" registered and enabled`);
+				this.disabledPlugins.delete(name);
+				this.logger?.debug?.(`Plugin "${name}" registered and enabled`);
 			}
 
 			return true;
@@ -56,131 +70,125 @@ export default class PluginManager {
 		}
 	}
 
-	/**
-	 * Enables a previously disabled plugin.
-	 */
 	enablePlugin(name: string): boolean {
-		if (!this.plugins.has(name)) {
-			this.logger.warn(`Cannot enable unknown plugin "${name}"`);
+		const normalized = name?.trim();
+		if (!normalized) {
+			this.logger?.warn?.("PluginManager.enablePlugin: empty plugin name");
 			return false;
 		}
-		if (!this.disabledPlugins.has(name)) {
-			this.logger.debug(`Plugin "${name}" is already enabled`);
+
+		if (!this.plugins.has(normalized)) {
+			this.logger?.warn?.(`Cannot enable unknown plugin "${normalized}"`);
+			return false;
+		}
+
+		if (!this.disabledPlugins.has(normalized)) {
+			this.logger?.debug?.(`Plugin "${normalized}" is already enabled`);
 			return true;
 		}
-		this.disabledPlugins.delete(name);
-		// синхронизируем флаг в объекте, если он есть
-		const p = this.plugins.get(name);
-		if (p) p.disabled = false;
-		this.logger.info(`Plugin "${name}" enabled`);
+
+		this.disabledPlugins.delete(normalized);
+		const plugin = this.plugins.get(normalized);
+		if (plugin) plugin.disabled = false;
+		this.logger?.info?.(`Plugin "${normalized}" enabled`);
 		return true;
 	}
 
-	/**
-	 * Disables a plugin so it won't be used in matching, without unregistering.
-	 */
 	disablePlugin(name: string): boolean {
-		if (!this.plugins.has(name)) {
-			this.logger.warn(`Cannot disable unknown plugin "${name}"`);
+		const normalized = name?.trim();
+		if (!normalized) {
+			this.logger?.warn?.("PluginManager.disablePlugin: empty plugin name");
 			return false;
 		}
-		if (this.disabledPlugins.has(name)) {
-			this.logger.debug(`Plugin "${name}" is already disabled`);
+
+		if (!this.plugins.has(normalized)) {
+			this.logger?.warn?.(`Cannot disable unknown plugin "${normalized}"`);
+			return false;
+		}
+
+		if (this.disabledPlugins.has(normalized)) {
+			this.logger?.debug?.(`Plugin "${normalized}" is already disabled`);
 			return true;
 		}
-		this.disabledPlugins.add(name);
-		const p = this.plugins.get(name);
-		if (p) p.disabled = true;
-		this.logger.info(`Plugin "${name}" disabled`);
+
+		this.disabledPlugins.add(normalized);
+		const plugin = this.plugins.get(normalized);
+		if (plugin) plugin.disabled = true;
+		this.logger?.info?.(`Plugin "${normalized}" disabled`);
 		return true;
 	}
 
-	/**
-	 * Returns whether a plugin is enabled.
-	 */
 	isPluginEnabled(name: string): boolean {
-		if (!this.plugins.has(name)) return false;
-		return !this.disabledPlugins.has(name);
+		const normalized = name?.trim();
+		if (!normalized) return false;
+		if (!this.plugins.has(normalized)) return false;
+		return !this.disabledPlugins.has(normalized);
 	}
 
-	/**
-	 * Gets plugin by name regardless of enabled state.
-	 */
 	getPlugin(name: string): MusicServicePlugin | undefined {
-		return this.plugins.get(name);
+		const normalized = name?.trim();
+		if (!normalized) return undefined;
+		return this.plugins.get(normalized);
 	}
 
-	/**
-	 * Returns all registered plugins (including disabled ones).
-	 */
 	getAllPlugins(): readonly MusicServicePlugin[] {
 		return Array.from(this.plugins.values());
 	}
 
-	/**
-	 * Returns only enabled/active plugins.
-	 */
 	getActivePlugins(): readonly MusicServicePlugin[] {
 		return this.getAllPlugins().filter((p) => this.isPluginEnabled(p.name));
 	}
 
-	/**
-	 * Finds a plugin that matches the URL with cache optimization, only among enabled plugins.
-	 */
 	getPluginForUrl(url: string): MusicServicePlugin | undefined {
 		try {
-			if (typeof url !== "string") {
-				throw new Error("URL must be a string");
+			if (typeof url !== "string") throw new Error("URL must be a string");
+
+			const trimmedUrl = url.trim();
+			if (!trimmedUrl) {
+				this.logger?.debug?.("PluginManager.getPluginForUrl: empty URL");
+				return undefined;
 			}
 
-			// Check cache first
-			const cachedPluginName = this.urlCache.get(url);
+			const cachedPluginName = this.urlCache.get(trimmedUrl);
 			if (cachedPluginName) {
 				if (!this.isPluginEnabled(cachedPluginName)) {
-					// кеш содержит отключённый плагин — сбросим его
-					this.urlCache.delete(url);
+					this.urlCache.delete(trimmedUrl);
 				} else {
-					const plugin = this.plugins.get(cachedPluginName);
-					if (plugin) {
-						this.logger.debug(
+					const cachedPlugin = this.plugins.get(cachedPluginName);
+					if (cachedPlugin) {
+						this.logger?.debug?.(
 							this.locale.t("messages.playerManager.cache.hit", {
-								key: plugin.name,
+								key: cachedPlugin.name,
 							}),
-							{
-								plugin: plugin.name,
-							},
 						);
-						return plugin;
+						this.logger?.debug?.("PluginManager.getPluginForUrl: cache hit", {
+							url: trimmedUrl,
+							plugin: cachedPlugin.name,
+						});
+						return cachedPlugin;
 					}
 				}
 			}
 
-			// Find matching plugin among enabled ones
 			const plugin = this.getActivePlugins().find((p) =>
-				p.urlPatterns?.some((pattern) => pattern.test(url)),
+				p.urlPatterns?.some((pattern) => pattern.test(trimmedUrl)),
 			);
 
 			if (plugin) {
-				if (this.urlCache.size >= this.MAX_URL_CACHE_SIZE) {
-					const keysToDelete = Array.from(this.urlCache.keys()).slice(
-						0,
-						Math.floor(this.MAX_URL_CACHE_SIZE * 0.1),
-					);
-					keysToDelete.forEach((key) => this.urlCache.delete(key));
-				}
-				this.urlCache.set(url, plugin.name);
-				this.logger.debug("Plugin found for URL", {
-					url,
+				this.addToUrlCache(trimmedUrl, plugin.name);
+				this.logger?.debug?.("Plugin found for URL", {
+					url: trimmedUrl,
 					plugin: plugin.name,
 				});
-			} else {
-				this.logger.debug(
-					this.locale.t("messages.playerManager.errors.plugin.not_found"),
-					{ url },
-				);
+				return plugin;
 			}
 
-			return plugin;
+			this.logger?.debug?.(
+				this.locale.t("messages.playerManager.errors.plugin.not_found"),
+				{ url: trimmedUrl },
+			);
+
+			return undefined;
 		} catch (error) {
 			this.handleError(
 				"getPluginForUrl",
@@ -191,23 +199,49 @@ export default class PluginManager {
 		}
 	}
 
-	/**
-	 * Clears the URL cache
-	 */
 	clearCache(): void {
 		const cacheSize = this.urlCache.size;
 		this.urlCache.clear();
-		this.logger.debug("URL cache cleared", { previousSize: cacheSize });
+		this.logger?.debug?.("URL cache cleared", { previousSize: cacheSize });
 	}
 
-	/**
-	 * Unified error handling
-	 */
+	destroy(): void {
+		if (this.cacheCleanupInterval) {
+			clearInterval(this.cacheCleanupInterval);
+			this.cacheCleanupInterval = null;
+		}
+		this.plugins.clear();
+		this.disabledPlugins.clear();
+		this.urlCache.clear();
+		this.logger?.debug?.("PluginManager.destroy: resources cleared");
+	}
+
+	private addToUrlCache(url: string, pluginName: string): void {
+		if (this.urlCache.size >= this.MAX_URL_CACHE_SIZE) {
+			this.trimUrlCache();
+		}
+		this.urlCache.set(url, pluginName);
+	}
+
+	private trimUrlCache(): void {
+		const targetRemove = Math.max(
+			1,
+			Math.floor(this.MAX_URL_CACHE_SIZE * this.CACHE_TRIM_RATIO),
+		);
+		const keys = Array.from(this.urlCache.keys());
+		for (let i = 0; i < targetRemove && i < keys.length; i += 1) {
+			this.urlCache.delete(keys[i]);
+		}
+		this.logger?.debug?.("URL cache trimmed", {
+			removed: targetRemove,
+			newSize: this.urlCache.size,
+		});
+	}
+
 	private handleError(context: string, error: unknown, message?: string): void {
 		const errorMessage = message || `Error in ${context}`;
 		const errorObj = error instanceof Error ? error : new Error(String(error));
-
-		this.logger.error(errorMessage, {
+		this.logger?.error?.(errorMessage, {
 			error: errorObj.message,
 			stack: errorObj.stack,
 			context,

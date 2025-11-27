@@ -60,7 +60,6 @@ export class Bot {
 		try {
 			this.setupEvents();
 			await this.initServices();
-			this.setupGlobalErrorHandlers();
 		} catch (error) {
 			this.logger.error(
 				this.locale.t("messages.bot.status.init_failed"),
@@ -235,16 +234,6 @@ export class Bot {
 		this.client.on("messageCreate", messageHandler);
 
 		this.logger.debug("Discord client events are set");
-	}
-
-	private setupGlobalErrorHandlers(): void {
-		process.on("unhandledRejection", (reason) => {
-			this.logger.error(`[UnhandledRejection]: ${reason}`);
-		});
-
-		process.on("uncaughtException", (error) => {
-			this.logger.error(`[UncaughtException]: ${error}`);
-		});
 	}
 
 	/** ----------------------------- */

@@ -1,5 +1,7 @@
-import logger from "./logger.js";
+import { createLogger } from "./logger.js";
 import { loadTranslation } from "./localeCache.js";
+
+const logger = createLogger("locale");
 
 export type TranslationParams = {
 	[key: string]: string | number;
@@ -13,87 +15,139 @@ export type DotPaths<T> = T extends object
 		}[keyof T]
 	: never;
 
-interface LocalePrivate<T = unknown> extends Locale<T> {
+export interface Locale<TTranslations> {
+	t(
+		key: DotPaths<TTranslations>,
+		params?: TranslationParams,
+		lang?: string | boolean,
+	): string;
+}
+
+interface LocalePrivate<TTranslations> extends Locale<TTranslations> {
 	load(language?: string): Promise<void>;
 	setLanguageMessage(language: string): void;
 	setLanguage(language: string): Promise<void>;
-	setTranslations(translations: T): void;
+	setTranslations(language: string, translations: TTranslations): void;
 	clearCache(): void;
 }
 
-export type LocaleType<T = unknown> = LocalePrivate<T>;
+export type LocaleType<TTranslations> = LocalePrivate<TTranslations>;
 
-export interface Locale<T = undefined> {
-	t(key: DotPaths<T>, params?: TranslationParams, lang?: string): string;
+type LocaleOptions = {
+	defaultLanguage?: string;
+	fastLangSwitch?: boolean;
+	strict?: boolean;
+};
+
+function getNestedTranslation<TTranslations>(
+	translations: TTranslations,
+	key: string,
+): unknown {
+	return key.split(".").reduce<unknown>((obj, k) => {
+		if (obj && typeof obj === "object") {
+			return (obj as Record<string, unknown>)[k];
+		}
+		return undefined;
+	}, translations);
 }
 
-export function createLocale<T extends Record<string, unknown>>(
+export function createLocale<TTranslations = Record<string, unknown>>(
 	moduleName: string,
-	_options: { fastLangSwitch?: boolean } = {},
-): LocalePrivate<T> {
-	const translations = new Map<string, T>();
-	const loadedLanguages = new Set<string>();
-	let currentLanguage = "en";
-	let messageLanguage = "en";
+	options: LocaleOptions = {},
+): LocalePrivate<TTranslations> {
+	const {
+		defaultLanguage = "en",
+		fastLangSwitch = false,
+		strict = false,
+	} = options;
 
-	async function load(language = "en") {
-		// Check if already loaded
+	const translations = new Map<string, TTranslations>();
+	const loadedLanguages = new Set<string>();
+	const loadingPromises = new Map<string, Promise<void>>();
+
+	let currentLanguage = defaultLanguage;
+	let messageLanguage = defaultLanguage;
+
+	async function load(language = defaultLanguage): Promise<void> {
 		if (loadedLanguages.has(language)) {
 			return;
 		}
 
-		try {
-			const data = await loadTranslation(moduleName, language);
-			if (data) {
-				translations.set(language, data);
-				loadedLanguages.add(language);
-			} else if (language !== "en") {
-				// Fallback to English if available
-				await load("en");
-			}
-		} catch (error) {
-			logger.error(
-				// `Failed to load ${language} translations for ${moduleName}:`,
-				error,
-			);
-			if (language !== "en") {
-				await load("en");
-			}
+		const existingPromise = loadingPromises.get(language);
+		if (existingPromise) {
+			return existingPromise;
 		}
+
+		const loadPromise = (async () => {
+			try {
+				const data = await loadTranslation(moduleName, language);
+				if (data) {
+					translations.set(language, data as TTranslations);
+					loadedLanguages.add(language);
+				} else if (language !== defaultLanguage) {
+					await load(defaultLanguage);
+				}
+			} catch (error) {
+				logger.error(
+					`Failed to load ${language} translations for ${moduleName}`,
+					error,
+				);
+				if (language !== defaultLanguage) {
+					await load(defaultLanguage);
+				}
+			} finally {
+				loadingPromises.delete(language);
+			}
+		})();
+
+		loadingPromises.set(language, loadPromise);
+		return loadPromise;
 	}
 
-	async function setLanguage(language: string) {
+	async function setLanguage(language: string): Promise<void> {
+		if (fastLangSwitch) {
+			currentLanguage = language;
+			if (!loadedLanguages.has(language)) {
+				load(language).catch((error) => {
+					logger.error(`Failed to load language ${language}`, error);
+					if (currentLanguage === language) {
+						currentLanguage = defaultLanguage;
+					}
+				});
+			}
+			return;
+		}
+
 		if (!loadedLanguages.has(language)) {
 			await load(language);
 		}
 
-		currentLanguage = translations.has(language) ? language : "en";
+		currentLanguage = translations.has(language) ? language : defaultLanguage;
 	}
 
 	function setLanguageMessage(language: string): void {
-		// Only load if not already loaded
-		if (!loadedLanguages.has(language)) {
-			// Async load in background, use fallback for now
-			load(language).catch(() => {
-				logger.warn(`Failed to load language ${language}, using fallback`);
-			});
+		const requestedLanguage = language;
 
-			// Use fallback language immediately
-			if (!translations.has(language)) {
-				language = "en";
-			}
+		if (!loadedLanguages.has(requestedLanguage)) {
+			load(requestedLanguage).catch(() => {
+				logger.warn(
+					`Failed to load language ${requestedLanguage}, using fallback`,
+				);
+			});
 		}
 
-		messageLanguage = language;
+		const effectiveLanguage = translations.has(requestedLanguage)
+			? requestedLanguage
+			: defaultLanguage;
 
-		// Only log language changes, not every call
-		if (messageLanguage !== language) {
-			logger.debug(`Message language changed to: ${language}`);
+		if (messageLanguage !== effectiveLanguage) {
+			messageLanguage = effectiveLanguage;
+			logger.debug(`Message language changed to: ${effectiveLanguage}`);
 		}
 	}
 
 	function t(
-		key: DotPaths<T>,
+		key: DotPaths<TTranslations>,
 		params?: TranslationParams,
 		lang?: string | boolean,
 	): string {
@@ -106,45 +160,58 @@ export function createLocale<T extends Record<string, unknown>>(
 				(typeof lang === "string" ? lang : undefined) ??
 				messageLanguage ??
 				currentLanguage ??
-				"en";
+				defaultLanguage;
 		}
 
-		const trans = translations.get(targetLang) ?? translations.get("en");
+		const trans =
+			translations.get(targetLang) ?? translations.get(defaultLanguage);
+
 		if (!trans) {
-			// Only warn once per missing language
-			if (!translations.has(targetLang)) {
-				logger.warn(`No translations available for ${targetLang}`);
+			// if (!translations.has(targetLang)) {
+			// 	const message = `No translations available for ${targetLang}`;
+			// 	if (strict) {
+			// 		throw new Error(message);
+			// 	}
+			// 	logger.warn(message);
+			// }
+			return String(key);
+		}
+
+		const rawValue = getNestedTranslation(trans, String(key));
+
+		if (typeof rawValue !== "string") {
+			if (strict) {
+				logger.error(
+					`Translation for key "${String(
+						key,
+					)}" in language "${targetLang}" is not a string`,
+				);
 			}
-			return key;
+			return String(key);
 		}
 
-		const value = String(key)
-			.split(".")
-			.reduce<unknown>(
-				(obj, k) =>
-					obj && typeof obj === "object"
-						? (obj as Record<string, unknown>)[k]
-						: undefined,
-				trans,
-			);
-
-		if (typeof value !== "string") {
-			return key;
+		if (!params) {
+			return rawValue;
 		}
 
-		return params
-			? value.replace(/{(\w+)}/g, (_, k) => params[k]?.toString() ?? `{${k}}`)
-			: value;
+		return rawValue.replace(
+			/{(\w+)}/g,
+			(_, k: string) => params[k]?.toString() ?? `{${k}}`,
+		);
 	}
 
-	function setTranslations(newTranslations: T): void {
-		translations.set(currentLanguage, newTranslations);
-		loadedLanguages.add(currentLanguage);
+	function setTranslations(
+		language: string,
+		newTranslations: TTranslations,
+	): void {
+		translations.set(language, newTranslations);
+		loadedLanguages.add(language);
 	}
 
 	function clearCache(): void {
 		translations.clear();
 		loadedLanguages.clear();
+		loadingPromises.clear();
 	}
 
 	return {
@@ -157,10 +224,12 @@ export function createLocale<T extends Record<string, unknown>>(
 	};
 }
 
-// Create a default locale instance for the main bot
-export const locale = createLocale("ragu2", { fastLangSwitch: true });
+export const locale = createLocale("ragu2", {
+	defaultLanguage: "en",
+	fastLangSwitch: true,
+	strict: false,
+});
 
-// Pre-load default language
 locale.load("en").catch((error) => {
 	logger.error("Failed to load default locale:", error);
 });

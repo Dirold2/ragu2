@@ -3,17 +3,19 @@ import { dirname } from "dirname-filename-esm";
 import { importx } from "@discordx/importer";
 
 import { bot } from "./bot.js";
-import { createLocale, createLogger } from "./utils/index.js";
+import { createLocale, createLogger, initLogger } from "./utils/index.js";
 import { registerShutdownHandlers } from "./utils/gracefulShutdown.js";
 import translations from "./locales/en.json" with { type: "json" };
 
 import { config } from "@dotenvx/dotenvx";
 import { resolve } from "path";
-import { setGlobalDispatcher, Agent } from "undici";
 
 config({ path: resolve(dirname(import.meta), "../.env") });
 
 const __dirname = dirname(import.meta);
+
+// Initialize logger and register error handlers
+initLogger({ registerHandlers: true });
 
 const logger = createLogger(`ragu2`);
 const locale = createLocale<typeof translations>(`ragu2`);
@@ -25,11 +27,6 @@ locale.load();
 async function run() {
 	// Регистрируем обработчики graceful shutdown
 	registerShutdownHandlers();
-
-	// Increase undici connect timeout to reduce Discord connection timeouts
-	try {
-		setGlobalDispatcher(new Agent({ connect: { timeout: 20000 } }));
-	} catch {}
 
 	await bot.initialize();
 

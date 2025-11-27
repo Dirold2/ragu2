@@ -7,9 +7,10 @@ import {
 import { bot } from "../bot.js";
 import { DotPaths, TranslationParams } from "../utils/locale.js";
 import translations from "../locales/en.json" with { type: "json" };
+import { createLogger, ModuleState } from "../utils/logger.js";
 
 export default class CommandService {
-	private readonly logger = bot.logger;
+	private readonly logger = createLogger("CommandService", ModuleState.RUNNING);
 	private readonly interactionCache = new Map<
 		string,
 		{ content: string; timestamp: number }
@@ -146,9 +147,9 @@ export default class CommandService {
 		if (error instanceof DiscordAPIError) {
 			const contextId = "id" in context ? context.id : "unknown";
 			const errorContext =
-				"id" in context
-					? `message with ID: ${contextId}`
-					: `interaction with ID: ${contextId}`;
+				context instanceof CommandInteraction
+					? `interaction with ID: ${contextId}`
+					: `message with ID: ${contextId}`;
 
 			if ([10008, 10062].includes(Number(error.code))) {
 				this.logger.debug(
@@ -162,11 +163,12 @@ export default class CommandService {
 				this.logger.debug(
 					bot.locale.t(
 						"messages.commandServise.interaction.already_acknowledged",
-						{ id: context.id },
+						{ id: contextId },
 						lang,
 					),
 				);
 			} else {
+				// Human-readable message
 				this.logger.error(
 					bot.locale.t(
 						"messages.commandServise.errors.discord_api",
@@ -178,16 +180,18 @@ export default class CommandService {
 						lang,
 					),
 				);
+				// Technical error details (stack, etc.) go through playerError
+				this.logger.playerError(error);
 			}
 		} else {
+			const id = "id" in context ? context.id : "unknown";
+
+			// Human-readable message for logs with localization
 			this.logger.error(
-				bot.locale.t(
-					"commands.message.unknown_error",
-					{ id: "id" in context ? context.id : "unknown" },
-					lang,
-				),
-				error,
+				bot.locale.t("commands.message.unknown_error", { id }, lang),
 			);
+			// Technical error details (stack) through playerError
+			this.logger.playerError(error);
 		}
 	}
 
