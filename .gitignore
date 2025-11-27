@@ -50,3 +50,4 @@ pnpm-workspace.yaml
 
 # Custom
 module.ts
+bun.lock

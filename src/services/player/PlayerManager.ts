@@ -13,8 +13,8 @@ export default class PlayerManager extends EventEmitter {
 	private readonly players: Map<string, PlayerService> = new Map();
 	private readonly playerCache: Map<string, PlayerCacheEntry> = new Map();
 	private readonly CACHE_CLEANUP_INTERVAL = 30 * 60 * 1000;
+	private readonly INACTIVE_TIMEOUT = 3600_000;
 	private cacheCleanupInterval: NodeJS.Timeout | null = null;
-
 	private readonly queueService = bot.queueService;
 	private readonly commandService: CommandService;
 	private readonly logger = bot.logger;
@@ -27,50 +27,43 @@ export default class PlayerManager extends EventEmitter {
 		this.startCacheCleanup();
 	}
 
-	/** ----------------------------- */
-	/** Player lifecycle management  */
-	/** ----------------------------- */
-
 	public getPlayer(guildId: string): PlayerService {
-		if (!guildId) throw new Error("guildId is required");
+		if (!guildId?.trim()) {
+			throw new Error("guildId is required");
+		}
 
-		// Активный плеер
 		if (this.players.has(guildId)) {
 			const player = this.players.get(guildId)!;
 			this.updateCache(guildId, player);
 			return player;
 		}
 
-		// Восстановление из кэша
 		if (this.playerCache.has(guildId)) {
 			const cacheEntry = this.playerCache.get(guildId)!;
 			cacheEntry.lastUsed = Date.now();
 			this.players.set(guildId, cacheEntry.player);
-			this.logger.debug(`Restored player for guild ${guildId} from cache`);
+			this.logger?.debug?.(
+				`[PlayerManager] Restored player from cache: ${guildId}`,
+			);
 			this.emit("playerRestored", guildId);
 			return cacheEntry.player;
 		}
 
-		// Создание нового плеера
 		const newPlayer = new PlayerService(guildId, this.bot);
 		this.players.set(guildId, newPlayer);
 		this.playerCache.set(guildId, { lastUsed: Date.now(), player: newPlayer });
-		this.logger.debug(`Created new player for guild ${guildId}`);
+		this.logger?.debug?.(`[PlayerManager] Created new player: ${guildId}`);
 		this.emit("playerCreated", guildId);
 		return newPlayer;
 	}
 
-	private updateCache(guildId: string, player: PlayerService) {
+	private updateCache(guildId: string, player: PlayerService): void {
 		if (this.playerCache.has(guildId)) {
 			this.playerCache.get(guildId)!.lastUsed = Date.now();
 		} else {
 			this.playerCache.set(guildId, { player, lastUsed: Date.now() });
 		}
 	}
-
-	/** ----------------------------- */
-	/** Channel & Playback actions   */
-	/** ----------------------------- */
 
 	public async joinChannel(interaction: CommandInteraction): Promise<void> {
 		const handles = await this.handleServerOnlyCommand(interaction);
@@ -80,19 +73,25 @@ export default class PlayerManager extends EventEmitter {
 			const player = this.getPlayer(handles.guildId);
 			await player.joinChannel(interaction);
 		} catch (err) {
-			this.logger.error(`[PlayerManager] Failed to join channel: ${err}`);
+			this.logger?.error?.(
+				`[PlayerManager] Failed to join channel: ${(err as Error).message}`,
+			);
 		}
 	}
 
-	public async playOrQueueTrack(guildId: string, track: Track): Promise<void> {
+	public async playOrQueueTrack(
+		guildId: string,
+		track: Track | null,
+	): Promise<void> {
+		if (!track) return;
+
 		try {
 			const player = this.getPlayer(guildId);
 			await player.playOrQueueTrack(track);
-		} catch (err: any) {
-			this.logger.error(
-				`[PlayerManager] Failed to play or queue track: ${err.name}: ${err.message}`,
+		} catch (err) {
+			this.logger?.error?.(
+				`[PlayerManager] Failed to play or queue track: ${(err as Error).message}`,
 			);
-			if (err.stack) this.logger.error(err.stack);
 		}
 	}
 
@@ -101,7 +100,9 @@ export default class PlayerManager extends EventEmitter {
 			const player = this.getPlayer(guildId);
 			await player.skip();
 		} catch (err) {
-			this.logger.error(`[PlayerManager] Failed to skip track: ${err}`);
+			this.logger?.error?.(
+				`[PlayerManager] Failed to skip: ${(err as Error).message}`,
+			);
 		}
 	}
 
@@ -113,138 +114,145 @@ export default class PlayerManager extends EventEmitter {
 			const player = this.getPlayer(handles.guildId);
 			await player.togglePause();
 		} catch (err) {
-			this.logger.error(`[PlayerManager] Failed to toggle pause: ${err}`);
+			this.logger?.error?.(
+				`[PlayerManager] Failed to toggle pause: ${(err as Error).message}`,
+			);
 		}
 	}
-
-	/** ----------------------------- */
-	/** Player settings              */
-	/** ----------------------------- */
 
 	public async setVolume(guildId: string, volume: number): Promise<void> {
 		const player = this.getPlayer(guildId);
 		if (!player) return;
+
 		try {
-			await player.effects.setVolume(volume);
-			player.state.volume = volume;
-			this.queueService.setVolume(guildId, volume);
-			this.logger.debug(`Volume for guild ${guildId} set to ${volume}%`);
+			const normalizedVolume = Math.max(0, Math.min(200, volume));
+			await player.effects.setVolume(normalizedVolume);
+			player.state.volume = normalizedVolume;
+			this.queueService?.setVolume?.(guildId, normalizedVolume);
+			this.logger?.debug?.(
+				`[PlayerManager] Volume set to ${normalizedVolume}% for ${guildId}`,
+			);
 		} catch (err) {
-			this.logger.error(`[PlayerManager] Failed to set volume: ${err}`);
+			this.logger?.error?.(
+				`[PlayerManager] Failed to set volume: ${(err as Error).message}`,
+			);
 		}
 	}
 
-	public async setLoop(guildId: string, loop: boolean) {
+	public async setLoop(guildId: string, loop: boolean): Promise<void> {
 		const player = this.getPlayer(guildId);
 		if (!player) return;
 		player.state.loop = loop;
-		this.queueService.setLoop(guildId, loop);
+		this.queueService?.setLoop?.(guildId, loop);
 	}
 
-	public async setWave(guildId: string, wave: boolean) {
+	public async setWave(guildId: string, wave: boolean): Promise<void> {
 		const player = this.getPlayer(guildId);
 		if (!player) return;
 		player.state.wave = wave;
-		this.queueService.setWave(guildId, wave);
+		this.queueService?.setWave?.(guildId, wave);
 	}
 
-	public async setCompressor(guildId: string, value: boolean) {
+	public async setCompressor(guildId: string, value: boolean): Promise<void> {
 		const player = this.getPlayer(guildId);
 		if (!player) return;
 		try {
 			await player.effects.setCompressor(value);
 		} catch (err) {
-			this.logger.error(`[PlayerManager] Failed to set compressor: ${err}`);
+			this.logger?.error?.(
+				`[PlayerManager] Failed to set compressor: ${(err as Error).message}`,
+			);
 		}
 	}
 
-	public async setBass(guildId: string, value: number) {
+	public async setBass(guildId: string, value: number): Promise<void> {
 		const player = this.getPlayer(guildId);
 		if (!player) return;
 		try {
-			await player.effects.setBass(value);
+			player.effects.setBass(value);
 		} catch (err) {
-			this.logger.error(`[PlayerManager] Failed to set bass: ${err}`);
+			this.logger?.error?.(
+				`[PlayerManager] Failed to set bass: ${(err as Error).message}`,
+			);
 		}
 	}
 
-	public async setTreble(guildId: string, value: number) {
+	public async setTreble(guildId: string, value: number): Promise<void> {
 		const player = this.getPlayer(guildId);
 		if (!player) return;
 		try {
-			await player.effects.setTreble(value);
+			player.effects.setTreble(value);
 		} catch (err) {
-			this.logger.error(`[PlayerManager] Failed to set treble: ${err}`);
+			this.logger?.error?.(
+				`[PlayerManager] Failed to set treble: ${(err as Error).message}`,
+			);
 		}
 	}
 
-	/** ----------------------------- */
-	/** Leave & destroy              */
-	/** ----------------------------- */
-
-	public async leaveChannel(guildId: string) {
+	public async leaveChannel(guildId: string): Promise<void> {
 		const player = this.safeGetPlayer(guildId);
 		if (!player) return;
+
 		try {
 			await player.destroy();
 			player.connectionManager.leaveChannel();
 			this.players.delete(guildId);
 			this.updateCache(guildId, player);
-			this.logger.debug(
-				`Left channel and destroyed player for guild ${guildId}`,
+			this.logger?.debug?.(
+				`[PlayerManager] Left channel and destroyed player: ${guildId}`,
 			);
 			this.emit("playerDestroyed", guildId);
 		} catch (err) {
-			this.logger.error(`[PlayerManager] Failed to leave channel: ${err}`);
+			this.logger?.error?.(
+				`[PlayerManager] Failed to leave channel: ${(err as Error).message}`,
+			);
 		}
 	}
 
-	public async destroyAll() {
-		for (const [, player] of this.players.entries()) {
+	public async destroyAll(): Promise<void> {
+		for (const [_guildId, player] of this.players.entries()) {
 			try {
 				await player.destroy();
 				player.connectionManager.leaveChannel();
-			} catch {}
+			} catch {
+				// Ignore errors during cleanup
+			}
 		}
+
 		this.players.clear();
 		this.playerCache.clear();
 		this.stopCacheCleanup();
-		this.logger.info("All players destroyed");
+		this.logger?.info?.("[PlayerManager] All players destroyed");
 	}
 
-	/** ----------------------------- */
-	/** Cache cleanup               */
-	/** ----------------------------- */
-
-	private startCacheCleanup() {
+	private startCacheCleanup(): void {
 		this.cacheCleanupInterval = setInterval(() => {
 			const now = Date.now();
-			const expiration = now - 3600_000; // 1 час неактивности
 
 			for (const [guildId, entry] of this.playerCache.entries()) {
-				if (entry.lastUsed < expiration) {
-					this.logger.debug(`Removing inactive player from cache: ${guildId}`);
+				if (now - entry.lastUsed > this.INACTIVE_TIMEOUT) {
+					this.logger?.debug?.(
+						`[PlayerManager] Removing inactive player from cache: ${guildId}`,
+					);
 					try {
 						entry.player.destroy();
 						this.players.delete(guildId);
 						this.playerCache.delete(guildId);
 						this.emit("playerDestroyed", guildId);
-					} catch {}
+					} catch {
+						// Ignore errors
+					}
 				}
 			}
 		}, this.CACHE_CLEANUP_INTERVAL);
 	}
 
-	private stopCacheCleanup() {
+	private stopCacheCleanup(): void {
 		if (this.cacheCleanupInterval) {
 			clearInterval(this.cacheCleanupInterval);
 			this.cacheCleanupInterval = null;
 		}
 	}
-
-	/** ----------------------------- */
-	/** Helpers                     */
-	/** ----------------------------- */
 
 	private safeGetPlayer(guildId?: string): PlayerService | null {
 		if (!guildId) return null;
@@ -258,19 +266,19 @@ export default class PlayerManager extends EventEmitter {
 	): Promise<{ guildId: string; channelId: string } | null> {
 		const { guildId, channelId } = interaction;
 		if (!guildId || !channelId) {
-			await this.commandService.reply(
+			await this.commandService?.reply?.(
 				interaction,
 				"messages.playerManager.errors.server_error",
 			);
 			return null;
 		}
+
 		return { guildId, channelId };
 	}
 
-	/** Graceful shutdown */
-	public async shutdown() {
-		this.logger.info("PlayerManager shutdown started...");
+	public async shutdown(): Promise<void> {
+		this.logger?.info?.("[PlayerManager] Shutdown started");
 		await this.destroyAll();
-		this.logger.info("PlayerManager shutdown completed");
+		this.logger?.info?.("[PlayerManager] Shutdown completed");
 	}
 }

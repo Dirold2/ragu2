@@ -1,4 +1,4 @@
-import { Track } from "./index.js";
+import type { Track } from "./index.js";
 
 export interface AudioProcessingOptions {
 	volume: number;
@@ -7,8 +7,6 @@ export interface AudioProcessingOptions {
 	compressor: boolean;
 	normalize: boolean;
 	headers?: Record<string, string>;
-	lowPassFrequency?: number;
-	lowPassQ?: number;
 	fade?: {
 		fadein: number;
 		fadeout: number;
@@ -16,7 +14,7 @@ export interface AudioProcessingOptions {
 }
 
 export interface PlayerState {
-	connection: any;
+	connection: unknown;
 	isPlaying: boolean;
 	channelId: string | null;
 	volume: number;
@@ -26,8 +24,6 @@ export interface PlayerState {
 	loop: boolean;
 	pause: boolean;
 	wave: boolean;
-	lowPassFrequency: number;
-	lowPassQ: number;
 	compressor: boolean;
 	normalize: boolean;
 	bass: number;

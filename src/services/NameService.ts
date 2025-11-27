@@ -319,10 +319,7 @@ export default class NameService {
 		if (interaction) {
 			await this.playerManager.joinChannel(interaction);
 			const firstTrack = this.createTrackInfo(tracks[0], interaction, false);
-			await this.playerManager.playOrQueueTrack(
-				guildId,
-				firstTrack
-			);
+			await this.playerManager.playOrQueueTrack(guildId, firstTrack);
 		}
 	}
 

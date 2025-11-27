@@ -151,14 +151,17 @@ export class ConnectionManager extends EventEmitter {
 			// Defensive: ensure we still have a connection object before dereferencing state/status
 			if (
 				!(await this.verifyActualConnection()) &&
-				connection && 
+				connection &&
 				connection.state &&
 				connection.state.status !== VoiceConnectionStatus.Destroyed
 			) {
 				try {
 					connection.destroy();
 				} catch (e) {
-					this.bot?.logger?.debug?.("[ConnectionManager] Error during connection.destroy in statusCheckInterval:", e);
+					this.bot?.logger?.debug?.(
+						"[ConnectionManager] Error during connection.destroy in statusCheckInterval:",
+						e,
+					);
 				}
 			}
 		}, 10_000);
@@ -252,7 +255,10 @@ export class ConnectionManager extends EventEmitter {
 
 	getConnection(): VoiceConnection | null {
 		// Defensive: only access state if this.connection is not null
-		if (this.connection && this.connection.state?.status === VoiceConnectionStatus.Destroyed) {
+		if (
+			this.connection &&
+			this.connection.state?.status === VoiceConnectionStatus.Destroyed
+		) {
 			this.forceCleanup();
 			return null;
 		}

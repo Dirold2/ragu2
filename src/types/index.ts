@@ -1,7 +1,6 @@
 import { AudioResource, StreamType, VoiceConnection } from "@discordjs/voice";
 import { z } from "zod";
 
-// Define schema for individual track search result
 export const TrackResultSchema = z.object({
 	id: z.string(),
 	title: z.string(),
@@ -17,44 +16,45 @@ export const TrackResultSchema = z.object({
 			}),
 		)
 		.optional(),
-	durationMs: z.number().optional(),
+	durationMs: z.number().int().nonnegative().optional(),
+
+	// Раньше было: z.string().url().optional() → ловило Invalid URL на cover
 	cover: z.string().optional(),
+
 	source: z.string(),
-	url: z.string().optional(),
+
+	// Здесь оставляем строгий URL, т.к. это реальный проигрываемый URL
+	url: z.string().url().optional(),
+
 	items: z.string().optional(),
 	generation: z.boolean().default(false),
 });
 
-// Type definition inferred from the TrackResultSchema
 export type SearchTrackResult = z.infer<typeof TrackResultSchema>;
 
-// Define schema for a track, including optional fields
 export const TrackSchema = z.object({
 	trackId: z.string(),
 	addedAt: z.bigint().optional(),
 	info: z.string(),
-	url: z.string().optional(),
+	url: z.string().url().optional(),
 	source: z.string(),
 	waveStatus: z.boolean().optional(),
 	requestedBy: z.string().optional(),
 	priority: z.boolean().optional(),
-	durationMs: z.number().optional(),
+	durationMs: z.number().int().nonnegative().optional(),
 	stationId: z.string().optional(),
 	generation: z.boolean().default(false),
 });
 
-// Type definition inferred from the TrackSchema
 export type Track = z.infer<typeof TrackSchema>;
 
-// Define schema for configuration settings
 export const ConfigSchema = z.object({
 	access_token: z.string(),
-	uid: z.number(),
+	uid: z.number().int(),
 	username: z.string().optional(),
 	password: z.string().optional(),
 });
 
-// Type definition inferred from the ConfigSchema
 export type Config = z.infer<typeof ConfigSchema>;
 
 export type PlayerState = {
