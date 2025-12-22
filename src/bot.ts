@@ -58,6 +58,8 @@ export class Bot {
 
 	public async initialize(): Promise<void> {
 		try {
+			// Load Russian translations first
+			await this.locale.load();
 			this.setupEvents();
 			await this.initServices();
 		} catch (error) {
@@ -83,7 +85,6 @@ export class Bot {
 				this.queueService,
 				this.commandService,
 			);
-			// this.setupPlayerAutoLeave();
 
 			this.nameService = new NameService(
 				this.queueService,
@@ -182,25 +183,7 @@ export class Bot {
 			throw error;
 		}
 	}
-
-	// /** ----------------------------- */
-	// /** Player auto-leave & idle     */
-	// /** ----------------------------- */
-
-	// private setupPlayerAutoLeave(): void {
-	// 	this.playerManager.on("playerCreated", (guildId: string) => {
-	// 		const player = this.playerManager.getPlayer(guildId);
-	// 		player.on("idle", () => {
-	// 			setTimeout(() => {
-	// 				if (!player.state.currentTrack && player.state.connection) {
-	// 					this.logger.info(`Player idle 10 min, leaving channel: ${guildId}`);
-	// 					void this.playerManager.leaveChannel(guildId);
-	// 				}
-	// 			}, 10 * 60_000);
-	// 		});
-	// 	});
-	// }
-
+	
 	/** ----------------------------- */
 	/** Events                        */
 	/** ----------------------------- */

@@ -10,6 +10,7 @@ declare module "async-retry" {
 		minTimeout?: number;
 		maxTimeout?: number;
 		randomize?: boolean;
+		onRetry?: (err: Error, attempt: number) => void;
 	}
 
 	export default function retry<T>(fn: RetryFn<T>, opts?: Options): Promise<T>;
