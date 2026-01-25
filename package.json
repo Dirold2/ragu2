@@ -1,6 +1,6 @@
 {
     "name": "ragu2",
-    "version": "0.1.4.22",
+    "version": "0.1.4.23",
     "description": "Discord bot module for RAGU2",
     "repository": {
         "type": "git",
@@ -32,7 +32,7 @@
         "discord.js": "^14.25.1",
         "discordx": "^11.13.3",
         "eventemitter3": "^5.0.4",
-        "fluent-streamer": "github:Dirold2/fluent-streamer#__dist__",
+        "fluent-streamer": "^0.3.1",
         "get-audio-duration": "^4.0.1",
         "humanize-ms": "^2.0.0",
         "lru-cache": "^11.2.4",
@@ -44,13 +44,12 @@
         "winston-daily-rotate-file": "^5.0.0",
         "async-retry": "^1.3.3",
         "ansi-styles": "^6.2.3",
-        "ym-api-meowed-d2": "github:Dirold2/ym-api-meowed-d2#__dist__",
+        "yamd2": "^1.3.26",
         "youtubei.js": "^16.0.1"
     },
     "devDependencies": {
         "@types/ms": "^2.1.0",
         "@types/node": "^25.0.10",
-        "ansi-styles": "^6.2.3",
         "chokidar": "^5.0.0",
         "dayjs": "^1.11.19",
         "dirname-filename-esm": "^1.1.2",

@@ -6,7 +6,7 @@ import {
 	Types,
 	WrappedYMApi,
 	YMApi,
-} from "ym-api-meowed-d2";
+} from "yamd2";
 import type { MusicServicePlugin, PlaylistTrack } from "../interfaces/index.js";
 import {
 	type Config,
