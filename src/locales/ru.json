@@ -158,7 +158,7 @@
 				"already_registered": "Плагин «{name}» уже зарегистрирован"
 			},
 			"info": {
-				"plugin_loaded": "Плагин загружен: {file}",
+				"plugin_loaded": "Плагин загружен: {file} ({name})",
 				"plugin_loaded_disabled": "Плагин загружен (отключён): {file} ({name})",
 				"plugin_registered": "Плагин «{name}» зарегистрирован и включён",
 				"plugin_registered_disabled": "Плагин «{name}» зарегистрирован как отключённый",

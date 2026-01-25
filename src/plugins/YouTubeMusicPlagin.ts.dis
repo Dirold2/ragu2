@@ -3,85 +3,84 @@ import { Discord } from "discordx";
 import { LRUCache } from "lru-cache";
 import { URL } from "url";
 import { Innertube, UniversalCache } from "youtubei.js";
-
 import { bot } from "../bot.js";
 import type { MusicServicePlugin } from "../interfaces/index.js";
 import { type SearchTrackResult, TrackResultSchema } from "../types/index.js";
 
 // YouTube API response types
 interface YouTubeVideoInfo {
-	basic_info: {
-		title?: string;
-		author?: string;
-		channel?: {
-			name?: string;
-		};
-		duration?: number;
-	};
-	streaming_data?: {
-		adaptive_formats?: YouTubeFormat[];
-	};
+  basic_info: {
+    title?: string;
+    author?: string;
+    channel?: {
+      name?: string;
+    };
+    duration?: number;
+  };
+  streaming_data?: {
+    adaptive_formats?: YouTubeFormat[];
+  };
 }
 
 interface YouTubeFormat {
-	itag?: number;
-	has_audio?: boolean;
-	has_video?: boolean;
-	mime_type?: string;
-	bitrate?: number;
-	language?: string | null;
-	is_original?: boolean;
-	audio_track?: {
-		display_name?: string;
-	};
-	url?: string;
-	decipher?: () => string;
-	duration?: number;
+  itag?: number;
+  has_audio?: boolean;
+  has_video?: boolean;
+  mime_type?: string;
+  bitrate?: number;
+  language?: string | null;
+  is_original?: boolean;
+  audio_track?: {
+    display_name?: string;
+  };
+  url?: string;
+  decipher?: () => string;
+  duration?: number;
 }
 
 interface YouTubeSearchResult {
-	id?: string;
-	video_id?: string;
-	title?: string;
-	author?:
-		| {
-				name?: string;
-		  }
-		| string;
-	duration?: string;
+  id?: string;
+  video_id?: string;
+  title?: string;
+  author?:
+    | {
+        name?: string;
+      }
+    | string;
+  duration?: string;
 }
 
 interface YouTubeSearchResponse {
-	results?: YouTubeSearchResult[];
+  results?: YouTubeSearchResult[];
 }
 
 interface StreamingDataOptions {
-	type: "audio";
-	client: "TV";
-	itag?: number;
-	language?: string;
-	codec?: string;
+  type: "audio";
+  client: "TV" | "ANDROID" | "WEB";
+  itag?: number;
+  language?: string;
+  codec?: string;
 }
 
 interface MinimalFormat {
-	itag?: number;
-	has_audio?: boolean;
-	has_video?: boolean;
-	mime_type?: string;
-	bitrate?: number;
-	language?: string | null;
-	is_original?: boolean;
-	audio_track?: { display_name?: string } | undefined;
-	duration?: number;
+  itag?: number;
+  has_audio?: boolean;
+  has_video?: boolean;
+  mime_type?: string;
+  bitrate?: number;
+  language?: string | null;
+  is_original?: boolean;
+  audio_track?: { display_name?: string } | undefined;
+  duration?: number;
 }
 
 interface TrackYouTube {
-	id: number | string;
-	title: string;
-	artists: Array<{ name: string }>;
-	albums: Array<{ title?: string }>;
-	durationMs: number | undefined;
-	coverUri: string | undefined;
+  id: number | string;
+  title: string;
+  artists: Array<{ name: string }>;
+  albums: Array<{ title?: string }>;
+  durationMs: number | undefined;
+  coverUri: string | undefined;
 }
 
 type KeyType = string;
@@ -93,622 +92,748 @@ const CACHE_CHECK_PERIOD = 120 * 1000;
 const MAX_RETRIES = 3;
 const MIN_TIMEOUT = 1000;
 const MAX_TIMEOUT = 5000;
+const YOUTUBE_CLIENTS = ["TV", "ANDROID", "WEB"] as const;
 
 /** Простой мьютекс для предотвращения параллельной инициализации */
 class Mutex {
-	private locked = false;
-	async acquire(): Promise<() => void> {
-		while (this.locked) {
-			await new Promise((r) => setTimeout(r, 10));
-		}
-		this.locked = true;
-		return () => {
-			this.locked = false;
-		};
-	}
+  private locked = false;
+
+  async acquire(): Promise<() => void> {
+    while (this.locked) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    this.locked = true;
+    return () => {
+      this.locked = false;
+    };
+  }
 }
 
 /**
  * Обёртка кеша поверх LRUCache с условным включением
  */
 class CacheWrapper {
-	private cache: LRUCache<KeyType, ValueType, ContextType> | null = null;
-	private readonly useCache: boolean;
+  private cache: LRUCache<KeyType, ValueType, ContextType> | null = null;
+  private readonly useCache: boolean;
 
-	constructor(
-		options?: Partial<LRUCache.Options<KeyType, ValueType, ContextType>>,
-	) {
-		const env = process.env.USE_CACHE?.toLowerCase();
-		this.useCache = env === "true" || env === undefined;
+  constructor(
+    options?: Partial<LRUCache.Options<KeyType, ValueType, ContextType>>,
+  ) {
+    const env = process.env.USE_CACHE?.toLowerCase();
+    this.useCache = env === "true" || env === undefined;
 
-		if (this.useCache) {
-			this.cache = new LRUCache<KeyType, ValueType, ContextType>({
-				max: 1000,
-				ttl: CACHE_TTL,
-				...options,
-			});
-		}
-	}
+    if (this.useCache) {
+      this.cache = new LRUCache({
+        max: 1000,
+        ttl: CACHE_TTL,
+        ...options,
+      });
+    }
+  }
 
-	get<T>(key: string): T | undefined {
-		if (!this.useCache || !this.cache) return undefined;
-		return this.cache.get(key) as T | undefined;
-	}
+  get<T>(key: string): T | undefined {
+    if (!this.useCache || !this.cache) return undefined;
+    return this.cache.get(key) as T | undefined;
+  }
 
-	set<T>(key: string, value: T, ttl?: number): boolean {
-		if (!this.useCache || !this.cache) return false;
+  set<T>(key: string, value: T, ttl?: number): boolean {
+    if (!this.useCache || !this.cache) return false;
+    const anyCache = this.cache as any;
+    if (typeof anyCache.set === "function") {
+      try {
+        return anyCache.set(key, value, { ttl });
+      } catch {
+        return anyCache.set(key, value, ttl);
+      }
+    }
+    return false;
+  }
 
-		const anyCache = this.cache as any;
-		if (typeof anyCache.set === "function") {
-			try {
-				return anyCache.set(key, value, { ttl });
-			} catch {
-				return anyCache.set(key, value, ttl);
-			}
-		}
-		return false;
-	}
+  clear(): void {
+    if (this.useCache && this.cache) {
+      this.cache.clear();
+    }
+  }
 
-	clear(): void {
-		if (this.useCache && this.cache) {
-			this.cache.clear();
-		}
-	}
-
-	getStats(): { size: number } {
-		if (this.useCache && this.cache) {
-			return { size: this.cache.size };
-		}
-		return { size: 0 };
-	}
+  getStats(): { size: number } {
+    if (this.useCache && this.cache) {
+      return { size: this.cache.size };
+    }
+    return { size: 0 };
+  }
 }
 
 @Discord()
 export default class YouTubeMusicPlugin implements MusicServicePlugin {
-	name = "youtube";
-	urlPatterns = [
-		/^(https?:\/\/)?(www\.)?youtube\.com\//,
-		/^(https?:\/\/)?(www\.)?music\.youtube\.com\//,
-		/^(https?:\/\/)?(www\.)?youtu\.be\//,
-	];
+  name = "youtube";
+  urlPatterns = [
+    /^(https?:\/\/)?(www\.)?youtube\.com\//,
+    /^(https?:\/\/)?(www\.)?music\.youtube\.com\//,
+    /^(https?:\/\/)?(www\.)?youtu\.be\//,
+  ];
 
-	// https://youtu.be/pAgnJDJN4VA?list=PLpZaq7kciiNIscD5bMLUIyesR_EHTSvxu
-	private urlTrackRootPattern = /^\/([a-zA-Z0-9_-]{11})$/;
-	// https://youtube.com/playlist?list=PLVktCYIdkbTOqhhtFSU3hioBuvuP9q_WQ&si=XF1rBo1u5s5xtVD7
-	private urlGenericPlaylistPattern = /\/playlist/;
-	private results: SearchTrackResult[] = [];
-	private yt!: Innertube;
-	private cache: CacheWrapper;
-	private initialized = false;
-	private initMutex = new Mutex();
-	private cacheCleanupInterval: NodeJS.Timeout | null = null;
+  private urlGenericPlaylistPattern = /\/playlist/;
+  private results: SearchTrackResult[] = [];
+  private yt!: Innertube;
+  private cache: CacheWrapper;
+  private initialized = false;
+  private initMutex = new Mutex();
+  private cacheCleanupInterval: NodeJS.Timeout | null = null;
+  private restrictedVideosCache = new Set<string>();
 
-	hasAvailableResults = (): boolean => this.results.length > 0;
+  hasAvailableResults = (): boolean => this.results.length > 0;
 
-	async includesUrl(url: string): Promise<boolean> {
-		try {
-			const parsed = new URL(url);
-			return this.urlGenericPlaylistPattern.test(parsed.pathname);
-		} catch {
-			return false;
-		}
-	}
+  async includesUrl(url: string): Promise<boolean> {
+    try {
+      const parsed = new URL(url);
+      return this.urlGenericPlaylistPattern.test(parsed.pathname);
+    } catch {
+      return false;
+    }
+  }
 
-	async searchName(trackName: string): Promise<SearchTrackResult[]> {
-		await this.ensureInitialized();
-		const cacheKey = `search_${trackName}`;
-		const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-		if (cachedResults) {
-			return cachedResults;
-		}
-		return await this.updateCacheInBackground(trackName, cacheKey);
-	}
+  async searchName(trackName: string): Promise<SearchTrackResult[]> {
+    await this.ensureInitialized();
 
-	async searchURL(url: string): Promise<SearchTrackResult[]> {
-		await this.ensureInitialized();
-		try {
-			const parsedUrl = new URL(url);
+    const cacheKey = `search_${trackName}`;
+    const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
 
-			if (
-				!parsedUrl.hostname.includes("youtube.com") &&
-				!parsedUrl.hostname.includes("music.youtube.com") &&
-				!parsedUrl.hostname.includes("youtu.be")
-			) {
-				bot.logger.warn(`[YouTube] URL не принадлежит YouTube: ${url}`);
-				return [];
-			}
+    if (cachedResults) {
+      return cachedResults;
+    }
 
-			// 1. Проверяем плейлист
-			if (this.urlGenericPlaylistPattern.test(parsedUrl.pathname)) {
-				const playlistId = parsedUrl.searchParams.get("list");
-				if (playlistId) {
-					return await this.getPlaylistTracks(playlistId);
-				}
-			}
+    return await this.updateCacheInBackground(trackName, cacheKey);
+  }
 
-			// 2. Проверяем короткий URL
-			if (this.urlTrackRootPattern.test(parsedUrl.pathname)) {
-				const videoId = this.extractVideoIdYT(url);
-				if (videoId) {
-					const videoId = this.extractVideoIdYT(url);
-					if (!videoId) {
-						bot.logger.warn(
-							`[YouTube] Не удалось извлечь video ID из URL: ${url}`,
-						);
-						return [];
-					}
+  async searchURL(url: string): Promise<SearchTrackResult[]> {
+    await this.ensureInitialized();
 
-					const info = (await this.yt.getInfo(videoId)) as YouTubeVideoInfo;
-					const details = info.basic_info;
+    try {
+      const parsedUrl = new URL(url);
 
-					const formatted = this.formatTrackInfo({
-						id: videoId,
-						title: String(details?.title ?? "Unknown Title"),
-						artists: [
-							{
-								name: String(
-									details?.author ?? details?.channel?.name ?? "Unknown Artist",
-								),
-							},
-						],
-						albums: [],
-						durationMs: this.parseDurationToMs(details?.duration),
-						coverUri: "",
-					});
+      if (
+        !parsedUrl.hostname.includes("youtube.com") &&
+        !parsedUrl.hostname.includes("music.youtube.com") &&
+        !parsedUrl.hostname.includes("youtu.be")
+      ) {
+        bot.logger.warn(`[YouTube] URL не принадлежит YouTube: ${url}`);
+        return [];
+      }
 
-					const validated = this.validateTrackResult(formatted);
-					return validated ? [validated] : [];
-				}
-			}
+      // 1. Проверяем плейлист
+      if (this.urlGenericPlaylistPattern.test(parsedUrl.pathname)) {
+        const playlistId = parsedUrl.searchParams.get("list");
+        if (playlistId) {
+          return await this.getPlaylistTracks(playlistId);
+        }
+      }
 
-			// 3. Пытаемся извлечь videoId обычным способом
-			const videoId = this.extractVideoIdYT(url);
-			if (!videoId) {
-				bot.logger.warn(`[YouTube] Не удалось извлечь video ID из URL: ${url}`);
-				return [];
-			}
+      // 2. Извлекаем videoId
+      const videoId = this.extractVideoIdYT(url);
+      if (!videoId) {
+        bot.logger.warn(
+          `[YouTube] Не удалось извлечь video ID из URL: ${url}`,
+        );
+        return [];
+      }
 
-			const info = (await this.yt.getInfo(videoId)) as YouTubeVideoInfo;
-			const details = info.basic_info;
+      bot.logger.debug(`[YouTube] Processing video ID: ${videoId}`);
 
-			const formatted = this.formatTrackInfo({
-				id: videoId,
-				title: String(details?.title ?? "Unknown Title"),
-				artists: [
-					{
-						name: String(
-							details?.author ?? details?.channel?.name ?? "Unknown Artist",
-						),
-					},
-				],
-				albums: [],
-				durationMs: this.parseDurationToMs(details?.duration),
-				coverUri: "",
-			});
+      // 3. Проверяем кеш ограниченных видео
+      if (this.restrictedVideosCache.has(videoId)) {
+        bot.logger.warn(
+          `[YouTube] Video ${videoId} is cached as restricted, skipping`,
+        );
+        return [];
+      }
 
-			const validated = this.validateTrackResult(formatted);
-			return validated ? [validated] : [];
-		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("plugins.youtube.errors.url_processing", {
-					plugin: this.name,
-					error: (error as Error).message
-				})
-			);
-			return [];
-		}
-	}
+      // 4. Пытаемся получить информацию с разными клиентами
+      const info = await this.tryMultipleClients(videoId);
+      
+      if (!info) {
+        bot.logger.error(
+          `[YouTube] Video ${videoId} is inaccessible (possibly age-restricted or private)`,
+        );
+        this.restrictedVideosCache.add(videoId);
+        return [];
+      }
 
-	private extractVideoIdYT(url: string): string | null {
-		try {
-			const parsedUrl = new URL(url);
+      const details = info.basic_info;
+      const formatted = this.formatTrackInfo({
+        id: videoId,
+        title: String(details?.title ?? "Unknown Title"),
+        artists: [
+          {
+            name: String(
+              details?.author ?? details?.channel?.name ?? "Unknown Artist",
+            ),
+          },
+        ],
+        albums: [],
+        durationMs: this.parseDurationToMs(details?.duration),
+        coverUri: "",
+      });
 
-			// 1. Короткие ссылки youtu.be/<id>
-			if (parsedUrl.hostname.includes("youtu.be")) {
-				const idMatch = parsedUrl.pathname.match(/^\/([a-zA-Z0-9_-]{11})$/);
-				if (idMatch) return idMatch[1];
-			}
+      const validated = this.validateTrackResult(formatted);
+      return validated ? [validated] : [];
+    } catch (error) {
+      bot.logger.error(
+        bot.locale.t("plugins.youtube.errors.url_processing", {
+          plugin: this.name,
+          error: (error as Error).message,
+        }),
+      );
+      return [];
+    }
+  }
 
-			// 2. Обычные ссылки youtube.com/watch?v=<id>
-			if (parsedUrl.searchParams.has("v")) {
-				const id = parsedUrl.searchParams.get("v");
-				if (id && /^[a-zA-Z0-9_-]{11}$/.test(id)) {
-					return id;
-				}
-			}
+  private extractVideoIdYT(url: string): string | null {
+    try {
+      const parsedUrl = new URL(url);
 
-			// 3. На случай формата /embed/<id> или /v/<id>
-			const embedMatch = parsedUrl.pathname.match(
-				/\/(embed|v)\/([a-zA-Z0-9_-]{11})/,
-			);
-			if (embedMatch) return embedMatch[2];
+      // 1. Короткие ссылки youtu.be/
+      if (parsedUrl.hostname.includes("youtu.be")) {
+        const idMatch = parsedUrl.pathname.match(/^\/([a-zA-Z0-9_-]{11})$/);
+        if (idMatch) return idMatch[1];
+      }
 
-			return null;
-		} catch {
-			return null;
-		}
-	}
+      // 2. Обычные ссылки youtube.com/watch?v=
+      if (parsedUrl.searchParams.has("v")) {
+        const id = parsedUrl.searchParams.get("v");
+        if (id && /^[a-zA-Z0-9_-]{11}$/.test(id)) {
+          return id;
+        }
+      }
 
-	async getTrackUrl(trackId: string): Promise<string | null> {
-		await this.ensureInitialized();
-		if (!trackId) {
-			bot.logger.error("YouTubeMusicPlugin: trackId is empty");
-			return null;
-		}
+      // 3. На случай формата /embed/ или /v/
+      const embedMatch = parsedUrl.pathname.match(
+        /\/(embed|v)\/([a-zA-Z0-9_-]{11})/,
+      );
+      if (embedMatch) return embedMatch[2];
 
-		try {
-			const url = await retry(
-				async () => {
-					const preferredLanguage = this.getPreferredLanguage();
+      return null;
+    } catch {
+      return null;
+    }
+  }
 
-					const info = (await this.yt.getInfo(trackId, {
-						client: "TV",
-					})) as YouTubeVideoInfo;
-					const adaptiveFormats = info.streaming_data?.adaptive_formats ?? [];
-					const picked = this.pickBestAudioFormat(
-						adaptiveFormats,
-						preferredLanguage,
-					);
+  /**
+   * Пытается получить информацию о видео, используя разные клиенты YouTube
+   */
+  private async tryMultipleClients(
+    trackId: string,
+  ): Promise<YouTubeVideoInfo | null> {
+    for (const client of YOUTUBE_CLIENTS) {
+      try {
+        bot.logger.debug(`[YouTube] Trying client: ${client} for video ${trackId}`);
+        
+        const info = (await this.yt.getInfo(trackId, {
+          client,
+        })) as YouTubeVideoInfo;
 
-					// Try with selected itag first
-					if (picked?.itag) {
-						const resolved = await this.resolveDirectUrl(
-							trackId,
-							picked.itag,
-							picked.language || preferredLanguage,
-							YouTubeMusicPlugin.isMp4aMime(picked.mime_type),
-						);
-						if (resolved) return resolved;
-					}
+        // Проверяем наличие данных потоковой передачи
+        if (info.streaming_data?.adaptive_formats?.length) {
+          bot.logger.debug(`[YouTube] Success with client: ${client}`);
+          return info;
+        }
+      } catch (error: any) {
+        const errMsg = error?.message || String(error);
+        
+        // Проверяем специфические ошибки авторизации
+        if (
+          errMsg.includes("PlayerErrorCommand") ||
+          errMsg.includes("authRequiredCommand") ||
+          errMsg.includes("age-restricted")
+        ) {
+          bot.logger.warn(
+            `[YouTube] Video ${trackId} requires authentication with client ${client}`,
+          );
+          continue;
+        }
+        
+        bot.logger.debug(
+          `[YouTube] Client ${client} failed for ${trackId}: ${errMsg}`,
+        );
+        continue;
+      }
+    }
 
-					const autoResolved = await this.resolveDirectUrl(
-						trackId,
-						undefined,
-						preferredLanguage,
-						true,
-					);
-					if (autoResolved) return autoResolved;
+    return null;
+  }
 
-					throw new Error(`No direct audio URL found for ${trackId}`);
-				},
-				{
-					retries: MAX_RETRIES,
-					factor: 2,
-					minTimeout: MIN_TIMEOUT,
-					maxTimeout: MAX_TIMEOUT,
-				},
-			);
+  async getTrackUrl(trackId: string): Promise<string | null> {
+    await this.ensureInitialized();
 
-			return url;
-		} catch (error) {
-			const errmsg = (error as Error).message;
-			bot.logger.error(
-				bot.locale.t("plugins.youtube.errors.get_track_url", {
-					trackId,
-					error: errmsg,
-				}),
-			);
-			return null;
-		}
-	}
+    if (!trackId) {
+      bot.logger.error("YouTubeMusicPlugin: trackId is empty");
+      return null;
+    }
 
-	async getPlaylistTracks(playlistId: string): Promise<SearchTrackResult[]> {
-		try {
-			const cacheKey = `playlist_${playlistId}`;
-			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-			if (cachedResults) return cachedResults;
+    // Проверяем кеш ограниченных видео
+    if (this.restrictedVideosCache.has(trackId)) {
+      bot.logger.warn(
+        `[YouTube] Video ${trackId} is cached as restricted, skipping`,
+      );
+      return null;
+    }
 
-			const playlist = await this.yt.getPlaylist(playlistId);
-			const videos: YouTubeSearchResult[] = (playlist as any)?.videos ?? [];
-			const results: SearchTrackResult[] = [];
+    try {
+      const url = await retry(
+        async () => {
+          try {
+            const preferredLanguage = this.getPreferredLanguage();
+            
+            // Пробуем разные клиенты
+            const info = await this.tryMultipleClients(trackId);
+            
+            if (!info || !info.streaming_data?.adaptive_formats) {
+              throw new Error(
+                `AGE_RESTRICTED:Video ${trackId} requires authentication or is age-restricted`,
+              );
+            }
 
-			for (const v of videos) {
-				const id = v.id ?? v.video_id;
-				const title = v.title;
-				if (!id || !title) continue;
-				const author = this.extractAuthorName(v);
-				const durationMs = this.parseDurationToMs(v.duration);
-				const formatted = this.formatTrackInfo({
-					id: String(id),
-					title: String(title),
-					artists: [{ name: author }],
-					albums: [],
-					durationMs,
-					coverUri: "",
-				});
-				const validated = this.validateTrackResult(formatted);
-				if (validated) results.push(validated);
-			}
+            const adaptiveFormats = info.streaming_data.adaptive_formats;
+            const picked = this.pickBestAudioFormat(
+              adaptiveFormats,
+              preferredLanguage,
+            );
 
-			this.cache.set(cacheKey, results);
-			return results;
-		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("plugins.youtube.errors.playlist.processing"),
-				error,
-			);
-			return [];
-		}
-	}
+            // Try with selected itag first
+            if (picked?.itag) {
+              const resolved = await this.resolveDirectUrl(
+                trackId,
+                picked.itag,
+                picked.language || preferredLanguage,
+                YouTubeMusicPlugin.isMp4aMime(picked.mime_type),
+              );
+              if (resolved) return resolved;
+            }
 
-	async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
-		await this.ensureInitialized();
-		try {
-			const cacheKey = `recommendations_${trackId}`;
-			const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
-			if (cachedResults) return cachedResults;
+            const autoResolved = await this.resolveDirectUrl(
+              trackId,
+              undefined,
+              preferredLanguage,
+              true,
+            );
+            if (autoResolved) return autoResolved;
 
-			// YouTube doesn't have a direct similar tracks API like Yandex
-			// We can implement this by searching for related videos or using the video's metadata
-			bot.logger.warn(
-				`[YouTube] Recommendations not implemented for trackId: ${trackId}`,
-			);
-			return [];
-		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("plugins.youtube.errors.error_fetching_similar_tracks", {
-					trackId,
-				}),
-				error,
-			);
-			return [];
-		}
-	}
+            throw new Error(`No direct audio URL found for ${trackId}`);
+          } catch (error: any) {
+            // Специальная обработка ошибок авторизации
+            const errMsg = error?.message || String(error);
+            
+            if (
+              errMsg.includes("PlayerErrorCommand") ||
+              errMsg.includes("authRequiredCommand") ||
+              errMsg.startsWith("AGE_RESTRICTED:")
+            ) {
+              bot.logger.warn(
+                `[YouTube] Video ${trackId} requires authentication (age-restricted or members-only)`,
+              );
+              throw new Error(`AGE_RESTRICTED:${trackId}`);
+            }
+            throw error;
+          }
+        },
+        {
+          retries: MAX_RETRIES,
+          factor: 2,
+          minTimeout: MIN_TIMEOUT,
+          maxTimeout: MAX_TIMEOUT,
+          onRetry: (error: Error, attempt: number) => {
+            // Не повторяем попытки для возрастных ограничений
+            if (error.message?.startsWith("AGE_RESTRICTED:")) {
+              throw error;
+            }
+            bot.logger.warn(
+              `[YouTube] Retry ${attempt}/${MAX_RETRIES} for ${trackId}: ${error.message}`,
+            );
+          },
+        },
+      );
 
-	clearCache(): void {
-		this.cache.clear();
-		this.results = [];
-	}
+      return url;
+    } catch (error) {
+      const errmsg = (error as Error).message;
 
-	getResults = (): SearchTrackResult[] => [...this.results];
+      if (errmsg.startsWith("AGE_RESTRICTED:")) {
+        bot.logger.error(`[YouTube] Cannot play age-restricted video: ${trackId}`);
+        this.restrictedVideosCache.add(trackId);
+        return null;
+      }
 
-	private getPreferredLanguage(): string {
-		const envLang = process.env.YT_AUDIO_LANGUAGE?.trim();
-		return envLang && envLang.length > 0 ? envLang : "en-US";
-	}
+      bot.logger.error(
+        bot.locale.t("plugins.youtube.errors.get_track_url", {
+          trackId,
+          error: errmsg,
+        }),
+      );
+      return null;
+    }
+  }
 
-	private static toMinimalFormat(format: YouTubeFormat): MinimalFormat {
-		return {
-			itag: format.itag,
-			has_audio: format.has_audio,
-			has_video: format.has_video,
-			mime_type: format.mime_type,
-			bitrate: format.bitrate,
-			language: format.language ?? null,
-			is_original: format.is_original,
-			audio_track: format.audio_track,
-			duration: format.duration,
-		};
-	}
+  async getPlaylistTracks(playlistId: string): Promise<SearchTrackResult[]> {
+    try {
+      const cacheKey = `playlist_${playlistId}`;
+      const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
+      if (cachedResults) return cachedResults;
 
-	private static isMp4aMime(mimeType?: string): boolean {
-		return /mp4a/i.test(String(mimeType || ""));
-	}
+      const playlist = await this.yt.getPlaylist(playlistId);
+      const videos: YouTubeSearchResult[] = (playlist as any)?.videos ?? [];
+      const results: SearchTrackResult[] = [];
 
-	private pickBestAudioFormat(
-		formats: YouTubeFormat[],
-		preferredLanguage: string,
-	): MinimalFormat | null {
-		const minimal = formats.map(YouTubeMusicPlugin.toMinimalFormat);
+      for (const v of videos) {
+        const id = v.id ?? v.video_id;
+        const title = v.title;
+        if (!id || !title) continue;
 
-		const languageMatch = minimal.find(
-			(f) =>
-				f.itag === 140 &&
-				f.has_audio &&
-				!f.has_video &&
-				!!f.audio_track &&
-				(f.language === preferredLanguage ||
-					(preferredLanguage === "original" && !!f.is_original)),
-		);
-		if (languageMatch) return languageMatch;
+        // Пропускаем ограниченные видео
+        if (this.restrictedVideosCache.has(String(id))) {
+          bot.logger.debug(`[YouTube] Skipping restricted video ${id} in playlist`);
+          continue;
+        }
 
-		const candidates = minimal
-			.filter(
-				(f) =>
-					f.has_audio &&
-					!f.has_video &&
-					YouTubeMusicPlugin.isMp4aMime(f.mime_type),
-			)
-			.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+        const author = this.extractAuthorName(v);
+        const durationMs = this.parseDurationToMs(v.duration);
 
-		return candidates[0] ?? null;
-	}
+        const formatted = this.formatTrackInfo({
+          id: String(id),
+          title: String(title),
+          artists: [{ name: author }],
+          albums: [],
+          durationMs,
+          coverUri: "",
+        });
 
-	private async resolveDirectUrl(
-		videoId: string,
-		itag?: number,
-		language?: string,
-		preferMp4a = true,
-	): Promise<string | null> {
-		const options: StreamingDataOptions = {
-			type: "audio",
-			client: "TV",
-		};
-		if (itag) options.itag = itag;
-		if (language) options.language = language;
-		if (preferMp4a) options.codec = "mp4a";
+        const validated = this.validateTrackResult(formatted);
+        if (validated) results.push(validated);
+      }
 
-		const fmt = (await this.yt.getStreamingData(
-			videoId,
-			options,
-		)) as YouTubeFormat;
-		const maybeDeciphered = fmt.decipher?.();
-		const directUrl = maybeDeciphered || fmt.url;
-		return typeof directUrl === "string" && directUrl.startsWith("http")
-			? directUrl
-			: null;
-	}
+      this.cache.set(cacheKey, results);
+      return results;
+    } catch (error) {
+      bot.logger.error(
+        bot.locale.t("plugins.youtube.errors.playlist.processing"),
+        error,
+      );
+      return [];
+    }
+  }
 
-	private extractAuthorName(item: YouTubeSearchResult): string {
-		if (typeof item.author === "string") {
-			return item.author;
-		}
-		return item.author?.name || "Unknown Artist";
-	}
+  async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
+    await this.ensureInitialized();
 
-	private formatTrackInfo(trackInfo: TrackYouTube): SearchTrackResult {
-		return {
-			id: trackInfo.id.toString(),
-			title: trackInfo.title,
-			artists: trackInfo.artists.map((artist) => ({ name: artist.name })),
-			albums: trackInfo.albums.map((album) => ({ title: album.title })),
-			durationMs: trackInfo.durationMs ?? 0,
-			cover: trackInfo.coverUri || "",
-			source: "youtube",
-		};
-	}
+    try {
+      const cacheKey = `recommendations_${trackId}`;
+      const cachedResults = this.cache.get<SearchTrackResult[]>(cacheKey);
+      if (cachedResults) return cachedResults;
 
-	private validateTrackResult(
-		searchResult: SearchTrackResult,
-	): SearchTrackResult | null {
-		const validation = TrackResultSchema.safeParse(searchResult);
-		if (!validation.success) {
-			bot.logger.warn(
-				bot.locale.t("plugins.youtube.errors.track.invalid_data", {
-					error: JSON.stringify(validation.error),
-				}),
-			);
-			return null;
-		}
-		return validation.data;
-	}
+      bot.logger.warn(
+        `[YouTube] Recommendations not implemented for trackId: ${trackId}`,
+      );
+      return [];
+    } catch (error) {
+      bot.logger.error(
+        bot.locale.t("plugins.youtube.errors.error_fetching_similar_tracks", {
+          trackId,
+        }),
+        error,
+      );
+      return [];
+    }
+  }
 
-	private parseDurationToMs(
-		duration?: string | number | null,
-	): number | undefined {
-		if (typeof duration === "number" && !isNaN(duration)) {
-			return duration * 1000; // сек → мс
-		}
-		if (typeof duration === "string") {
-			const parts = duration.split(":").map(Number);
-			if (parts.some(isNaN)) return undefined;
-			let seconds = 0;
-			for (const part of parts) {
-				seconds = seconds * 60 + part;
-			}
-			return seconds * 1000;
-		}
-		return undefined;
-	}
+  clearCache(): void {
+    this.cache.clear();
+    this.results = [];
+    this.restrictedVideosCache.clear();
+  }
 
-	private async ensureInitialized(): Promise<void> {
-		if (this.initialized) return;
-		const release = await this.initMutex.acquire();
-		try {
-			if (this.initialized) return;
-			this.yt = await Innertube.create({
-				location: "US",
-				cache: new UniversalCache(false),
-				generate_session_locally: true,
-				// fetch: this.createTypeSafeFetch(this.proxyAgent),
-			});
-			this.initialized = true;
-			bot.logger.debug("YouTubeMusicPlugin initialized (youtubei.js)");
-		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("plugins.youtube.errors.error_initializing_service"),
-				error,
-			);
-			throw new Error(
-				bot.locale.t("plugins.youtube.errors.failed_to_initialize"),
-			);
-		} finally {
-			release();
-		}
-	}
+  getResults = (): SearchTrackResult[] => [...this.results];
 
-	private async updateCacheInBackground(
-		trackName: string,
-		cacheKey: string,
-	): Promise<SearchTrackResult[]> {
-		try {
-			const result = await retry(
-				async () => {
-					const search = (await this.yt.search(trackName, {
-						type: "video",
-					})) as YouTubeSearchResponse;
-					return search;
-				},
-				{
-					retries: MAX_RETRIES,
-					onRetry: (error: Error) =>
-						bot.logger.warn(
-							`${bot.locale.t("plugins.youtube.errors.retrying_search", {
-								trackName,
-							})}: ${error.message}`,
-						),
-				},
-			);
+  private getPreferredLanguage(): string {
+    const envLang = process.env.YT_AUDIO_LANGUAGE?.trim();
+    return envLang && envLang.length > 0 ? envLang : "en-US";
+  }
 
-			if (!result?.results) return [];
+  private static toMinimalFormat(format: YouTubeFormat): MinimalFormat {
+    return {
+      itag: format.itag,
+      has_audio: format.has_audio,
+      has_video: format.has_video,
+      mime_type: format.mime_type,
+      bitrate: format.bitrate,
+      language: format.language ?? null,
+      is_original: format.is_original,
+      audio_track: format.audio_track,
+      duration: format.duration,
+    };
+  }
 
-			const validatedTracks = result.results
-				.map((item: YouTubeSearchResult) => {
-					const id = item.id ?? item.video_id;
-					const title = item.title;
-					if (!id || !title) return null;
+  private static isMp4aMime(mimeType?: string): boolean {
+    return /mp4a/i.test(String(mimeType || ""));
+  }
 
-					const authorName = this.extractAuthorName(item);
-					const durationMs = this.parseDurationToMs(item.duration);
-					const formatted = this.formatTrackInfo({
-						id: String(id),
-						title: String(title),
-						artists: [{ name: authorName }],
-						albums: [],
-						durationMs,
-						coverUri: "",
-					});
-					return this.validateTrackResult(formatted);
-				})
-				.filter((t: SearchTrackResult): t is SearchTrackResult => t !== null);
+  private pickBestAudioFormat(
+    formats: YouTubeFormat[],
+    preferredLanguage: string,
+  ): MinimalFormat | null {
+    const minimal = formats.map(YouTubeMusicPlugin.toMinimalFormat);
 
-			if (validatedTracks.length > 0) {
-				this.cache.set(cacheKey, validatedTracks);
-				this.results = validatedTracks;
-			}
+    const languageMatch = minimal.find(
+      (f) =>
+        f.itag === 140 &&
+        f.has_audio &&
+        !f.has_video &&
+        !!f.audio_track &&
+        (f.language === preferredLanguage ||
+          (preferredLanguage === "original" && !!f.is_original)),
+    );
 
-			return validatedTracks;
-		} catch (error) {
-			bot.logger.warn(
-				bot.locale.t("plugins.youtube.errors.track.search", {
-					query: trackName,
-					error: error instanceof Error ? error.message : String(error),
-				}),
-			);
-			return [];
-		}
-	}
+    if (languageMatch) return languageMatch;
 
-	public async destroy(): Promise<void> {
-		this.results = [];
-		this.cache.clear();
-		this.initialized = false;
+    const candidates = minimal
+      .filter(
+        (f) =>
+          f.has_audio &&
+          !f.has_video &&
+          YouTubeMusicPlugin.isMp4aMime(f.mime_type),
+      )
+      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
 
-		if (this.cacheCleanupInterval) {
-			clearInterval(this.cacheCleanupInterval);
-			this.cacheCleanupInterval = null;
-		}
-	}
+    return candidates[0] ?? null;
+  }
 
-	private startCacheCleanup(): void {
-		const env = process.env.USE_CACHE?.toLowerCase();
-		const useCache = env === "true" || env === undefined;
-		if (!useCache) return;
+  private async resolveDirectUrl(
+    videoId: string,
+    itag?: number,
+    language?: string,
+    preferMp4a = true,
+  ): Promise<string | null> {
+    const options: StreamingDataOptions = {
+      type: "audio",
+      client: "TV",
+    };
 
-		this.cacheCleanupInterval = setInterval(() => {
-			const stats = this.cache.getStats();
-			if (stats.size > 800) {
-				this.cache.clear();
-			}
-		}, CACHE_CHECK_PERIOD);
-	}
+    if (itag) options.itag = itag;
+    if (language) options.language = language;
+    if (preferMp4a) options.codec = "mp4a";
 
-	constructor() {
-		this.cache = new CacheWrapper({
-			max: 1000,
-			ttl: CACHE_TTL,
-		});
+    try {
+      const fmt = (await this.yt.getStreamingData(
+        videoId,
+        options,
+      )) as unknown as YouTubeFormat;
 
-		this.startCacheCleanup();
-	}
+      const maybeDeciphered = fmt.decipher?.();
+      const directUrl = maybeDeciphered || fmt.url;
+
+      return typeof directUrl === "string" && directUrl.startsWith("http")
+        ? directUrl
+        : null;
+    } catch (error) {
+      bot.logger.debug(
+        `[YouTube] Failed to resolve direct URL for ${videoId}: ${(error as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  private extractAuthorName(item: YouTubeSearchResult): string {
+    if (typeof item.author === "string") {
+      return item.author;
+    }
+    return item.author?.name || "Unknown Artist";
+  }
+
+  private formatTrackInfo(trackInfo: TrackYouTube): SearchTrackResult {
+    return {
+      id: trackInfo.id.toString(),
+      title: trackInfo.title,
+      artists: trackInfo.artists.map((artist) => ({ name: artist.name })),
+      generation: false,
+      albums: trackInfo.albums.map((album) => ({ title: album.title })),
+      durationMs: trackInfo.durationMs ?? 0,
+      cover: trackInfo.coverUri || "",
+      source: "youtube",
+    };
+  }
+
+  private validateTrackResult(
+    searchResult: SearchTrackResult,
+  ): SearchTrackResult | null {
+    const validation = TrackResultSchema.safeParse(searchResult);
+
+    if (!validation.success) {
+      bot.logger.warn(
+        bot.locale.t("plugins.youtube.errors.track.invalid_data", {
+          error: JSON.stringify(validation.error),
+        }),
+      );
+      return null;
+    }
+
+    return validation.data;
+  }
+
+  private parseDurationToMs(
+    duration?: string | number | null,
+  ): number | undefined {
+    if (typeof duration === "number" && !isNaN(duration)) {
+      return duration * 1000; // сек → мс
+    }
+
+    if (typeof duration === "string") {
+      const parts = duration.split(":").map(Number);
+      if (parts.some(isNaN)) return undefined;
+
+      let seconds = 0;
+      for (const part of parts) {
+        seconds = seconds * 60 + part;
+      }
+      return seconds * 1000;
+    }
+
+    return undefined;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+
+    const release = await this.initMutex.acquire();
+    try {
+      if (this.initialized) return;
+
+      this.yt = await Innertube.create({
+        location: "US",
+        cache: new UniversalCache(false),
+        generate_session_locally: true,
+      });
+
+      this.initialized = true;
+      bot.logger.debug("YouTubeMusicPlugin initialized (youtubei.js)");
+    } catch (error) {
+      bot.logger.error(
+        bot.locale.t("plugins.youtube.errors.error_initializing_service"),
+        error,
+      );
+      throw new Error(
+        bot.locale.t("plugins.youtube.errors.failed_to_initialize"),
+      );
+    } finally {
+      release();
+    }
+  }
+
+  private async updateCacheInBackground(
+    trackName: string,
+    cacheKey: string,
+  ): Promise<SearchTrackResult[]> {
+    try {
+      const result = await retry(
+        async () => {
+          const search = (await this.yt.search(trackName, {
+            type: "video",
+          })) as YouTubeSearchResponse;
+          return search;
+        },
+        {
+          retries: MAX_RETRIES,
+          onRetry: (error: Error) =>
+            bot.logger.warn(
+              `${bot.locale.t("plugins.youtube.errors.retrying_search", {
+                trackName,
+              })}: ${error.message}`,
+            ),
+        },
+      );
+
+      if (!result?.results) return [];
+
+      const validatedTracks = result.results
+        .map((item: YouTubeSearchResult) => {
+          const id = item.id ?? item.video_id;
+          const title = item.title;
+          if (!id || !title) return null;
+
+          // Пропускаем ограниченные видео
+          if (this.restrictedVideosCache.has(String(id))) {
+            return null;
+          }
+
+          const authorName = this.extractAuthorName(item);
+          const durationMs = this.parseDurationToMs(item.duration);
+
+          const formatted = this.formatTrackInfo({
+            id: String(id),
+            title: String(title),
+            artists: [{ name: authorName }],
+            albums: [],
+            durationMs,
+            coverUri: "",
+          });
+
+          return this.validateTrackResult(formatted);
+        })
+        .filter(
+          (t: SearchTrackResult | null): t is SearchTrackResult => t !== null,
+        );
+
+      if (validatedTracks.length > 0) {
+        this.cache.set(cacheKey, validatedTracks);
+        this.results = validatedTracks;
+      }
+
+      return validatedTracks;
+    } catch (error) {
+      bot.logger.warn(
+        bot.locale.t("plugins.youtube.errors.track.search", {
+          query: trackName,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return [];
+    }
+  }
+
+  public async destroy(): Promise<void> {
+    this.results = [];
+    this.cache.clear();
+    this.restrictedVideosCache.clear();
+    this.initialized = false;
+
+    if (this.cacheCleanupInterval) {
+      clearInterval(this.cacheCleanupInterval);
+      this.cacheCleanupInterval = null;
+    }
+  }
+
+  private startCacheCleanup(): void {
+    const env = process.env.USE_CACHE?.toLowerCase();
+    const useCache = env === "true" || env === undefined;
+
+    if (!useCache) return;
+
+    this.cacheCleanupInterval = setInterval(() => {
+      const stats = this.cache.getStats();
+      if (stats.size > 800) {
+        this.cache.clear();
+      }
+      
+      // Очищаем кеш ограниченных видео, если он слишком большой
+      if (this.restrictedVideosCache.size > 100) {
+        this.restrictedVideosCache.clear();
+        bot.logger.debug("[YouTube] Cleared restricted videos cache");
+      }
+    }, CACHE_CHECK_PERIOD);
+  }
+
+  constructor() {
+    this.cache = new CacheWrapper({
+      max: 1000,
+      ttl: CACHE_TTL,
+    });
+    this.startCacheCleanup();
+  }
 }

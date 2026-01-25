@@ -155,7 +155,7 @@
 				"already_registered": "Plugin \"{name}\" is already registered"
 			},
 			"info": {
-				"plugin_loaded": "Plugin loaded: {file}",
+				"plugin_loaded": "Plugin loaded: {file} ({name})",
 				"plugin_loaded_disabled": "Plugin loaded (disabled): {file} ({name})",
 				"plugin_registered": "Plugin \"{name}\" registered and enabled",
 				"plugin_registered_disabled": "Plugin \"{name}\" registered as disabled",
