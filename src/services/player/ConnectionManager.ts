@@ -98,7 +98,7 @@ export class ConnectionManager extends EventEmitter {
 		const voiceChannel = member.voice.channel;
 		return Boolean(
 			voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) &&
-				voiceChannel.id,
+			voiceChannel.id,
 		);
 	}
 

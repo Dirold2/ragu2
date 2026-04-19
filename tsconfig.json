@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
-    "target": "es2022",
-    "module": "nodenext",
     "lib": ["ES2023", "DOM"],
-    "moduleResolution": "nodenext",
+    "module": "NodeNext",
+    "target": "ES2022",
+    "moduleResolution": "NodeNext",
     "rootDir": "./src",
     "outDir": "./build",
     "allowSyntheticDefaultImports": true,
@@ -24,13 +24,12 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
     "paths": {
-      "*": ["node_modules/*", "src/types/*"],
-      "#utils/*": ["src/utils/*"],
-      "#service/*": ["src/services/*"],
-      "#commands/*": ["src/commands/*"],
-      "#plugins/*": ["src/plugins/*"],
+      "*": ["./node_modules/*", "./src/types/*"],
+      "#utils/*": ["./src/utils/*"],
+      "#service/*": ["./src/services/*"],
+      "#commands/*": ["./src/commands/*"],
+      "#plugins/*": ["./src/plugins/*"],
       "#*": [
         "./src/*",
         "./src/*.ts",

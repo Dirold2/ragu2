@@ -27,34 +27,33 @@ const patterns = {
  * Clears Node.js module cache for project files (ESM compatible)
  */
 const clearNodeCache = async (): Promise<void> => {
-    try {
-        const { createRequire } = await import('module');
-        const require = createRequire(import.meta.url);
-        
-        // Очистка CommonJS кэша для файлов проекта
-        Object.keys(require.cache)
-            .filter((key) => {
-                try {
-                    const dir = require('path').dirname(key);
-                    return dir.includes(process.cwd()) || key.includes('ragu2');
-                } catch {
-                    return false;
-                }
-            })
-            .forEach((key) => {
-                delete require.cache[key];
-            });
-            
-        logger.debug('Node cache cleared');
+	try {
+		const { createRequire } = await import("module");
+		const require = createRequire(import.meta.url);
+
+		// Очистка CommonJS кэша для файлов проекта
+		Object.keys(require.cache)
+			.filter((key) => {
+				try {
+					const dir = require("path").dirname(key);
+					return dir.includes(process.cwd()) || key.includes("ragu2");
+				} catch {
+					return false;
+				}
+			})
+			.forEach((key) => {
+				delete require.cache[key];
+			});
+
+		logger.debug("Node cache cleared");
 	} catch (error) {
 		if (error instanceof Error) {
-			logger.warn('Cache clear failed:', error.message);
+			logger.warn("Cache clear failed:", error.message);
 		} else {
-			logger.warn('Cache clear failed:', String(error));
+			logger.warn("Cache clear failed:", String(error));
 		}
 	}
 };
-
 
 const { logger, locale } = bot;
 locale.load();

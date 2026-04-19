@@ -1,4 +1,3 @@
-import { EventEmitter } from "eventemitter3";
 import { Transform } from "node:stream";
 import { StreamType } from "@discordjs/voice";
 import { FluentStream } from "fluent-streamer";
@@ -10,6 +9,7 @@ import {
 	DEFAULT_COMPRESSOR,
 	DEFAULT_NORMALIZE,
 } from "../../utils/constants.js";
+import { EventEmitter } from "eventemitter3";
 
 export class AudioService extends EventEmitter {
 	private ffmpeg!: FluentStream;

@@ -2,11 +2,7 @@ import retry from "async-retry";
 import { Discord } from "discordx";
 import { LRUCache } from "lru-cache";
 import { URL } from "url";
-import {
-	Types,
-	WrappedYMApi,
-	YMApi,
-} from "yamd2";
+import { Types, WrappedYMApi, YMApi } from "yamd2";
 import type { MusicServicePlugin, PlaylistTrack } from "../interfaces/index.js";
 import {
 	type Config,
@@ -457,28 +453,22 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 		try {
 			const url = await retry(
 				() =>
-					this.wrapper.getDownloadUrl(
-						Number(trackId),
-						{
-							codec: Types.DownloadTrackCodec.MP3,
-							quality: Types.DownloadTrackQuality.Lossless,
-							forceRaw: false,
-						}
-					),
+					this.wrapper.getDownloadUrl(Number(trackId), {
+						codec: Types.DownloadTrackCodec.MP3,
+						quality: Types.DownloadTrackQuality.Lossless,
+						forceRaw: false,
+					}),
 				RETRY_CONFIG,
 			);
 			if (url) return url;
 		} catch {}
 		return await retry(
 			() =>
-				this.wrapper.getDownloadUrl(
-					Number(trackId),
-					{
-						codec: Types.DownloadTrackCodec.MP3,
-						quality: Types.DownloadTrackQuality.Lossless,
-						forceRaw: false,
-					}
-				),
+				this.wrapper.getDownloadUrl(Number(trackId), {
+					codec: Types.DownloadTrackCodec.MP3,
+					quality: Types.DownloadTrackQuality.Lossless,
+					forceRaw: false,
+				}),
 			RETRY_CONFIG,
 		);
 	}
