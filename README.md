@@ -1,113 +1,99 @@
-# Ragu2 Project
+# RAGU2
 
-RAGU2 is a Discord music bot that allows users to play, pause, and manage music tracks in voice channels. The bot supports integration with Yandex Music and provides various commands for playback control.
-
-## Localization
+Discord music bot with Yandex Music integration, audio processing, and localization.
 
 [__English__](./README.md), [Русский](./lang/ru/README.md)
 
-## Plugins in RAGU2
+## Features
 
-RAGU2 uses a plugin system that allows adding new features and capabilities to the bot. Currently, the following music platform plugins are available:
+- **Playback** — play, pause, skip, shuffle, queue, loop
+- **Equalizer** — bass (`-20`–`20`), treble (`-10`–`20`), compressor
+- **Volume** — adjustable with smooth fade in/out
+- **My Wave** — endless radio from the last track
+- **History & Top** — recently played and most popular tracks
+- **Queue management** — view, clear, auto-advance
+- **Reconnect** — automatic reconnection on network drops
+- **Localization** — English and Russian
+- **Plugin system** — extensible music platform support
 
-- Yandex Music
+## Supported Platforms
+
+| Platform | Status |
+|----------|--------|
+| Yandex Music | ✅ |
 
 ## Installation
 
-1. Clone the repository:
+```bash
+git clone https://github.com/dirold2/ragu2.git
+cd ragu2
+npm install
+```
 
-   ```bash
-   git clone https://github.com/dirold2/ragu2.git
-   cd ragu2
-   ```
+Create `.env`:
 
-2. Install dependencies:
+```env
+DISCORD_TOKEN=""          # https://discord.com/developers/applications
+BOT_LOCALE="en"           # en / ru
+FFPROBE_PATH=""           # optional, path to ffprobe
+YM_USER_ID=""             # https://mail.yandex.ru/
+YM_API_KEY=""             # https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d
+```
 
-   ```bash
-   npm install
-   ```
+## Usage
 
-3. Create a `.env` file in the project root and add your Discord token:
+```bash
+# development
+npm run dev
 
-   ```env
-   # discord_token
-   DISCORD_TOKEN="" #https://discord.com/developers/applications
+# production
+npm run build && npm start
 
-   # bot locale
-   BOT_LOCALE="" # default en
-
-   # ffprobe path
-   FFPROBE_PATH="" 
-
-   # yandex_api
-   YM_USER_ID="" # https://mail.yandex.ru/
-   YM_API_KEY="" # https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d
-   ```
-
-## Launching the Bot
-
-To launch the bot, follow these steps:
-
-1. Build the project:
-
-   ```bash
-   pnpm build
-   ```
-
-2. Start the bot:
-
-   ```bash
-   pnpm start
-   ```
-
-   ________________________
-
-   For development:
-
-   ```bash
-   pnpm dev
-   ```
+# with PM2
+npm run pm2:start
+```
 
 ## Commands
 
-The bot supports the following commands:
-
-- `/play <track_name>` - Play a track.
-- `/pause` - Pause playback.
-- `/skip` - Skip the current track.
-- `/volume <level>` - Set the volume level.
-- `/shuffle` - Shuffle the queue.
-- `/wave` - Enable "My Wave" based on the last track.
-- `/queue` - Show the current track queue.
-- `/other` - Show other commands.
+| Command | Description |
+|---------|-------------|
+| `/play <query>` | Search and play a track |
+| `/pause` | Pause / resume |
+| `/skip` | Skip to next track |
+| `/volume <0–100>` | Set volume |
+| `/equalizer <bass> <treble> <compressor>` | Adjust audio |
+| `/loop` | Toggle queue loop |
+| `/shuffle` | Shuffle queue |
+| `/queue` | Show queue |
+| `/wave` | Start My Wave radio |
+| `/other history` | Recently played |
+| `/other top` | Most popular tracks |
+| `/other queuedel` | Clear queue |
 
 ## Project Structure
 
-- `.env` - Environment variables.
-- `src/` - Bot source code.
-- `src/config/` - Bot configuration.
-- `src/commands/` - Bot commands.
-- `src/services/` - Services for managing bot logic.
-- `src/utils/` - Utilities and helper functions.
-- `src/locales/` - Localization files for multilingual support.
-- `src/types/` - Data types.
-- `src/interfaces/` - Interfaces.
+```
+src/
+├── commands/       # Slash command handlers
+├── services/
+│   ├── audio/      # FFmpeg audio pipeline
+│   └── player/     # Playback, queue, effects
+├── plugins/        # Music platform adapters
+├── utils/          # Locale, config, monitoring
+└── types/          # TypeScript definitions
+```
+
+## Configuration
+
+`config.json` — volume limits, equalizer ranges, fade timing.
+
+`ecosystem.config.json` — PM2 process settings.
 
 ## TODO
 
-Work in progress:
-
-- [x] Add localization
-- [x] Add "wave" for continuous music playback
-- [x] Replacing node-cache with lru-cache
-- [x] Solving the bug with an empty track on the side of the Yandex Music plugin
-- [ ] Fix memory (Max 270MB)
-
-Plugins:
-
-- [x] Add Yandex Music plugin
-- [ ] Add YouTube plugin
-- [ ] Add SoundCloud plugin
-- [ ] Add Apple Music plugin
-- [ ] Add Deezer plugin
-- [ ] Add Spotify plugin
+- [x] Memory optimization (<270 MB — ~120 MB under load)
+- [ ] YouTube plugin
+- [ ] SoundCloud plugin
+- [ ] Spotify plugin
+- [ ] Apple Music plugin
+- [ ] Deezer plugin

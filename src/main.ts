@@ -3,6 +3,7 @@ import { dirname } from "dirname-filename-esm";
 import { importx } from "@discordx/importer";
 
 import { bot } from "./bot.js";
+import { setCommandDeps } from "./commands/commandDeps.js";
 import { createLocale, createLogger, initLogger } from "./utils/index.js";
 import { registerShutdownHandlers } from "./utils/gracefulShutdown.js";
 import translations from "./locales/en.json" with { type: "json" };
@@ -25,22 +26,31 @@ locale.load();
  * Runs the bot
  */
 async function run() {
-	// Регистрируем обработчики graceful shutdown
-	registerShutdownHandlers();
+  // Регистрируем обработчики graceful shutdown
+  registerShutdownHandlers();
 
-	await bot.initialize();
+  await bot.initialize();
 
-	logger.info(locale.t("messages.bot.initialization.success"));
+  setCommandDeps({
+    playerManager: bot.playerManager,
+    commandService: bot.commandService,
+    queueService: bot.queueService,
+    nameService: bot.nameService,
+    logger: bot.logger,
+    t: (key, params, lang) => bot.locale.t(key as any, params as any, lang),
+  });
 
-	await importx(`${__dirname}/{events,commands}/**/*.{ts,js}`);
+  logger.info(locale.t("messages.bot.initialization.success"));
 
-	if (!process.env.DISCORD_TOKEN) {
-		throw Error(`No token`);
-	}
+  await importx(`${__dirname}/{events,commands}/**/*.{ts,js}`);
 
-	await bot.start(process.env.DISCORD_TOKEN);
+  if (!process.env.DISCORD_TOKEN) {
+    throw Error(`No token`);
+  }
 
-	logger.info(locale.t("messages.bot.start.success"));
+  await bot.start(process.env.DISCORD_TOKEN);
+
+  logger.info(locale.t("messages.bot.start.success"));
 }
 
 void run();

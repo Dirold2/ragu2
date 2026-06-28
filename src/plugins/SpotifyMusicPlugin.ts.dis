@@ -1,0 +1,153 @@
+import type { MusicServicePlugin } from "../interfaces/index.js";
+import { type SearchTrackResult } from "../types/index.js";
+import { SPApi } from "spd2";
+
+export default class SpotifyMusicPlugin implements MusicServicePlugin {
+	name = "spotify";
+	urlPatterns = [
+		/open\.spotify\.com\/(track|album|playlist|artist)/,
+		/spotify:\/\/(track|album|playlist|artist):/,
+	];
+
+	private api: SPApi | null = null;
+
+	constructor(private spDc: string = process.env.SP_DC || "") {}
+
+	private async getApi(): Promise<SPApi> {
+		if (!this.api) {
+			this.api = new SPApi(this.spDc);
+			await this.api.initialize();
+		}
+		return this.api;
+	}
+
+	async initialize() {
+		if (!this.api) {
+			this.api = new SPApi(this.spDc);
+			await this.api.initialize();
+		}
+		return this.api;
+	}
+
+	async searchName(query: string): Promise<SearchTrackResult[]> {
+		const api = await this.getApi();
+
+		try {
+            // Приведение типа any необходимо, так как search может отсутствовать в строгом интерфейсе SPApi
+			const result: any = await (api as any).search(query, 10);
+
+            const tracks: SearchTrackResult[] = result.tracks?.map((track: any) => {
+                const trackId = (api as any).extractId(track.uri) || '';
+                
+                let artistsArray: { name: string }[] = [{ name: "Unknown" }];
+                if (Array.isArray(track.artists)) {
+                    artistsArray = track.artists.map((a: any) => ({ name: a.name || 'Unknown' }));
+                } else if (typeof track.artists === 'string') {
+                    artistsArray = [{ name: track.artists }];
+                } else if (track.artists?.name) {
+                    artistsArray = [{ name: track.artists.name }];
+                }
+                
+                return {
+                    id: trackId,
+                    title: track.name || "Unknown",
+                    artists: artistsArray,
+                    source: "spotify",
+                    generation: false,
+                    durationMs: track.duration?.totalMilliseconds || 0,
+                    cover: track.albumOfTrack?.coverArt?.images?.[1]?.url || "",
+                    url: track.uri || '',
+                    albums: [{ title: track.albumOfTrack?.name || "" }],
+                    explicit: track.contentRating?.label === "EXPLICIT"
+                };
+            }) || [];
+
+			return tracks;
+		} catch (error) {
+			console.error("Spotify search error:", error);
+			return [];
+		}
+	}
+
+	async searchURL(url: string): Promise<SearchTrackResult[]> {
+		const trackId = this.extractSpotifyId(url);
+		if (!trackId) return [];
+
+		const api = await this.getApi();
+		try {
+            // getTrack возвращает TrackMeta { id, title, artist, duration, ... }
+			const track = await api.getTrack(trackId);
+
+			const result: SearchTrackResult = {
+				id: track.id,
+                // В TrackMeta поле называется title
+				title: track.title || "Unknown",
+                // В TrackMeta поле artist - это строка, а не массив
+				artists: [{ name: track.artist || "Unknown" }],
+				source: "spotify",
+				generation: false,
+                // В TrackMeta поле duration - число (секунды)
+				durationMs: (track.duration || 0) * 1000,
+                // В TrackMeta нет поля cover, используем заглушку или пустую строку
+				cover: "", 
+				url: `https://open.spotify.com/track/${trackId}`,
+                // В TrackMeta нет поля album, используем заглушку
+				albums: [{ title: "" }],
+			};
+
+			return [result];
+		} catch (error) {
+			console.error("Spotify URL error:", error);
+			return [];
+		}
+	}
+
+	async getTrackUrl(trackId: string): Promise<string> {
+		const api = await this.getApi();
+		try {
+            // Используем допустимые значения качества
+			const result = await api.getAudio(trackId, { quality: "OGG_VORBIS_320", decrypt: true });
+			const urls = result.urls || [];
+
+			if (urls.length === 0) {
+				console.warn("No URLs found for track:", trackId);
+				return "";
+			}
+
+            // Логика выбора лучшего качества адаптирована под структуру ответа spd2
+            // Обычно urls содержит объекты { url, quality, ... }
+			const bestTrack = 
+				urls.find((u: any) => u.quality === 'FLAC_FLAC') || 
+				urls.find((u: any) => u.quality === 'OGG_VORBIS_320') || 
+				urls.find((u: any) => u.quality === 'MP4_256') || 
+				urls[0];
+
+			console.log("Selected stream:", bestTrack.quality);
+			
+            // Возвращаем прямую ссылку (обычно это поле url или blobUrl)
+			return bestTrack?.url || bestTrack?.blobUrl || "";
+		} catch (error) {
+			console.error("Spotify stream error:", error);
+			return "";
+		}
+	}
+
+	getApiHeaders(): Record<string, string> {
+		return {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "Origin": "https://open.spotify.com/",
+          "Referer": "https://open.spotify.com/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+		  "Spotify-App-Version": "1.2.87.27.ga2033a72",
+		  "Cookie": `sp_dc=${this.spDc}`,
+		};
+	}
+
+	private extractSpotifyId(url: string): string | null {
+		const match =
+			url.match(/\/(track|album|playlist|artist)\/([a-zA-Z0-9]+)/) ||
+			url.match(/spotify:(track|album|playlist|artist):([a-zA-Z0-9]+)/);
+		return match ? match[2] : null;
+	}
+}

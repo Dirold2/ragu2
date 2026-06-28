@@ -1,206 +1,192 @@
-import {
-	CommandInteraction,
-	DiscordAPIError,
-	type Message,
-	MessageFlags,
-} from "discord.js";
-import { bot } from "../bot.js";
+import { CommandInteraction, DiscordAPIError, type Message, MessageFlags } from "discord.js";
+import { createLogger, ModuleState, type Logger } from "dlog2";
 import { DotPaths, TranslationParams } from "../utils/locale.js";
 import translations from "../locales/en.json" with { type: "json" };
-import { createLogger, ModuleState } from "../utils/logger.js";
+
+type LocaleService = {
+  t(key: string, params?: Record<string, unknown>, lang?: string | boolean): string;
+  load(language?: string): Promise<void>;
+  setLanguageMessage(language: string): void;
+};
 
 export default class CommandService {
-	private readonly logger = createLogger("CommandService", ModuleState.RUNNING);
-	private readonly interactionCache = new Map<
-		string,
-		{ content: string; timestamp: number }
-	>();
-	private readonly CACHE_TTL = 60000;
-	private readonly timeoutHandles = new Map<string, NodeJS.Timeout>();
+  private readonly logger: Logger;
+  private readonly interactionCache = new Map<string, { content: string; timestamp: number }>();
+  private readonly CACHE_TTL = 60000;
+  private readonly timeoutHandles = new Map<string, NodeJS.Timeout>();
 
-	/**
-	 * Получает язык сервера или значение по умолчанию
-	 */
-	private getGuildLanguage(interaction: CommandInteraction): string {
-		return interaction.guild?.preferredLocale || "en";
-	}
+  constructor(private readonly locale: LocaleService) {
+    this.logger = createLogger("CommandService", ModuleState.RUNNING);
+  }
 
-	/**
-	 * Упрощённый ответ с автоматическим переводом
-	 */
-	public async reply(
-		interaction: CommandInteraction,
-		translationKey: DotPaths<typeof translations>,
-		params?: TranslationParams,
-		options: {
-			ephemeral?: boolean;
-			forceFresh?: boolean;
-		} = { ephemeral: true },
-	): Promise<void> {
-		if (!interaction.isRepliable()) {
-			this.logger.debug(
-				bot.locale.t(
-					"messages.commandServise.interaction.not_repliable",
-					{
-						id: interaction.id,
-					},
-					this.getGuildLanguage(interaction),
-				),
-			);
-			return;
-		}
+  /**
+   * Получает язык сервера или значение по умолчанию
+   */
+  private getGuildLanguage(interaction: CommandInteraction): string {
+    return interaction.guild?.preferredLocale || "en";
+  }
 
-		const lang = this.getGuildLanguage(interaction);
+  /**
+   * Упрощённый ответ с автоматическим переводом
+   */
+  public async reply(
+    interaction: CommandInteraction,
+    translationKey: DotPaths<typeof translations>,
+    params?: TranslationParams,
+    options: {
+      ephemeral?: boolean;
+      forceFresh?: boolean;
+    } = { ephemeral: true },
+  ): Promise<void> {
+    if (!interaction.isRepliable()) {
+      this.logger.debug(
+        this.locale.t(
+          "messages.commandServise.interaction.not_repliable",
+          {
+            id: interaction.id,
+          },
+          this.getGuildLanguage(interaction),
+        ),
+      );
+      return;
+    }
 
-		await bot.locale.load(lang);
-		bot.locale.setLanguageMessage(lang);
+    const lang = this.getGuildLanguage(interaction);
 
-		const content = bot.locale.t(translationKey, params, `${lang}`);
+    await this.locale.load(lang);
+    this.locale.setLanguageMessage(lang);
 
-		try {
-			// Проверка кэша
-			const cacheKey = `${interaction.id}-${interaction.user.id}`;
-			const cachedResponse = this.interactionCache.get(cacheKey);
+    const content = this.locale.t(translationKey, params, `${lang}`);
 
-			if (
-				!options.forceFresh &&
-				cachedResponse?.content === content &&
-				Date.now() - cachedResponse.timestamp < this.CACHE_TTL
-			) {
-				this.logger.debug(`Cached response for interaction ${interaction.id}`);
-				return;
-			}
+    try {
+      // Проверка кэша
+      const cacheKey = `${interaction.id}-${interaction.user.id}`;
+      const cachedResponse = this.interactionCache.get(cacheKey);
 
-			// Отправка сообщения
-			if (!interaction.deferred && !interaction.replied) {
-				await interaction.deferReply({
-					flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
-				});
-			}
+      if (
+        !options.forceFresh &&
+        cachedResponse?.content === content &&
+        Date.now() - cachedResponse.timestamp < this.CACHE_TTL
+      ) {
+        this.logger.debug(`Cached response for interaction ${interaction.id}`);
+        return;
+      }
 
-			try {
-				await interaction.editReply({ content });
-			} catch (err) {
-				// Fallback: if the original reply cannot be edited (expired/already acknowledged), send follow-up
-				if (
-					err instanceof DiscordAPIError &&
-					[10008, 10062, 40060].includes(Number(err.code))
-				) {
-					try {
-						await interaction.followUp({
-							content,
-							flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
-						});
-					} catch (followErr) {
-						this.handleError(followErr, interaction);
-					}
-				} else {
-					throw err;
-				}
-			}
+      // Отправка сообщения
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply({
+          flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
+        });
+      }
 
-			// Обновление кэша
-			this.interactionCache.set(cacheKey, { content, timestamp: Date.now() });
-			const timeoutId = setTimeout(() => {
-				this.interactionCache.delete(cacheKey);
-				this.timeoutHandles.delete(cacheKey);
-			}, this.CACHE_TTL);
-			this.timeoutHandles.set(cacheKey, timeoutId);
-		} catch (error) {
-			this.handleError(error, interaction);
-		}
-	}
+      try {
+        await interaction.editReply({ content });
+      } catch (err) {
+        // Fallback: if the original reply cannot be edited (expired/already acknowledged), send follow-up
+        if (err instanceof DiscordAPIError && [10008, 10062, 40060].includes(Number(err.code))) {
+          try {
+            await interaction.followUp({
+              content,
+              flags: options.ephemeral ? MessageFlags.Ephemeral : undefined,
+            });
+          } catch (followErr) {
+            this.handleError(followErr, interaction);
+          }
+        } else {
+          throw err;
+        }
+      }
 
-	/**
-	 * Удаление сообщения с логированием
-	 */
-	public async delete(message: Message): Promise<void> {
-		if (!message.deletable) {
-			this.logger.debug(
-				bot.locale.t("commands.message.not_deletable", { id: message.id }),
-			);
-			return;
-		}
+      // Обновление кэша
+      this.interactionCache.set(cacheKey, { content, timestamp: Date.now() });
+      const timeoutId = setTimeout(() => {
+        this.interactionCache.delete(cacheKey);
+        this.timeoutHandles.delete(cacheKey);
+      }, this.CACHE_TTL);
+      this.timeoutHandles.set(cacheKey, timeoutId);
+    } catch (error) {
+      this.handleError(error, interaction);
+    }
+  }
 
-		try {
-			await message.delete();
-			this.logger.debug(
-				bot.locale.t("commands.message.deleted", { id: message.id }),
-			);
-		} catch (error) {
-			this.handleError(error, message);
-		}
-	}
+  /**
+   * Удаление сообщения с логированием
+   */
+  public async delete(message: Message): Promise<void> {
+    if (!message.deletable) {
+      this.logger.debug(this.locale.t("commands.message.not_deletable", { id: message.id }));
+      return;
+    }
 
-	/**
-	 * Унифицированная обработка ошибок
-	 */
-	private handleError(
-		error: unknown,
-		context: CommandInteraction | Message,
-	): void {
-		const lang =
-			context instanceof CommandInteraction
-				? this.getGuildLanguage(context)
-				: "en";
+    try {
+      await message.delete();
+      this.logger.debug(this.locale.t("commands.message.deleted", { id: message.id }));
+    } catch (error) {
+      this.handleError(error, message);
+    }
+  }
 
-		if (error instanceof DiscordAPIError) {
-			const contextId = "id" in context ? context.id : "unknown";
-			const errorContext =
-				context instanceof CommandInteraction
-					? `interaction with ID: ${contextId}`
-					: `message with ID: ${contextId}`;
+  /**
+   * Унифицированная обработка ошибок
+   */
+  private handleError(error: unknown, context: CommandInteraction | Message): void {
+    const lang = context instanceof CommandInteraction ? this.getGuildLanguage(context) : "en";
 
-			if ([10008, 10062].includes(Number(error.code))) {
-				this.logger.debug(
-					bot.locale.t(
-						"messages.commandServise.interaction.expired",
-						{ context: errorContext },
-						lang,
-					),
-				);
-			} else if (error.code === 40060) {
-				this.logger.debug(
-					bot.locale.t(
-						"messages.commandServise.interaction.already_acknowledged",
-						{ id: contextId },
-						lang,
-					),
-				);
-			} else {
-				// Human-readable message
-				this.logger.error(
-					bot.locale.t(
-						"messages.commandServise.errors.discord_api",
-						{
-							code: error.code,
-							context: errorContext,
-							message: error.message,
-						},
-						lang,
-					),
-				);
-				// Technical error details (stack, etc.) go through playerError
-				this.logger.playerError(error);
-			}
-		} else {
-			const id = "id" in context ? context.id : "unknown";
+    if (error instanceof DiscordAPIError) {
+      const contextId = "id" in context ? context.id : "unknown";
+      const errorContext =
+        context instanceof CommandInteraction
+          ? `interaction with ID: ${contextId}`
+          : `message with ID: ${contextId}`;
 
-			// Human-readable message for logs with localization
-			this.logger.error(
-				bot.locale.t("commands.message.unknown_error", { id }, lang),
-			);
-			// Technical error details (stack) through playerError
-			this.logger.playerError(error);
-		}
-	}
+      if ([10008, 10062].includes(Number(error.code))) {
+        this.logger.debug(
+          this.locale.t(
+            "messages.commandServise.interaction.expired",
+            { context: errorContext },
+            lang,
+          ),
+        );
+      } else if (error.code === 40060) {
+        this.logger.debug(
+          this.locale.t(
+            "messages.commandServise.interaction.already_acknowledged",
+            { id: contextId },
+            lang,
+          ),
+        );
+      } else {
+        // Human-readable message
+        this.logger.error(
+          this.locale.t(
+            "messages.commandServise.errors.discord_api",
+            {
+              code: error.code,
+              context: errorContext,
+              message: error.message,
+            },
+            lang,
+          ),
+        );
+        // Technical error details (stack, etc.) go through playerError
+        this.logger.playerError(error);
+      }
+    } else {
+      const id = "id" in context ? context.id : "unknown";
 
-	public clearCache(): void {
-		for (const handle of this.timeoutHandles.values()) {
-			clearTimeout(handle);
-		}
-		this.timeoutHandles.clear();
-		this.interactionCache.clear();
-		this.logger.debug("Interaction cache and timers cleared");
-	}
+      // Human-readable message for logs with localization
+      this.logger.error(this.locale.t("commands.message.unknown_error", { id }, lang));
+      // Technical error details (stack) through playerError
+      this.logger.playerError(error);
+    }
+  }
+
+  public clearCache(): void {
+    for (const handle of this.timeoutHandles.values()) {
+      clearTimeout(handle);
+    }
+    this.timeoutHandles.clear();
+    this.interactionCache.clear();
+    this.logger.debug("Interaction cache and timers cleared");
+  }
 }

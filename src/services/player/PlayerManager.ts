@@ -1,12 +1,21 @@
 import type { CommandInteraction } from "discord.js";
 import type { Track } from "../../interfaces/index.js";
-import { type CommandService, PlayerService } from "../index.js";
-import { bot } from "../../bot.js";
-import { EventEmitter } from "eventemitter3";
+import { type CacheQueueService, type CommandService, PlayerService } from "../index.js";
+import type { Logger } from "dlog2";
+import { createLogger } from "../../utils/index.js";
+import EventEmitter from "events";
+import type { MusicServicePlugin } from "../../interfaces/index.js";
 
 interface PlayerCacheEntry {
 	lastUsed: number;
 	player: PlayerService;
+}
+
+interface PlayerServiceDeps {
+	logger: Logger;
+	client: { user?: { id: string } | null; guilds: { fetch(id: string): Promise<{ channels: { fetch(): Promise<Map<string, any>> } }> } };
+	pluginManager: { getPlugin(name: string): MusicServicePlugin | undefined };
+	t: (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;
 }
 
 export default class PlayerManager extends EventEmitter {
@@ -15,15 +24,20 @@ export default class PlayerManager extends EventEmitter {
 	private readonly CACHE_CLEANUP_INTERVAL = 30 * 60 * 1000;
 	private readonly INACTIVE_TIMEOUT = 3600_000;
 	private cacheCleanupInterval: NodeJS.Timeout | null = null;
-	private readonly queueService = bot.queueService;
-	private readonly commandService: CommandService;
-	private readonly logger = bot.logger;
-	private readonly bot = bot;
+	private readonly logger: Logger;
+	private readonly playerDeps: PlayerServiceDeps;
 
-	constructor(queueService = bot.queueService, commandService: CommandService) {
+	constructor(
+		private readonly queueService: CacheQueueService,
+		private readonly commandService: CommandService,
+		client: PlayerServiceDeps["client"],
+		pluginManager: PlayerServiceDeps["pluginManager"],
+		t: PlayerServiceDeps["t"],
+		logger?: Logger,
+	) {
 		super();
-		this.queueService = queueService;
-		this.commandService = commandService;
+		this.logger = logger ?? createLogger("PlayerManager");
+		this.playerDeps = { logger: this.logger, client, pluginManager, t };
 		this.startCacheCleanup();
 	}
 
@@ -49,7 +63,7 @@ export default class PlayerManager extends EventEmitter {
 			return cacheEntry.player;
 		}
 
-		const newPlayer = new PlayerService(guildId, this.bot);
+		const newPlayer = new PlayerService(guildId, { ...this.playerDeps, queueService: this.queueService });
 		this.players.set(guildId, newPlayer);
 		this.playerCache.set(guildId, { lastUsed: Date.now(), player: newPlayer });
 		this.logger?.debug?.(`[PlayerManager] Created new player: ${guildId}`);

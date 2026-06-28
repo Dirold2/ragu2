@@ -1,91 +1,74 @@
-import {
-	ApplicationCommandOptionType,
-	CommandInteraction,
-	GuildMember,
-} from "discord.js";
+import { ApplicationCommandOptionType, CommandInteraction, GuildMember } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { bot } from "../bot.js";
 
 @Discord()
 export class OtherCommand {
-	@Slash({ name: "other", description: "Additional commands" })
-	async other(
-		@SlashOption({
-			name: "command",
-			description: "Select command",
-			type: ApplicationCommandOptionType.String,
-			required: true,
-		})
-		command: "history" | "top" | "queuedel",
-		interaction: CommandInteraction,
-	): Promise<void> {
-		switch (command) {
-			case "history": {
-				const tracks = await bot.queueService.getLastPlayedTracks();
+  @Slash({ name: "other", description: "Additional commands" })
+  async other(
+    @SlashOption({
+      name: "command",
+      description: "Select command",
+      type: ApplicationCommandOptionType.String,
+      required: true,
+    })
+    command: "history" | "top" | "queuedel",
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    switch (command) {
+      case "history": {
+        const tracks = await bot.queueService.getLastPlayedTracks();
 
-				if (tracks.length === 0) {
-					await bot.commandService.reply(
-						interaction,
-						"commands.other.no_recently_played_tracks",
-					);
-					return;
-				}
+        if (tracks.length === 0) {
+          await bot.commandService.reply(interaction, "commands.other.no_recently_played_tracks");
+          return;
+        }
 
-				const trackList = tracks
-					.map((track: any, index: number) => `${index + 1}. ${track.info}`)
-					.join("\n");
-				await bot.commandService.reply(
-					interaction,
-					"commands.other.recently_played_tracks",
-					{ trackList },
-				);
-				break;
-			}
+        const trackList = tracks
+          .map((track: any, index: number) => `${index + 1}. ${track.info}`)
+          .join("\n");
+        await bot.commandService.reply(interaction, "commands.other.recently_played_tracks", {
+          trackList,
+        });
+        break;
+      }
 
-			case "top": {
-				const topTracks = await bot.queueService.getTopPlayedTracks();
+      case "top": {
+        const topTracks = await bot.queueService.getTopPlayedTracks();
 
-				if (topTracks.length === 0) {
-					await bot.commandService.reply(
-						interaction,
-						"commands.other.no_popular_tracks",
-					);
-					return;
-				}
+        if (topTracks.length === 0) {
+          await bot.commandService.reply(interaction, "commands.other.no_popular_tracks");
+          return;
+        }
 
-				const topTrackList = topTracks
-					.map((track: any, index: number) => `${index + 1}. ${track.info}`)
-					.join("\n");
-				await bot.commandService.reply(
-					interaction,
-					"commands.other.popular_tracks",
-					{ topTrackList },
-				);
-				break;
-			}
+        const topTrackList = topTracks
+          .map((track: any, index: number) => `${index + 1}. ${track.info}`)
+          .join("\n");
+        await bot.commandService.reply(interaction, "commands.other.popular_tracks", {
+          topTrackList,
+        });
+        break;
+      }
 
-			case "queuedel": {
-				const member = interaction.member as GuildMember;
-				if (!member.voice?.channel) {
-					await bot.commandService.reply(
-						interaction,
-						"commands.queue.not_in_voice_channel",
-					);
-					return;
-				}
+      case "queuedel": {
+        const member = interaction.member as GuildMember;
+        if (!member.voice?.channel) {
+          await bot.commandService.reply(interaction, "commands.queue.not_in_voice_channel");
+          return;
+        }
 
-				const channelId = member.voice.channel.id;
-				const queue = await bot.queueService.getQueue(channelId);
+        const channelId = member.voice.channel.id;
+        const queue = await bot.queueService.getQueue(channelId);
 
-				if (queue.tracks.length === 0) {
-					await bot.commandService.reply(interaction, "commands.queue.empty");
-					return;
-				}
+        if (queue.tracks.length === 0) {
+          await bot.commandService.reply(interaction, "commands.queue.empty");
+          return;
+        }
 
-				await bot.queueService.clearQueue(channelId);
-				await bot.commandService.reply(interaction, "commands.queue.cleared");
-				break;
-			}
-		}
-	}
+        await bot.queueService.clearQueue(channelId);
+        await bot.commandService.reply(interaction, "commands.queue.cleared");
+        break;
+      }
+    }
+  }
 }

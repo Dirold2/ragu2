@@ -1,67 +1,61 @@
 {
-    "name": "ragu2",
-    "version": "0.1.4.24",
-    "description": "Discord bot module for RAGU2",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/dirold2/ragu2.git"
-    },
-    "type": "module",
-    "private": true,
-    "main": "index.js",
-    "types": "index.d.ts",
-    "scripts": {
-        "build": "tsc",
-        "dev": "tsx src/main.ts",
-        "start": "node --enable-source-maps --trace-warnings --experimental-specifier-resolution=node build/main.js",
-        "lint": "eslint .",
-        "lint:fix": "eslint . .ts --fix",
-        "format": "prettier --write --use-tabs --tab-width 2 \"src/**/*.{ts,json}\"",
-        "pm2:start": "pm2 start ecosystem.config.json",
-        "pm2:restart": "pm2 restart ragu2",
-        "pm2:stop": "pm2 stop ragu2",
-        "pm2:delete": "pm2 delete ragu2",
-        "pm2:list": "pm2 list"
-    },
-    "dependencies": {
-        "@discordjs/voice": "^0.19.2",
-        "@discordx/importer": "^1.3.3",
-        "@dotenvx/dotenvx": "^1.61.1",
-        "@snazzah/davey": "^0.1.11",
-        "ansi-styles": "^6.2.3",
-        "async-retry": "^1.3.3",
-        "callsites": "^4.2.0",
-        "current-module-paths": "^1.1.3",
-        "discord.js": "^14.26.3",
-        "discordx": "^11.13.3",
-        "eventemitter3": "^5.0.4",
-        "fluent-streamer": "^0.3.1",
-        "get-audio-duration": "^4.0.1",
-        "humanize-ms": "^2.0.0",
-        "lru-cache": "^11.3.5",
-        "opusscript": "^0.1.1",
-        "prom-client": "^15.1.3",
-        "tsx": "^4.21.0",
-        "typescript": "^6.0.3",
-        "winston": "^3.19.0",
-        "winston-daily-rotate-file": "^5.0.0",
-        "yamd2": "^1.3.30",
-        "youtubei.js": "^17.0.1"
-    },
-    "devDependencies": {
-        "@types/ms": "^2.1.0",
-        "@types/node": "^25.6.0",
-        "chokidar": "^5.0.0",
-        "dayjs": "^1.11.20",
-        "dirname-filename-esm": "^1.1.2",
-        "ms": "^2.1.3",
-        "prettier": "^3.8.3",
-        "ts-node": "^10.9.2",
-        "tslib": "^2.8.1",
-        "zod": "^4.3.6"
-    },
-    "imports": {
-        "#*": "./src/*",
-        "#utils": "./utils/*"
-    }
+  "name": "ragu2",
+  "version": "0.1.5",
+  "description": "Discord bot module for RAGU2",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dirold2/ragu2.git"
+  },
+  "type": "module",
+  "private": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "tsc && esbuild 'dist/**/*.js' --outdir=dist --allow-overwrite --minify --sourcemap && d-build",
+    "dev": "tsx src/main.ts",
+    "start": "node --enable-source-maps --trace-warnings --experimental-specifier-resolution=node dist/main.js",
+    "dist": "d-dist",
+    "lint": "oxlint src",
+    "lint:fix": "oxlint src --fix",
+    "format": "oxfmt src",
+    "format:check": "oxfmt src --check",
+    "pm2:start": "pm2 start ecosystem.config.json",
+    "pm2:restart": "pm2 restart ragu2",
+    "pm2:stop": "pm2 stop ragu2",
+    "pm2:delete": "pm2 delete ragu2",
+    "pm2:list": "pm2 list"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "@discordx/importer": "^1.3.3",
+    "@dotenvx/dotenvx": "^1.75.1",
+    "async-retry": "^1.3.3",
+    "discord.js": "^14.26.4",
+    "discordx": "^11.13.3",
+    "dlog2": "^0.1.2",
+    "execa": "^9.6.1",
+    "fluent-streamer": "^0.5.3",
+    "get-audio-duration": "^4.0.1",
+    "humanize-ms": "^2.0.0",
+    "lru-cache": "^11.5.1",
+    "opusscript": "^0.1.1",
+    "prom-client": "^15.1.3",
+    "typescript": "^6.0.3",
+    "yamd2": "^1.4.0"
+  },
+  "devDependencies": {
+    "@dirold2/dev-tools": "^1.1.0",
+    "@types/ms": "^2.1.0",
+    "@types/node": "^26.0.1",
+    "chokidar": "^5.0.0",
+    "dirname-filename-esm": "^1.1.2",
+    "ms": "^2.1.3",
+    "oxfmt": "^0.56.0",
+    "oxlint": "^1.71.0",
+    "zod": "^4.4.3"
+  },
+  "imports": {
+    "#*": "./src/*",
+    "#utils": "./utils/*"
+  }
 }

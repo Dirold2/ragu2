@@ -1,252 +1,275 @@
 import {
-	CommandInteraction,
-	GuildMember,
-	Message,
-	PermissionsBitField,
-	ReactionCollector,
+  CommandInteraction,
+  GuildMember,
+  Message,
+  PermissionsBitField,
+  ReactionCollector,
 } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 import { bot } from "../bot.js";
 
 interface Track {
-	info: string;
-	source: string;
-	trackId?: string;
-	addedAt?: bigint;
+  info: string;
+  source: string;
+  trackId?: string;
+  addedAt?: bigint;
+}
+
+interface QueueState {
+  currentPage: number;
+  pages: string[];
+  message: Message | null;
+  currentCollector: ReactionCollector | null;
 }
 
 const MAX_PAGE_LENGTH = 1900;
 const REACTIONS = {
-	PREV: "⬅️",
-	NEXT: "➡️",
-	CLOSE: "❌",
+  PREV: "⬅️",
+  NEXT: "➡️",
+  CLOSE: "❌",
 } as const;
 
 type ReactionEmoji = (typeof REACTIONS)[keyof typeof REACTIONS];
 
 @Discord()
 export class QueueCommand {
-	private currentPage = 0;
-	private pages: string[] = [];
-	private message: Message | null = null;
-	private currentCollector: ReactionCollector | null = null;
+  private readonly sessions = new Map<string, QueueState>();
 
-	@Slash({
-		name: "queue",
-		description: bot.locale.t("commands.queue.description"),
-	})
-	async queue(interaction: CommandInteraction): Promise<void> {
-		try {
-			await this.handleQueueCommand(interaction);
-		} catch (error) {
-			bot.logger.error(
-				bot.locale.t("commands.queue.errors.unexpected", {
-					error: error instanceof Error ? error.message : String(error),
-				}),
-			);
-			await bot.commandService.reply(
-				interaction,
-				"commands.queue.errors.unexpected",
-				{
-					error: error instanceof Error ? error.message : String(error),
-				},
-			);
-		}
-	}
+  @Slash({
+    name: "queue",
+    description: bot.locale.t("commands.queue.description"),
+  })
+  async queue(interaction: CommandInteraction): Promise<void> {
+    try {
+      await this.handleQueueCommand(interaction);
+    } catch (error) {
+      bot.logger.error(
+        bot.locale.t("commands.queue.errors.unexpected", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      await bot.commandService.reply(
+        interaction,
+        "commands.queue.errors.unexpected",
+        {
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    }
+  }
 
-	private async handleQueueCommand(
-		interaction: CommandInteraction,
-	): Promise<void> {
-		const member = interaction.member;
-		if (!(member instanceof GuildMember) || !member.voice.channelId) {
-			await bot.commandService.reply(
-				interaction,
-				"commands.queue.errors.not_in_channel",
-			);
-			return;
-		}
+  private getOrCreateState(interactionId: string): QueueState {
+    let state = this.sessions.get(interactionId);
+    if (!state) {
+      state = {
+        currentPage: 0,
+        pages: [],
+        message: null,
+        currentCollector: null,
+      };
+      this.sessions.set(interactionId, state);
+    }
+    return state;
+  }
 
-		const queue = await bot.queueService.getQueue(member.voice.channelId);
-		if (queue.tracks.length === 0) {
-			await bot.commandService.reply(interaction, "commands.queue.empty");
-			return;
-		}
+  private async handleQueueCommand(
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    const member = interaction.member;
+    if (!(member instanceof GuildMember) || !member.voice.channelId) {
+      await bot.commandService.reply(
+        interaction,
+        "commands.queue.errors.not_in_channel",
+      );
+      return;
+    }
 
-		this.pages = this.createPages(queue.tracks as Track[]);
-		this.currentPage = 0;
+    const queue = await bot.queueService.getQueue(interaction.guildId!);
+    if (queue.tracks.length === 0) {
+      await bot.commandService.reply(interaction, "commands.queue.empty");
+      return;
+    }
 
-		const message = (await interaction.reply({
-			content: await this.createPageMessage(),
-			fetchReply: true,
-		})) as Message;
+    const state = this.getOrCreateState(interaction.id);
+    state.pages = this.createPages(queue.tracks as Track[]);
+    state.currentPage = 0;
 
-		this.message = message;
+    const message = (await interaction.reply({
+      content: this.createPageMessage(state),
+      fetchReply: true,
+    })) as Message;
 
-		if (
-			this.pages.length > 1 &&
-			message.guild?.members.me?.permissions.has(
-				PermissionsBitField.Flags.ManageMessages,
-			)
-		) {
-			await this.setupReactions(message, interaction);
-		}
-	}
+    state.message = message;
 
-	private async setupReactions(
-		message: Message,
-		interaction: CommandInteraction,
-	): Promise<void> {
-		try {
-			for (const reaction of Object.values(REACTIONS)) {
-				await message.react(reaction);
-			}
-			this.createReactionCollector(message, interaction);
-		} catch (error) {
-			bot.logger.error(
-				bot.locale.t(
-					"commands.queue.errors.unexpected",
-					{
-						error: error instanceof Error ? error.message : String(error),
-					},
-					interaction.guild?.preferredLocale || "en",
-				),
-			);
-		}
-	}
+    if (
+      state.pages.length > 1 &&
+      message.guild?.members.me?.permissions.has(
+        PermissionsBitField.Flags.ManageMessages,
+      )
+    ) {
+      await this.setupReactions(state, message, interaction);
+    }
+  }
 
-	private async cleanupCollector(): Promise<void> {
-		if (this.currentCollector) {
-			this.currentCollector.stop();
-			this.currentCollector = null;
-		}
-	}
+  private async setupReactions(
+    state: QueueState,
+    message: Message,
+    interaction: CommandInteraction,
+  ): Promise<void> {
+    try {
+      for (const reaction of Object.values(REACTIONS)) {
+        await message.react(reaction);
+      }
+      this.createReactionCollector(state, message, interaction);
+    } catch (error) {
+      bot.logger.error(
+        bot.locale.t(
+          "commands.queue.errors.unexpected",
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+          interaction.guild?.preferredLocale || "en",
+        ),
+      );
+    }
+  }
 
-	private async createReactionCollector(
-		message: Message,
-		interaction: CommandInteraction,
-	): Promise<void> {
-		await this.cleanupCollector();
+  private async cleanupCollector(state: QueueState): Promise<void> {
+    if (state.currentCollector) {
+      state.currentCollector.stop();
+      state.currentCollector = null;
+    }
+  }
 
-		const collector = message.createReactionCollector({
-			filter: (reaction, user) => {
-				const emoji = reaction.emoji.name as string;
-				return (
-					Object.values(REACTIONS).includes(emoji as ReactionEmoji) &&
-					user.id === interaction.user.id
-				);
-			},
-			time: 300000,
-		});
+  private createReactionCollector(
+    state: QueueState,
+    message: Message,
+    interaction: CommandInteraction,
+  ): void {
+    this.cleanupCollector(state);
 
-		this.currentCollector = collector;
+    const collector = message.createReactionCollector({
+      filter: (reaction, user) => {
+        const emoji = reaction.emoji.name as string;
+        return (
+          Object.values(REACTIONS).includes(emoji as ReactionEmoji) &&
+          user.id === interaction.user.id
+        );
+      },
+      time: 300000,
+    });
 
-		collector.on("collect", async (reaction, user) => {
-			if (!this.message) {
-				await this.cleanupCollector();
-				return;
-			}
+    state.currentCollector = collector;
 
-			try {
-				await reaction.users.remove(user.id).catch(() => {});
+    collector.on("collect", async (reaction, user) => {
+      if (!state.message) {
+        this.cleanupCollector(state);
+        return;
+      }
 
-				const emoji = reaction.emoji.name as ReactionEmoji;
-				switch (emoji) {
-					case REACTIONS.PREV:
-						if (this.currentPage > 0) {
-							this.currentPage--;
-							await this.updateMessage();
-						}
-						break;
-					case REACTIONS.NEXT:
-						if (this.currentPage < this.pages.length - 1) {
-							this.currentPage++;
-							await this.updateMessage();
-						}
-						break;
-					case REACTIONS.CLOSE:
-						await this.message.delete();
-						this.message = null;
-						collector.stop();
-						break;
-				}
-			} catch (error) {
-				if (
-					error instanceof Error &&
-					error.message.includes(
-						bot.locale.t(
-							"commands.queue.errors.unknown",
-							undefined,
-							interaction.guild?.preferredLocale || "en",
-						),
-					)
-				) {
-					this.message = null;
-					collector.stop();
-				} else {
-					bot.logger.error(
-						bot.locale.t(
-							"commands.queue.errors.unexpected",
-							{
-								error: error instanceof Error ? error.message : String(error),
-							},
-							interaction.guild?.preferredLocale || "en",
-						),
-					);
-				}
-			}
-		});
+      try {
+        await reaction.users.remove(user.id).catch(() => {});
 
-		collector.on("end", async () => {
-			if (this.message?.reactions) {
-				await this.message.reactions.removeAll().catch(() => {});
-			}
-			this.message = null;
-			this.currentCollector = null;
-		});
-	}
+        const emoji = reaction.emoji.name as ReactionEmoji;
+        switch (emoji) {
+          case REACTIONS.PREV:
+            if (state.currentPage > 0) {
+              state.currentPage--;
+              await this.updateMessage(state);
+            }
+            break;
+          case REACTIONS.NEXT:
+            if (state.currentPage < state.pages.length - 1) {
+              state.currentPage++;
+              await this.updateMessage(state);
+            }
+            break;
+          case REACTIONS.CLOSE:
+            await state.message.delete();
+            state.message = null;
+            collector.stop();
+            break;
+        }
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message.includes(
+            bot.locale.t(
+              "commands.queue.errors.unknown",
+              undefined,
+              interaction.guild?.preferredLocale || "en",
+            ),
+          )
+        ) {
+          state.message = null;
+          collector.stop();
+        } else {
+          bot.logger.error(
+            bot.locale.t(
+              "commands.queue.errors.unexpected",
+              {
+                error: error instanceof Error ? error.message : String(error),
+              },
+              interaction.guild?.preferredLocale || "en",
+            ),
+          );
+        }
+      }
+    });
 
-	private async updateMessage(): Promise<void> {
-		if (this.message) {
-			await this.message.edit(await this.createPageMessage());
-		}
-	}
+    collector.on("end", async () => {
+      if (state.message?.reactions) {
+        await state.message.reactions.removeAll().catch(() => {});
+      }
+      state.message = null;
+      state.currentCollector = null;
+      this.sessions.delete(interaction.id);
+    });
+  }
 
-	private async createPageMessage(): Promise<string> {
-		return this.pages.length > 1
-			? bot.locale.t("commands.queue.pages", {
-					current: this.currentPage + 1,
-					total: this.pages.length,
-				})
-			: this.pages[this.currentPage];
-	}
+  private async updateMessage(state: QueueState): Promise<void> {
+    if (state.message) {
+      await state.message.edit(this.createPageMessage(state));
+    }
+  }
 
-	private createPages(tracks: Track[]): string[] {
-		const pages: string[] = [];
-		let currentPage = "";
+  private createPageMessage(state: QueueState): string {
+    return state.pages.length > 1
+      ? bot.locale.t("commands.queue.pages", {
+          current: state.currentPage + 1,
+          total: state.pages.length,
+        })
+      : state.pages[state.currentPage];
+  }
 
-		tracks.forEach((track, index) => {
-			const entry = `${index + 1}. ${track.info}\n`;
-			if ((currentPage + entry).length > MAX_PAGE_LENGTH) {
-				pages.push(currentPage);
-				currentPage = entry;
-			} else {
-				currentPage += entry;
-			}
-		});
+  private createPages(tracks: Track[]): string[] {
+    const pages: string[] = [];
+    let currentPage = "";
 
-		if (currentPage) pages.push(currentPage);
-		return pages;
-	}
+    tracks.forEach((track, index) => {
+      const entry = `${index + 1}. ${track.info}\n`;
+      if ((currentPage + entry).length > MAX_PAGE_LENGTH) {
+        pages.push(currentPage);
+        currentPage = entry;
+      } else {
+        currentPage += entry;
+      }
+    });
 
-	// Добавляем метод очистки при уничтожении команды
-	public async destroy(): Promise<void> {
-		await this.cleanupCollector();
-		if (this.message) {
-			await this.message.delete().catch(() => {});
-			this.message = null;
-		}
-		this.pages = [];
-		this.currentPage = 0;
-	}
+    if (currentPage) pages.push(currentPage);
+    return pages;
+  }
+
+  public async destroy(): Promise<void> {
+    for (const [_id, state] of this.sessions) {
+      if (state.currentCollector) {
+        state.currentCollector.stop();
+      }
+      if (state.message) {
+        await state.message.delete().catch(() => {});
+      }
+    }
+    this.sessions.clear();
+  }
 }

@@ -1,0 +1,78 @@
+import type { MusicServicePlugin } from "../interfaces/index.js";
+import type { SearchTrackResult } from "../types/index.js";
+import { HITApi } from "hitd2";
+
+export default class HitmoMusicPlugin implements MusicServicePlugin {
+    name = 'hitmos';
+    urlPatterns = [/hitmos\.me/, /rus\.hitmoz\.org/];
+
+    private api: HITApi;
+
+    constructor(sessionCookie?: string) {
+        this.api = new HITApi({ sessionCookie });
+    }
+
+    async initialize() {
+        console.log(`[Plugin:${this.name}] Initialized`);
+    }
+
+    /**
+     * Поиск трека по названию.
+     * Возвращает массив результатов поиска в общем формате SearchTrackResult.
+     */
+    async searchName(trackName: string): Promise<SearchTrackResult[]> {
+        try {
+            const tracks = await this.api.search(trackName, 10);
+
+            return tracks.map((track) => ({
+                id: track.id,
+                title: track.title,
+                artists: [{ name: track.artist || "Unknown" }],
+                albums: undefined,
+                durationMs: track.duration > 0 ? track.duration * 1000 : undefined,
+                cover: undefined,
+                source: this.name,
+                url: undefined,
+                generation: false,
+            }));
+        } catch (error) {
+            console.error(`[Plugin:${this.name}] Search failed for "${trackName}":`, error);
+            return [];
+        }
+    }
+
+    async searchURL(url: string): Promise<SearchTrackResult[]> {
+        try {
+            const match = url.match(/(?:song|track)\/([a-zA-Z0-9_-]+)/);
+            if (!match || !match[1]) {
+                return [];
+            }
+
+            const trackId = match[1];
+            const meta = await this.api.getTrack(trackId);
+
+            return [{
+                id: meta.id,
+                title: meta.title,
+                artists: [{ name: meta.artist || "Unknown" }],
+                albums: undefined,
+                durationMs: meta.duration > 0 ? meta.duration * 1000 : undefined,
+                cover: undefined,
+                source: this.name,
+                url: undefined,
+                generation: false,
+            }];
+        } catch (error) {
+            console.error(`[Plugin:${this.name}] URL processing failed for "${url}":`, error);
+            return [];
+        }
+    }
+
+    async getTrackUrl(trackId: string): Promise<string> {
+        const audio = await this.api.getAudio(trackId);
+        if (!audio.url) {
+            throw new Error("Audio URL is empty");
+        }
+        return audio.url;
+    }
+}

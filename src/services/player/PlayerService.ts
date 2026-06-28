@@ -1,398 +1,392 @@
+import type { Logger } from "dlog2";
 import type { CommandInteraction } from "discord.js";
 import {
-	AudioPlayerStatus,
-	createAudioPlayer,
-	createAudioResource,
-	NoSubscriberBehavior,
+  AudioPlayerStatus,
+  createAudioPlayer,
+  createAudioResource,
+  NoSubscriberBehavior,
 } from "@discordjs/voice";
-import { EventEmitter } from "eventemitter3";
+import EventEmitter from "events";
+import { Readable } from "node:stream";
 import { AudioService } from "../audio/AudioService.js";
 import { TrackManager } from "./TrackManager.js";
 import { ConnectionManager } from "./ConnectionManager.js";
 import type { PlayerState } from "../../types/audio.js";
 import { PlayerServiceEvents } from "../../types/audio.js";
 import config from "../../../config.json" with { type: "json" };
-import type { Bot } from "../../bot.js";
-import { PlayerQueue } from "./PlayerQueue.js";
+import { PlayerQueue, type QueueServiceSubset } from "./PlayerQueue.js";
 import { PlayerEffects } from "./PlayerEffects.js";
 import type { Track } from "../../types/index.js";
+import type { MusicServicePlugin } from "../../interfaces/index.js";
+
+interface PluginManagerSubset {
+  getPlugin(name: string): MusicServicePlugin | undefined;
+}
+
+interface PlayerServiceDeps {
+  logger: Logger;
+  queueService: QueueServiceSubset;
+  client: { user?: { id: string } | null; guilds: { fetch(id: string): Promise<{ channels: { fetch(): Promise<Map<string, any>> } }> } };
+  pluginManager: PluginManagerSubset;
+  t: (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;
+}
 
 export default class PlayerService extends EventEmitter {
-	private readonly player = createAudioPlayer({
-		behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
-	});
+  private readonly player = createAudioPlayer({
+    behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
+  });
 
-	private audioService: AudioService;
-	private trackManager: TrackManager;
-	public connectionManager: ConnectionManager;
-	private queue: PlayerQueue;
-	public effects: PlayerEffects;
-	private fadeOutTimer: NodeJS.Timeout | null = null;
-	public state: PlayerState;
-	private isDestroyed = false;
+  private audioService: AudioService;
+  private trackManager: TrackManager;
+  public connectionManager: ConnectionManager;
+  private queue: PlayerQueue;
+  public effects: PlayerEffects;
+  private fadeOutTimer: NodeJS.Timeout | null = null;
+  public state: PlayerState;
+  private isDestroyed = false;
 
-	private isHandlingError = false;
-	private skipInProgress = false;
+  private isHandlingError = false;
+  private skipInProgress = false;
 
-	constructor(
-		public readonly guildId: string,
-		private readonly bot: Bot,
-	) {
-		super();
-		this.audioService = new AudioService();
-		this.trackManager = new TrackManager(bot);
-		this.connectionManager = new ConnectionManager(guildId, bot);
-		this.state = this.getInitialState();
+  private logDebug(msg: string): void {
+    this.deps.logger.debug?.(`[PlayerService] ${msg}`);
+  }
 
-		const savedVolume = this.bot.queueService?.getVolume?.(this.guildId);
-		if (typeof savedVolume === "number") {
-			this.state.volume = Math.max(0, Math.min(200, savedVolume));
-		}
+  private logError(msg: string): void {
+    this.deps.logger.error?.(`[PlayerService] ${msg}`);
+  }
 
-		this.queue = new PlayerQueue(
-			guildId,
-			bot,
-			this.emit.bind(this),
-			this.trackManager,
-		);
+  private clearFadeTimer(): void {
+    if (this.fadeOutTimer) {
+      clearTimeout(this.fadeOutTimer);
+      this.fadeOutTimer = null;
+    }
+  }
 
-		this.effects = new PlayerEffects(this.audioService);
-		this.state.lastUserTrack =
-			this.bot.queueService?.getLastTrack?.(this.guildId) ?? null;
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
-		this.setupEvents();
-	}
+  private async recoverFromAudioError(): Promise<void> {
+    this.player.stop();
+    await this.sleep(500);
+    await this.playNextOrRecommendations();
+  }
 
-	private setupEvents(): void {
-		this.player.on(AudioPlayerStatus.Playing, () => {
-			if (this.isDestroyed) return;
-			this.bot?.logger?.debug?.("[PlayerService] Playing");
-			this.state.isPlaying = true;
-			this.state.pause = false;
-			this.emit(PlayerServiceEvents.PLAYING);
-		});
+  private async performFadeOutAndStop(): Promise<void> {
+    this.clearFadeTimer();
+    await this.effects.setVolume(0, 1000, false);
+    await this.sleep(1300);
+    await this.audioService.stop();
+    await this.sleep(200);
+    this.player.stop();
+    await this.sleep(200);
+  }
 
-		this.player.on(AudioPlayerStatus.Paused, () => {
-			if (this.isDestroyed) return;
-			this.bot?.logger?.debug?.("[PlayerService] Paused");
-			this.state.isPlaying = false;
-			this.state.pause = true;
-			this.emit(PlayerServiceEvents.PAUSED);
-		});
+  constructor(
+    public readonly guildId: string,
+    private readonly deps: PlayerServiceDeps,
+  ) {
+    super();
+    this.audioService = new AudioService();
+    this.trackManager = new TrackManager(deps.logger, deps.pluginManager, deps.t);
+    this.connectionManager = new ConnectionManager(guildId, deps.logger, deps.client);
+    this.state = this.getInitialState();
 
-		this.player.on(AudioPlayerStatus.Idle, () => {
-			if (this.isDestroyed) return;
-			this.handleTrackEnd();
-		});
+    const savedVolume = deps.queueService?.getVolume?.(guildId);
+    if (typeof savedVolume === "number") {
+      this.state.volume = Math.max(0, Math.min(200, savedVolume));
+    }
 
-		this.player.on("error", (error) => {
-			if (this.isDestroyed) return;
+    this.queue = new PlayerQueue(guildId, deps.logger, deps.queueService, this.emit.bind(this), this.trackManager);
 
-			if (error.message.includes("Premature close")) {
-				this.bot?.logger?.debug?.(
-					"[PlayerService] Ignoring premature close in player",
-				);
-				return;
-			}
+    this.effects = new PlayerEffects(this.audioService);
+    this.state.lastUserTrack = deps.queueService?.getLastTrack?.(guildId) ?? null;
 
-			this.bot?.logger?.error?.("[PlayerService] Player error:", error);
-			this.handleTrackEnd();
-		});
+    this.setupEvents();
+  }
 
-		this.audioService.on("volumeChanged", (volume: number) => {
-			if (!this.isDestroyed) {
-				this.emit(PlayerServiceEvents.VOLUME_CHANGED, volume);
-			}
-		});
+  private setupEvents(): void {
+    this.setupPlayerEvents();
+    this.setupAudioServiceEvents();
+    this.setupConnectionEvents();
+  }
 
-		this.connectionManager.on("connected", (channelId: string) => {
-			if (this.isDestroyed) return;
-			this.bot?.logger?.debug?.(`[PlayerService] Connected to ${channelId}`);
-			this.state.channelId = channelId;
-			this.state.connection = this.connectionManager.getConnection();
-			this.emit(PlayerServiceEvents.CONNECTED, channelId);
-		});
+  private setupPlayerEvents(): void {
+    this.player.on(AudioPlayerStatus.Playing, () => {
+      if (this.isDestroyed) return;
+      this.logDebug("Playing");
+      this.state.isPlaying = true;
+      this.state.pause = false;
+      this.emit(PlayerServiceEvents.PLAYING);
+    });
 
-		this.connectionManager.on("disconnected", () => {
-			if (this.isDestroyed) return;
-			this.handleDisconnection();
-		});
+    this.player.on(AudioPlayerStatus.Paused, () => {
+      if (this.isDestroyed) return;
+      this.logDebug("Paused");
+      this.state.isPlaying = false;
+      this.state.pause = true;
+      this.emit(PlayerServiceEvents.PAUSED);
+    });
 
-		this.audioService.on("error", async (error: Error) => {
-			if (this.isDestroyed || this.isHandlingError) return;
+    this.player.on(AudioPlayerStatus.Idle, () => {
+      if (this.isDestroyed) return;
+      this.handleTrackEnd();
+    });
 
-			if (error.message.includes("Premature close")) {
-				this.bot?.logger?.debug?.(
-					"[PlayerService] Ignoring premature close in AudioService",
-				);
-				return;
-			}
+    this.player.on("error", (error) => {
+      if (this.isDestroyed) return;
 
-			this.bot?.logger?.error?.("[PlayerService] AudioService error:", error);
+      if (error.message.includes("Premature close")) {
+        this.logDebug("Ignoring premature close in player");
+        return;
+      }
 
-			this.isHandlingError = true;
-			try {
-				this.player.stop();
-				await new Promise((resolve) => setTimeout(resolve, 500)); // Даем время на очистку
-				await this.playNextOrRecommendations();
-			} catch (e) {
-				this.bot?.logger?.error?.(
-					"[PlayerService] Failed to recover from error:",
-					e,
-				);
-			} finally {
-				this.isHandlingError = false;
-			}
-		});
+      this.logError("Player error:");
+      this.handleTrackEnd();
+    });
+  }
 
-		this.audioService.on("debug", (message: string) => {
-			this.bot?.logger?.debug?.(message);
-		});
-	}
+  private setupAudioServiceEvents(): void {
+    this.audioService.on("volumeChanged", (volume: number) => {
+      if (!this.isDestroyed) {
+        this.emit(PlayerServiceEvents.VOLUME_CHANGED, volume);
+      }
+    });
 
-	private handleDisconnection(): void {
-		if (this.isDestroyed) return;
-		this.bot?.logger?.debug?.("[PlayerService] Disconnected");
-		this.player.stop();
-		this.resetState();
-		this.emit(PlayerServiceEvents.DISCONNECTED);
-	}
+    this.audioService.on("error", async (error: Error) => {
+      if (this.isDestroyed || this.isHandlingError) return;
 
-	async playOrQueueTrack(
-		track: Track | null,
-		interaction?: CommandInteraction,
-	): Promise<void> {
-		if (!track || this.isDestroyed) return;
-		this.bot?.logger?.debug?.(
-			`[PlayerService] playOrQueueTrack: ${track.info}`,
-		);
+      if (error.message.includes("Premature close")) {
+        this.logDebug("Ignoring premature close in AudioService");
+        return;
+      }
 
-		try {
-			const isConnected = !!this.connectionManager.getConnection();
-			if (!isConnected && interaction) {
-				await this.joinChannel(interaction);
-			}
+      this.logError("AudioService error:");
 
-			if (this.state.isPlaying) {
-				await this.queue.queueTrack(track);
-			} else {
-				await this.playTrack(track);
-			}
+      this.isHandlingError = true;
+      try {
+        await this.recoverFromAudioError();
+      } catch (e) {
+        this.logError(
+          `Failed to recover from error: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      } finally {
+        this.isHandlingError = false;
+      }
+    });
 
-			if (!this.state.nextTrack) {
-				this.state.nextTrack = await this.queue.peekNextTrack();
-			}
-		} catch (error) {
-			this.bot?.logger?.error?.(
-				`[PlayerService] Error in playOrQueueTrack: ${(error as Error).message}`,
-			);
-		}
-	}
+    this.audioService.on("debug", (message: string) => {
+      this.deps.logger?.debug?.(message);
+    });
+  }
 
-	async skip(): Promise<void> {
-		if (this.isDestroyed || this.skipInProgress) return;
+  private setupConnectionEvents(): void {
+    this.connectionManager.on("connected", (channelId: string) => {
+      if (this.isDestroyed) return;
+      this.logDebug(`Connected to ${channelId}`);
+      this.state.channelId = channelId;
+      this.state.connection = this.connectionManager.getConnection();
+      this.emit(PlayerServiceEvents.CONNECTED, channelId);
+    });
 
-		this.skipInProgress = true;
-		try {
-			this.bot?.logger?.debug?.("[PlayerService] Skipping track");
+    this.connectionManager.on("disconnected", () => {
+      if (this.isDestroyed) return;
+      this.handleDisconnection();
+    });
+  }
 
-			if (this.fadeOutTimer) {
-				clearTimeout(this.fadeOutTimer);
-				this.fadeOutTimer = null;
-			}
+  private handleDisconnection(): void {
+    if (this.isDestroyed) return;
+    this.logDebug("Disconnected");
+    this.player.stop();
+    this.resetState();
+    this.emit(PlayerServiceEvents.DISCONNECTED);
+  }
 
-			this.state.loop = false;
-			this.bot.queueService?.setLoop?.(this.guildId, false);
+  async playOrQueueTrack(track: Track | null, interaction?: CommandInteraction): Promise<void> {
+    if (!track || this.isDestroyed) return;
+    this.logDebug(`playOrQueueTrack: ${track.info}`);
 
-			await this.effects.setVolume(0, 1000, false);
-			await new Promise((resolve) => setTimeout(resolve, 1300));
+    try {
+      const isConnected = !!this.connectionManager.getConnection();
+      if (!isConnected && interaction) {
+        await this.joinChannel(interaction);
+      }
 
-			await this.audioService.stop();
-			await new Promise((resolve) => setTimeout(resolve, 200));
+      if (this.state.isPlaying) {
+        await this.queue.queueTrack(track);
+      } else {
+        await this.playTrack(track);
+      }
 
-			this.player.stop();
-			await new Promise((resolve) => setTimeout(resolve, 200));
-		} catch (error) {
-			this.bot?.logger?.error?.(
-				`[PlayerService] Error in skip: ${(error as Error).message}`,
-			);
-		} finally {
-			this.skipInProgress = false;
-		}
-	}
+      if (!this.state.nextTrack) {
+        this.state.nextTrack = await this.queue.peekNextTrack();
+      }
+    } catch (error) {
+      this.logError(`Error in playOrQueueTrack: ${(error as Error).message}`);
+    }
+  }
 
-	async playTrack(track: Track | null): Promise<boolean> {
-		if (!track || this.isDestroyed) return false;
+  async skip(): Promise<void> {
+    if (this.isDestroyed || this.skipInProgress) return;
 
-		try {
-			this.bot?.logger?.debug?.(`[PlayerService] Playing: ${track.info}`);
-			this.connectionManager.resetIdleTimeout();
+    this.skipInProgress = true;
+    try {
+      this.logDebug("Skipping track");
+      await this.performFadeOutAndStop();
+    } catch (error) {
+      this.logError(`Error in skip: ${(error as Error).message}`);
+    } finally {
+      this.skipInProgress = false;
+    }
+  }
 
-			const trackUrl = await this.trackManager.getTrackUrl(
-				track.trackId,
-				track.source,
-			);
+  async playTrack(track: Track | null): Promise<boolean> {
+    if (!track || this.isDestroyed) return false;
 
-			if (!trackUrl) {
-				this.bot?.logger?.warn?.("[PlayerService] No track URL found");
-				return await this.playNextOrRecommendations();
-			}
+    try {
+      this.logDebug(`Playing: ${track.info}`);
+      this.connectionManager.resetIdleTimeout();
 
-			const streamResult =
-				await this.audioService.createAudioStreamForDiscord(trackUrl);
-			const { stream, type } = streamResult;
-			const resource = createAudioResource(stream, { inputType: type });
+      const trackUrl = await this.trackManager.getTrackUrl(track.trackId, track.source);
 
-			this.state.currentTrack = track;
-			if (!track.generation) {
-				this.bot.queueService?.setLastTrack?.(this.guildId, track);
-			}
+      if (!trackUrl) {
+        this.deps.logger?.warn?.("[PlayerService] No track URL found");
+        return await this.playNextOrRecommendations();
+      }
 
-			this.player.play(resource);
-			await this.effects.fadeIn(this.state.volume);
+      const streamResult = await this.audioService.createAudioStreamForDiscord(trackUrl);
+      const { stream, type } = streamResult;
+      const nodeStream = Readable.fromWeb(stream as any);
+      const resource = createAudioResource(nodeStream, { inputType: type });
 
-			const durationMs =
-				track.durationMs ?? (await this.trackManager.getDuration(trackUrl));
-			const scheduledForTrackId = track.trackId;
+      this.state.currentTrack = track;
+      if (!track.generation) {
+        this.deps.queueService?.setLastTrack?.(this.guildId, track);
+      }
 
-			this.fadeOutTimer = await this.effects.scheduleFadeOut(
-				durationMs,
-				async () => {
-					if (this.state.currentTrack?.trackId === scheduledForTrackId) {
-						await this.effects.setVolume(0, 2000, false);
-					}
-				},
-			);
+      this.player.play(resource);
+      await this.effects.fadeIn(this.state.volume);
 
-			this.emit(PlayerServiceEvents.TRACK_STARTED, track);
-			return true;
-		} catch (error) {
-			this.bot?.logger?.error?.(
-				`[PlayerService] Error playing track: ${(error as Error).message}`,
-			);
-			return await this.playNextOrRecommendations();
-		}
-	}
+      const durationMs = track.durationMs ?? (await this.trackManager.getDuration(trackUrl));
+      const scheduledForTrackId = track.trackId;
 
-	async togglePause(): Promise<void> {
-		if (!this.state.connection || this.isDestroyed) return;
+      this.fadeOutTimer = await this.effects.scheduleFadeOut(durationMs, async () => {
+        if (this.state.currentTrack?.trackId === scheduledForTrackId) {
+          await this.effects.setVolume(0, 2000, false);
+        }
+      });
 
-		try {
-			const status = this.player.state.status;
-			switch (status) {
-				case AudioPlayerStatus.Playing:
-					this.player.pause();
-					break;
-				case AudioPlayerStatus.Paused:
-					this.player.unpause();
-					break;
-			}
-		} catch (error) {
-			this.bot?.logger?.error?.(
-				`[PlayerService] Error toggling pause: ${(error as Error).message}`,
-			);
-		}
-	}
+      this.emit(PlayerServiceEvents.TRACK_STARTED, track);
+      return true;
+    } catch (error) {
+      this.logError(`Error playing track: ${(error as Error).message}`);
+      return await this.playNextOrRecommendations();
+    }
+  }
 
-	private async handleTrackEnd(): Promise<void> {
-		if (this.isDestroyed) return;
+  async togglePause(): Promise<void> {
+    if (!this.state.connection || this.isDestroyed) return;
 
-		if (this.fadeOutTimer) {
-			clearTimeout(this.fadeOutTimer);
-			this.fadeOutTimer = null;
-		}
+    try {
+      const status = this.player.state.status;
+      switch (status) {
+        case AudioPlayerStatus.Playing:
+          this.player.pause();
+          break;
+        case AudioPlayerStatus.Paused:
+          this.player.unpause();
+          break;
+      }
+    } catch (error) {
+      this.logError(`Error toggling pause: ${(error as Error).message}`);
+    }
+  }
 
-		const prevTrack = this.state.currentTrack;
-		this.state.currentTrack = null;
-		this.state.isPlaying = false;
-		this.state.pause = false;
+  private async handleTrackEnd(): Promise<void> {
+    if (this.isDestroyed) return;
 
-		this.emit(PlayerServiceEvents.TRACK_ENDED, prevTrack);
-		await this.playNextOrRecommendations();
-	}
+    this.clearFadeTimer();
 
-	async joinChannel(interaction: CommandInteraction): Promise<void> {
-		if (this.isDestroyed) return;
+    const prevTrack = this.state.currentTrack;
+    this.state.currentTrack = null;
+    this.state.isPlaying = false;
+    this.state.pause = false;
 
-		try {
-			const connection = await this.connectionManager.joinChannel(interaction);
-			connection.subscribe(this.player);
-			this.bot?.logger?.debug?.("[PlayerService] Joined channel");
-		} catch (error) {
-			this.bot?.logger?.error?.(
-				`[PlayerService] Error joining channel: ${(error as Error).message}`,
-			);
-			throw error;
-		}
-	}
+    this.emit(PlayerServiceEvents.TRACK_ENDED, prevTrack);
+    await this.playNextOrRecommendations();
+  }
 
-	async destroy(): Promise<void> {
-		if (this.isDestroyed) return;
+  async joinChannel(interaction: CommandInteraction): Promise<void> {
+    if (this.isDestroyed) return;
 
-		try {
-			this.bot.logger?.debug?.("[PlayerService] Destroying");
-			this.isDestroyed = true;
+    try {
+      const connection = await this.connectionManager.joinChannel(interaction);
+      connection.subscribe(this.player);
+      this.logDebug("Joined channel");
+    } catch (error) {
+      this.logError(`Error joining channel: ${(error as Error).message}`);
+      throw error;
+    }
+  }
 
-			if (this.fadeOutTimer) {
-				clearTimeout(this.fadeOutTimer);
-				this.fadeOutTimer = null;
-			}
+  async destroy(): Promise<void> {
+    if (this.isDestroyed) return;
 
-			this.player.stop();
-			await this.audioService.destroy();
-			this.effects.destroy();
-			this.connectionManager.destroy();
-			this.trackManager.clearCache();
-			this.removeAllListeners();
-			this.resetState();
-		} catch (error) {
-			this.bot?.logger?.error?.(
-				`[PlayerService] Error destroying: ${(error as Error).message}`,
-			);
-		}
-	}
+    try {
+      this.logDebug("Destroying");
+      this.isDestroyed = true;
 
-	private async playNextOrRecommendations(): Promise<boolean> {
-		try {
-			const lastTrack = this.state.currentTrack;
-			await this.queue.playNextTrack(
-				lastTrack,
-				this.state.loop,
-				this.playTrack.bind(this),
-				() =>
-					this.queue.tryPlayRecommendations(
-						this.bot.queueService?.getLastTrack?.(this.guildId) ?? null,
-						this.playTrack.bind(this),
-					),
-			);
-			return false;
-		} catch (error) {
-			this.bot?.logger?.error?.(
-				`[PlayerService] Error in playNextOrRecommendations: ${(error as Error).message}`,
-			);
-			return false;
-		}
-	}
+      this.clearFadeTimer();
 
-	private resetState(): void {
-		this.state = this.getInitialState();
-	}
+      this.player.stop();
+      await this.audioService.destroy();
+      this.effects.destroy();
+      this.connectionManager.destroy();
+      this.trackManager.clearCache();
+      this.removeAllListeners();
+      this.resetState();
+    } catch (error) {
+      this.logError(`Error destroying: ${(error as Error).message}`);
+    }
+  }
 
-	private getInitialState(): PlayerState {
-		return {
-			connection: null,
-			isPlaying: false,
-			channelId: null,
-			volume: (config.volume?.default ?? 50) * 100,
-			currentTrack: null,
-			nextTrack: null,
-			lastUserTrack: null,
-			loop: false,
-			pause: false,
-			wave: false,
-			compressor: config.compressor?.default ?? false,
-			normalize: config.normalize?.default ?? false,
-			bass: config.equalizer?.bass_default ?? 0,
-		};
-	}
+  private async playNextOrRecommendations(): Promise<boolean> {
+    try {
+      const lastTrack = this.state.currentTrack;
+      await this.queue.playNextTrack(lastTrack, this.state.loop, this.playTrack.bind(this), () =>
+        this.queue.tryPlayRecommendations(
+          this.deps.queueService?.getLastTrack?.(this.guildId) ?? null,
+          this.playTrack.bind(this),
+        ),
+      );
+      return false;
+    } catch (error) {
+      this.logError(`Error in playNextOrRecommendations: ${(error as Error).message}`);
+      return false;
+    }
+  }
+
+  private resetState(): void {
+    this.state = this.getInitialState();
+  }
+
+  private getInitialState(): PlayerState {
+    return {
+      connection: null,
+      isPlaying: false,
+      channelId: null,
+      volume: (config.volume?.default ?? 50) * 100,
+      currentTrack: null,
+      nextTrack: null,
+      lastUserTrack: null,
+      loop: false,
+      pause: false,
+      wave: false,
+      compressor: config.compressor?.default ?? false,
+      normalize: config.normalize?.default ?? false,
+      bass: config.equalizer?.bass_default ?? 0,
+    };
+  }
 }
