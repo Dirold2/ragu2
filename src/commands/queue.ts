@@ -7,7 +7,8 @@ import {
 } from "discord.js";
 import { Discord, Slash } from "discordx";
 
-import { bot } from "../bot.js";
+import { getDeps, t } from "./commandDeps.js";
+import { getErrorMessage } from "../utils/error.js";
 
 interface Track {
   info: string;
@@ -38,24 +39,21 @@ export class QueueCommand {
 
   @Slash({
     name: "queue",
-    description: bot.locale.t("commands.queue.description"),
+    description: t("commands.queue.description"),
   })
   async queue(interaction: CommandInteraction): Promise<void> {
     try {
       await this.handleQueueCommand(interaction);
     } catch (error) {
-      bot.logger.error(
-        bot.locale.t("commands.queue.errors.unexpected", {
-          error: error instanceof Error ? error.message : String(error),
+      const { logger, commandService } = getDeps();
+      logger.error(
+        t("commands.queue.errors.unexpected", {
+          error: getErrorMessage(error),
         }),
       );
-      await bot.commandService.reply(
-        interaction,
-        "commands.queue.errors.unexpected",
-        {
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
+      await commandService.reply(interaction, "commands.queue.errors.unexpected", {
+        error: getErrorMessage(error),
+      });
     }
   }
 
@@ -73,21 +71,17 @@ export class QueueCommand {
     return state;
   }
 
-  private async handleQueueCommand(
-    interaction: CommandInteraction,
-  ): Promise<void> {
+  private async handleQueueCommand(interaction: CommandInteraction): Promise<void> {
+    const { commandService, queueService } = getDeps();
     const member = interaction.member;
     if (!(member instanceof GuildMember) || !member.voice.channelId) {
-      await bot.commandService.reply(
-        interaction,
-        "commands.queue.errors.not_in_channel",
-      );
+      await commandService.reply(interaction, "commands.queue.errors.not_in_channel");
       return;
     }
 
-    const queue = await bot.queueService.getQueue(interaction.guildId!);
+    const queue = await queueService.getQueue(interaction.guildId!);
     if (queue.tracks.length === 0) {
-      await bot.commandService.reply(interaction, "commands.queue.empty");
+      await commandService.reply(interaction, "commands.queue.empty");
       return;
     }
 
@@ -104,9 +98,7 @@ export class QueueCommand {
 
     if (
       state.pages.length > 1 &&
-      message.guild?.members.me?.permissions.has(
-        PermissionsBitField.Flags.ManageMessages,
-      )
+      message.guild?.members.me?.permissions.has(PermissionsBitField.Flags.ManageMessages)
     ) {
       await this.setupReactions(state, message, interaction);
     }
@@ -123,11 +115,12 @@ export class QueueCommand {
       }
       this.createReactionCollector(state, message, interaction);
     } catch (error) {
-      bot.logger.error(
-        bot.locale.t(
+      const { logger } = getDeps();
+      logger.error(
+        t(
           "commands.queue.errors.unexpected",
           {
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
           },
           interaction.guild?.preferredLocale || "en",
         ),
@@ -195,7 +188,7 @@ export class QueueCommand {
         if (
           error instanceof Error &&
           error.message.includes(
-            bot.locale.t(
+            t(
               "commands.queue.errors.unknown",
               undefined,
               interaction.guild?.preferredLocale || "en",
@@ -205,11 +198,12 @@ export class QueueCommand {
           state.message = null;
           collector.stop();
         } else {
-          bot.logger.error(
-            bot.locale.t(
+          const { logger } = getDeps();
+          logger.error(
+            t(
               "commands.queue.errors.unexpected",
               {
-                error: error instanceof Error ? error.message : String(error),
+                error: getErrorMessage(error),
               },
               interaction.guild?.preferredLocale || "en",
             ),
@@ -236,7 +230,7 @@ export class QueueCommand {
 
   private createPageMessage(state: QueueState): string {
     return state.pages.length > 1
-      ? bot.locale.t("commands.queue.pages", {
+      ? t("commands.queue.pages", {
           current: state.currentPage + 1,
           total: state.pages.length,
         })

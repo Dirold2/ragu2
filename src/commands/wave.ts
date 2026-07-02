@@ -2,6 +2,7 @@ import { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
+import { getErrorMessage } from "../utils/error.js";
 
 @Discord()
 export class WaveCommand {
@@ -28,11 +29,11 @@ export class WaveCommand {
     } catch (error) {
       logger.error(
         getDeps().t("commands.wave.errors.playback", {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         }),
       );
       return await commandService.reply(interaction, "commands.wave.errors.playback", {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

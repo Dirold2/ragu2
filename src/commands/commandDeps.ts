@@ -1,5 +1,10 @@
 import type { Logger } from "dlog2";
-import type { PlayerManager, CommandService, CacheQueueService, NameService } from "../services/index.js";
+import type {
+  PlayerManager,
+  CommandService,
+  CacheQueueService,
+  NameService,
+} from "../services/index.js";
 
 export interface CommandDeps {
   playerManager: PlayerManager;
@@ -18,7 +23,9 @@ export function setCommandDeps(deps: CommandDeps): void {
 
 export function getDeps(): CommandDeps {
   if (!currentDeps) {
-    throw new Error("CommandDeps not initialized – call setCommandDeps() before importing commands");
+    throw new Error(
+      "CommandDeps not initialized – call setCommandDeps() before importing commands",
+    );
   }
   return currentDeps;
 }

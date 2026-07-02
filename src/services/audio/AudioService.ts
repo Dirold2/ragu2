@@ -8,16 +8,15 @@ import {
   DEFAULT_COMPRESSOR,
   DEFAULT_NORMALIZE,
 } from "../../utils/constants.js";
+import { Mutex } from "../../utils/mutex.js";
 import EventEmitter from "events";
 
 export class AudioService extends EventEmitter {
   private ffmpeg!: FluentStream;
   private currentOptions: Required<AudioProcessingOptions>;
   private _fadeInterval?: NodeJS.Timeout;
-  private pipelineReady: boolean = false;
   private currentProcess?: { stop: () => void; done: Promise<void> };
-  private _isCreating: boolean = false;
-  private _isStopping: boolean = false;
+  private mutex = new Mutex();
 
   constructor(options: Partial<AudioProcessingOptions> = {}) {
     super();
@@ -35,7 +34,7 @@ export class AudioService extends EventEmitter {
     this.ffmpeg = new FluentStream({
       useAudioProcessor: true,
       disableThrottling: true,
-      verbose: true,
+      verbose: process.env.LOG_LEVEL === "debug" ? true : false,
     });
 
     this.ffmpeg.volume = this.currentOptions.volume;
@@ -44,31 +43,16 @@ export class AudioService extends EventEmitter {
     this.ffmpeg.compressor = this.currentOptions.compressor;
   }
 
-  /**
-   * Create PCM-RAW stream for Discord with minimal latency
-   * Создаёт поток PCM-RAW для проигрывания в Discord с минимальной задержкой
-   */
   async createAudioStreamForDiscord(
     url: string,
     options?: Partial<AudioProcessingOptions>,
   ): Promise<{ stream: ReadableStream<Uint8Array>; type: StreamType }> {
-    if (options) Object.assign(this.currentOptions, options);
-
-    while (this._isCreating || this._isStopping) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    this._isCreating = true;
+    const release = await this.mutex.acquire();
     try {
+      if (options) Object.assign(this.currentOptions, options);
+
       await this.destroy();
-
-      this.pipelineReady = false;
       this.ffmpeg.clear();
-
-      this.ffmpeg.volume = this.currentOptions.volume;
-      this.ffmpeg.bass = this.currentOptions.bass;
-      this.ffmpeg.treble = this.currentOptions.treble;
-      this.ffmpeg.compressor = this.currentOptions.compressor;
 
       this.ffmpeg
         .inputOptions(
@@ -85,8 +69,6 @@ export class AudioService extends EventEmitter {
           "5",
           "-reconnect_at_eof",
           "1",
-          "-headers",
-          "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36\r\nReferer: https://music.yandex.ru/\r\n",
           "-probesize",
           "1024k",
           "-analyzeduration",
@@ -108,59 +90,40 @@ export class AudioService extends EventEmitter {
         .output({ pipe: "pipe:1" });
 
       const { output, done, stop } = await this.ffmpeg.run();
-
       this.currentProcess = { stop, done };
 
-      done
-        .catch((err: Error) => {
-          if (!this._isStopping) {
-            this.emit("error", err);
-          }
-        })
-        .finally(() => {
-          this.pipelineReady = false;
-        });
+      done.catch((err: Error) => {
+        this.emit("error", err);
+      });
 
-      this.pipelineReady = true;
       this.emit(
         "debug",
         `[AudioService] Stream created successfully for: ${url}`,
       );
-
       return { stream: output, type: StreamType.Raw };
     } finally {
-      this._isCreating = false;
+      release();
     }
   }
 
   async stop(): Promise<void> {
-    if (this._isStopping) {
-      return;
-    }
-
-    while (this._isCreating) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    this._isStopping = true;
+    const release = await this.mutex.acquire();
     try {
       if (this.currentProcess) {
         this.currentProcess.stop();
-
         await Promise.race([
           this.currentProcess.done,
           new Promise((resolve) => setTimeout(resolve, 2000)),
         ]).catch(() => {
           //
         });
-
         this.currentProcess = undefined;
       }
 
       await this.destroy();
       await new Promise((resolve) => setTimeout(resolve, 100));
     } finally {
-      this._isStopping = false;
+      release();
     }
   }
 
@@ -235,18 +198,15 @@ export class AudioService extends EventEmitter {
 
   setNormalize(enabled: boolean): void {
     this.currentOptions.normalize = enabled;
-    this.emit("normalizeChanged", enabled);
-  }
-
-  async fadeIn(duration = 2000): Promise<void> {
-    if (!this.pipelineReady) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      if (!this.pipelineReady) return;
+    const changed = this.ffmpeg.changeNormalize(enabled);
+    if (!changed) {
+      this.emit(
+        "debug",
+        `[AudioService] Normalize will be applied on next track: ${enabled}`,
+      );
     }
 
-    setTimeout(() => {
-      this.emit("volumeChanged", this.currentOptions.volume * 100);
-    }, duration);
+    this.emit("normalizeChanged", enabled);
   }
 
   async destroy(): Promise<void> {
@@ -255,8 +215,6 @@ export class AudioService extends EventEmitter {
         clearInterval(this._fadeInterval);
         this._fadeInterval = undefined;
       }
-
-      this.pipelineReady = false;
 
       if (this.currentProcess) {
         this.currentProcess.stop();

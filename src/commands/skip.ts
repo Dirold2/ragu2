@@ -2,6 +2,7 @@ import { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
+import { getErrorMessage } from "../utils/error.js";
 
 @Discord()
 export class SkipCommand {
@@ -21,11 +22,11 @@ export class SkipCommand {
     } catch (error) {
       logger.error(
         getDeps().t("commands.skip.errors.playback", {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         }),
       );
       await commandService.reply(interaction, "commands.skip.errors.playback", {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

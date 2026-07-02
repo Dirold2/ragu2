@@ -1,5 +1,6 @@
 import { createLogger } from "dlog2";
 import { loadTranslation } from "./localeCache.js";
+import { getErrorMessage } from "./error.js";
 
 const logger = createLogger("locale");
 
@@ -78,7 +79,7 @@ export function createLocale<TTranslations = Record<string, unknown>>(
         }
       } catch (error) {
         logger.error(
-          `Failed to load ${language} translations for ${moduleName}: ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to load ${language} translations for ${moduleName}: ${getErrorMessage(error)}`,
         );
         if (language !== defaultLanguage) {
           await load(defaultLanguage);

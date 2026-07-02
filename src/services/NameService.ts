@@ -4,6 +4,7 @@ import type { Logger } from "dlog2";
 import { PluginNotFoundError, UserNotInVoiceChannelError } from "../errors/index.js";
 import type { MusicServicePlugin } from "../interfaces/index.js";
 import { trackPlayCounter } from "../utils/index.js";
+import { getErrorMessage } from "../utils/error.js";
 import {
   type CacheQueueService,
   type CommandService,
@@ -13,7 +14,7 @@ import {
   type Track,
 } from "./index.js";
 
-const TrackUrlSchema = z.string().url();
+const TrackUrlSchema = z.url();
 
 type LocaleT = (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;
 
@@ -26,10 +27,6 @@ export default class NameService {
     private readonly logger: Logger,
     private readonly localeT: LocaleT,
   ) {}
-
-  private getErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-  }
 
   private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
     return Promise.race([
@@ -129,11 +126,11 @@ export default class NameService {
     } catch (error) {
       this.logger.error(
         this.localeT("messages.nameService.errors.track_processing", {
-          error: this.getErrorMessage(error),
+          error: getErrorMessage(error),
         }),
       );
       await this.commandService.reply(interaction, "messages.nameService.errors.track_processing", {
-        error: this.getErrorMessage(error),
+        error: getErrorMessage(error),
       });
     }
   }
@@ -229,7 +226,7 @@ export default class NameService {
       this.logger.warn(
         this.localeT("messages.nameService.errors.search_error", {
           plugin: plugin.name,
-          error: this.getErrorMessage(error),
+          error: getErrorMessage(error),
         }),
       );
       return [];
@@ -253,7 +250,7 @@ export default class NameService {
       this.logger.warn(
         this.localeT("messages.nameService.errors.url_processing", {
           plugin: plugin.name,
-          error: this.getErrorMessage(error),
+          error: getErrorMessage(error),
         }),
       );
       return [];
@@ -395,7 +392,7 @@ export default class NameService {
   private async handleError(error: unknown): Promise<void> {
     this.logger.error(
       this.localeT("messages.nameService.errors.track_processing", {
-        error: this.getErrorMessage(error),
+        error: getErrorMessage(error),
       }),
     );
   }

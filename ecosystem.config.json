@@ -1,7 +1,7 @@
 [
   {
     "name": "ragu2",
-    "script": "./build/main.js",
+    "script": "./dist/main.js",
     "cwd": "./",
     "env": {
       "NODE_ENV": "production"

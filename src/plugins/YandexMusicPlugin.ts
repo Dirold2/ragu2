@@ -1,6 +1,5 @@
 import retry from "async-retry";
 import { Discord } from "discordx";
-import { LRUCache } from "lru-cache";
 import { URL } from "url";
 import { Types, WrappedYMApi, YMApi } from "yamd2";
 import type { MusicServicePlugin, PlaylistTrack } from "../interfaces/index.js";
@@ -10,7 +9,11 @@ import {
   type SearchTrackResult,
   TrackResultSchema,
 } from "../types/index.js";
+import { CacheManager } from "hcacher";
+import { getErrorMessage } from "../utils/error.js";
 import { bot } from "../bot.js";
+import { Mutex } from "../utils/mutex.js";
+import createLogger from "dlog2";
 
 export interface TrackYandex {
   id: number | string;
@@ -20,10 +23,6 @@ export interface TrackYandex {
   durationMs: number | undefined;
   coverUri: string | undefined;
 }
-
-// ============================================
-// Constants
-// ============================================
 
 const CACHE_TTL = 600 * 1000;
 const CACHE_CHECK_PERIOD = 120 * 1000;
@@ -37,10 +36,6 @@ const RETRY_CONFIG = {
   maxTimeout: 5000,
 } as const;
 
-// ============================================
-// URL Patterns
-// ============================================
-
 const URL_PATTERNS = {
   track: /\/album\/\d+\/track\/(\d+)/,
   trackRoot: /\/track\/(\d+)/,
@@ -49,98 +44,31 @@ const URL_PATTERNS = {
   album: /\/album\/(\d+)(\?.*)?$/,
 } as const;
 
-// ============================================
-// Helper Classes
-// ============================================
-
-/** Simple mutex for preventing parallel initialization */
-class Mutex {
-  private locked = false;
-  private waiters: (() => void)[] = [];
-
-  acquire(): Promise<() => void> {
-    if (!this.locked) {
-      this.locked = true;
-      return Promise.resolve(() => this.release());
-    }
-    return new Promise((resolve) => {
-      this.waiters.push(() => {
-        this.locked = true;
-        resolve(() => this.release());
-      });
-    });
-  }
-
-  private release(): void {
-    const next = this.waiters.shift();
-    if (next) next();
-    else this.locked = false;
-  }
+function useCache(): boolean {
+  const env = process.env.USE_CACHE?.toLowerCase();
+  return env === "true" || env === undefined;
 }
 
-/** Cache wrapper with conditional enabling */
-class CacheWrapper<T extends {} = any> {
-  private cache: LRUCache<string, T> | null = null;
-  private readonly useCache: boolean;
-
-  constructor(options?: Partial<LRUCache.Options<string, T, unknown>>) {
-    const env = process.env.USE_CACHE?.toLowerCase();
-    this.useCache = env === "true" || env === undefined;
-
-    if (this.useCache) {
-      this.cache = new LRUCache({
-        max: CACHE_MAX_SIZE,
-        ttl: CACHE_TTL,
-        ...options,
-      });
-    }
-  }
-
-  get(key: string): T | undefined {
-    if (!this.useCache || !this.cache) return undefined;
-    return this.cache.get(key);
-  }
-
-  set(key: string, value: T, ttl?: number): boolean {
-    if (!this.useCache || !this.cache) return false;
-    this.cache.set(key, value, { ttl });
-    return true;
-  }
-
-  clear(): void {
-    if (this.useCache && this.cache) {
-      this.cache.clear();
-    }
-  }
-
-  getStats(): { size: number } {
-    if (this.useCache && this.cache) {
-      return { size: this.cache.size };
-    }
-    return { size: 0 };
-  }
-}
-
-/** Radio session manager */
 class RadioSessionManager {
+  public logger = createLogger(`RadioSession`);
   private sessions = new Map<string, string>();
   private batchIds = new Map<string, string>();
   private trackIds = new Map<string, string[]>();
   private playedTracks = new Map<string, Set<string>>();
   private sessionPromises = new Map<string, Promise<string | null>>();
 
-  async getOrCreateSession(trackId: string, api: YMApi): Promise<string | null> {
-    // Return existing session
+  async getOrCreateSession(
+    trackId: string,
+    api: YMApi,
+  ): Promise<string | null> {
     if (this.sessions.has(trackId)) {
       return this.sessions.get(trackId)!;
     }
 
-    // Wait for in-progress session creation
     if (this.sessionPromises.has(trackId)) {
       return this.sessionPromises.get(trackId)!;
     }
 
-    // Create new session
     const promise = api.radio
       .createRotorSession([`track:${trackId}`], false)
       .then((session: Types.RotorSessionCreateResponse) => {
@@ -150,7 +78,7 @@ class RadioSessionManager {
         return session.radioSessionId;
       })
       .catch((err: Error) => {
-        bot.logger.warn(`[Yandex] Failed to create rotor session: ${err}`, {
+        this.logger.warn(`[Yandex] Failed to create rotor session: ${err}`, {
           module: "Yandex",
         });
         return null;
@@ -204,34 +132,34 @@ class RadioSessionManager {
   }
 }
 
-// ============================================
-// Main Plugin Class
-// ============================================
-
 @Discord()
 export default class YandexMusicPlugin implements MusicServicePlugin {
   name = "yandex";
   urlPatterns = [/music\.yandex\./];
 
+  public logger = createLogger(this.name);
   private results: SearchTrackResult[] = [];
   private wrapper = new WrappedYMApi();
   private api = new YMApi();
-  private cache: CacheWrapper<SearchTrackResult[]>;
+  private cache: CacheManager<SearchTrackResult[]>;
   private initialized = false;
   private initMutex = new Mutex();
   private cacheCleanupInterval: NodeJS.Timeout | null = null;
   private radioManager = new RadioSessionManager();
   private recommendationsCache = new Map<string, SearchTrackResult[]>();
-  private recommendationsPromises = new Map<string, Promise<SearchTrackResult[]>>();
+  private recommendationsPromises = new Map<
+    string,
+    Promise<SearchTrackResult[]>
+  >();
 
   constructor() {
-    this.cache = new CacheWrapper({ max: CACHE_MAX_SIZE, ttl: CACHE_TTL });
+    this.cache = new CacheManager<SearchTrackResult[]>({
+      enabled: useCache(),
+      maxSize: CACHE_MAX_SIZE,
+      ttl: CACHE_TTL,
+    });
     this.startCacheCleanup();
   }
-
-  // ============================================
-  // Public API
-  // ============================================
 
   async initialize(): Promise<void> {
     await this.ensureInitialized();
@@ -276,7 +204,6 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
         return [];
       }
 
-      // Check patterns in order of specificity
       if (URL_PATTERNS.album.test(parsedUrl.pathname)) {
         const albumId = this.extractId(parsedUrl, URL_PATTERNS.album);
         return albumId ? await this.getAlbumTracks(albumId) : [];
@@ -297,7 +224,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
       }
 
       if (URL_PATTERNS.trackRoot.test(parsedUrl.pathname)) {
-        return await this.processTrackFromUrl(parsedUrl, URL_PATTERNS.trackRoot);
+        return await this.processTrackFromUrl(
+          parsedUrl,
+          URL_PATTERNS.trackRoot,
+        );
       }
 
       if (URL_PATTERNS.track.test(parsedUrl.pathname)) {
@@ -306,7 +236,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
       return [];
     } catch (error) {
-      bot.logger.error(
+      this.logger.error(
         bot.locale.t("plugins.yandex.errors.url_processing", {
           plugin: this.name,
           error: (error as Error).message,
@@ -316,18 +246,26 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     }
   }
 
+  getApiHeaders(_url: string): Record<string, string> {
+    return {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      Referer: "https://music.yandex.ru/",
+    };
+  }
+
   async getTrackUrl(trackId: string): Promise<string | null> {
     await this.ensureInitialized();
 
     if (!trackId) {
-      bot.logger.error("YandexMusicPlugin: trackId is empty");
+      this.logger.error("YandexMusicPlugin: trackId is empty");
       return null;
     }
 
     try {
       return await this.fetchTrackUrl(trackId);
     } catch (error) {
-      bot.logger.error(
+      this.logger.error(
         `${bot.locale.t("plugins.yandex.errors.get_track_url", {
           trackId,
           error: (error as Error).message,
@@ -340,11 +278,13 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
   async getRecommendations(trackId: string): Promise<SearchTrackResult[]> {
     await this.ensureInitialized();
 
-    // Return existing promise if in progress
     if (this.recommendationsPromises.has(trackId)) {
-      bot.logger.debug(`[Yandex] Waiting for in-progress recommendations for track:${trackId}`, {
-        module: "Yandex",
-      });
+      this.logger.debug(
+        `[Yandex] Waiting for in-progress recommendations for track:${trackId}`,
+        {
+          module: "Yandex",
+        },
+      );
       return this.recommendationsPromises.get(trackId)!;
     }
 
@@ -354,7 +294,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     return promise;
   }
 
-  async getPlaylistTracks(playlistId: string, user?: string): Promise<SearchTrackResult[]> {
+  async getPlaylistTracks(
+    playlistId: string,
+    user?: string,
+  ): Promise<SearchTrackResult[]> {
     await this.ensureInitialized();
 
     try {
@@ -367,17 +310,21 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
         : await this.api.playlists.getPlaylist(playlistId);
 
       if (!playlistInfo?.tracks) {
-        bot.logger.warn(bot.locale.t("plugins.yandex.errors.playlist.not_found"));
+        this.logger.warn(
+          bot.locale.t("plugins.yandex.errors.playlist.not_found"),
+        );
         return [];
       }
 
-      const results = this.processTrackList(playlistInfo.tracks as PlaylistTrack[]);
+      const results = this.processTrackList(
+        playlistInfo.tracks as PlaylistTrack[],
+      );
       this.cache.set(cacheKey, results);
 
       return results;
     } catch (error) {
-      bot.logger.error(
-        `${bot.locale.t("plugins.yandex.errors.playlist.processing")}: ${error instanceof Error ? error.message : String(error)}`,
+      this.logger.error(
+        `${bot.locale.t("plugins.yandex.errors.playlist.processing")}: ${getErrorMessage(error)}`,
       );
       return [];
     }
@@ -391,14 +338,16 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
       const cachedResults = this.cache.get(cacheKey);
       if (cachedResults) return cachedResults;
 
-      const albumInfo = await this.api.albums.getAlbumWithTracks(Number(albumId));
+      const albumInfo = await this.api.albums.getAlbumWithTracks(
+        Number(albumId),
+      );
       const results = this.processTrackList(albumInfo.volumes.flat());
 
       this.cache.set(cacheKey, results);
       return results;
     } catch (error) {
-      bot.logger.error(
-        `${bot.locale.t("plugins.yandex.errors.track.processing")}: ${error instanceof Error ? error.message : String(error)}`,
+      this.logger.error(
+        `${bot.locale.t("plugins.yandex.errors.track.processing")}: ${getErrorMessage(error)}`,
       );
       return [];
     }
@@ -411,7 +360,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
   resetRadioSession(): void {
     this.radioManager.resetAll();
-    bot.logger.info(`[Yandex] Radio sessions reset`, { module: "Yandex" });
+    this.logger.info(`[Yandex] Radio sessions reset`, { module: "Yandex" });
   }
 
   async destroy(): Promise<void> {
@@ -425,13 +374,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     }
   }
 
-  // ============================================
-  // Private Methods
-  // ============================================
-
   private isYandexMusicUrl(parsedUrl: URL): boolean {
     return (
-      parsedUrl.hostname.endsWith("music.yandex.ru") || parsedUrl.hostname.includes("music.yandex")
+      parsedUrl.hostname.endsWith("music.yandex.ru") ||
+      parsedUrl.hostname.includes("music.yandex")
     );
   }
 
@@ -451,7 +397,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     }
   }
 
-  private async fetchRecommendations(trackId: string): Promise<SearchTrackResult[]> {
+  private async fetchRecommendations(
+    trackId: string,
+  ): Promise<SearchTrackResult[]> {
     try {
       const results = await this.fetchStationTracks(trackId, true);
 
@@ -461,7 +409,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
       return results;
     } catch (e) {
-      bot.logger.warn(
+      this.logger.warn(
         `[Yandex] Error fetching recommendations for trackId:${trackId}: ${e instanceof Error ? e.message : String(e)}`,
       );
       this.radioManager.reset(trackId);
@@ -471,11 +419,17 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     }
   }
 
-  private async fetchStationTracks(trackId: string, retry: boolean): Promise<SearchTrackResult[]> {
-    const sessionId = await this.radioManager.getOrCreateSession(trackId, this.api);
+  private async fetchStationTracks(
+    trackId: string,
+    retry: boolean,
+  ): Promise<SearchTrackResult[]> {
+    const sessionId = await this.radioManager.getOrCreateSession(
+      trackId,
+      this.api,
+    );
 
     if (!sessionId) {
-      bot.logger.warn(`[Yandex] No valid sessionId for track:${trackId}`, {
+      this.logger.warn(`[Yandex] No valid sessionId for track:${trackId}`, {
         module: "Yandex",
       });
       return [];
@@ -490,7 +444,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
       return this.processStationTracks(trackId, st.sequence ?? []);
     } catch (err: any) {
       if (retry && err?.response?.status === 400) {
-        bot.logger.warn(
+        this.logger.warn(
           `[Yandex] sessionId=${sessionId} invalid, regenerating for track:${trackId}`,
           { module: "Yandex" },
         );
@@ -501,7 +455,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     }
   }
 
-  private processStationTracks(trackId: string, sequence: any[]): SearchTrackResult[] {
+  private processStationTracks(
+    trackId: string,
+    sequence: any[],
+  ): SearchTrackResult[] {
     const collected: SearchTrackResult[] = [];
 
     for (const item of sequence) {
@@ -522,10 +479,13 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
       if (result) {
         collected.push(result);
-        this.radioManager.markAsPlayed(trackId, `${trackIdStr}:${trackAlbumIdStr}`);
+        this.radioManager.markAsPlayed(
+          trackId,
+          `${trackIdStr}:${trackAlbumIdStr}`,
+        );
         this.radioManager.addToQueue(trackId, `${result.id}:${result.id}`);
 
-        bot.logger.debug(`[Yandex] Added track: ${trackIdStr} - ${t.title}`, {
+        this.logger.debug(`[Yandex] Added track: ${trackIdStr} - ${t.title}`, {
           module: "Yandex",
         });
       }
@@ -536,7 +496,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     return collected;
   }
 
-  private processTrackList(tracks: (PlaylistTrack | TrackYandex)[]): SearchTrackResult[] {
+  private processTrackList(
+    tracks: (PlaylistTrack | TrackYandex)[],
+  ): SearchTrackResult[] {
     return tracks
       .map((track) => {
         const t = "track" in track ? track.track : track;
@@ -553,7 +515,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
       .filter((t): t is SearchTrackResult => t !== null);
   }
 
-  private async processTrackFromUrl(parsedUrl: URL, pattern: RegExp): Promise<SearchTrackResult[]> {
+  private async processTrackFromUrl(
+    parsedUrl: URL,
+    pattern: RegExp,
+  ): Promise<SearchTrackResult[]> {
     const trackId = this.extractId(parsedUrl, pattern);
     if (!trackId) return [];
 
@@ -573,8 +538,8 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
       const validated = this.validateTrackResult(formatted);
       return validated ? [validated] : [];
     } catch (error) {
-      bot.logger.error(
-        `Error processing track ${trackId}: ${error instanceof Error ? error.message : String(error)}`,
+      this.logger.error(
+        `Error processing track ${trackId}: ${getErrorMessage(error)}`,
       );
       return [];
     }
@@ -585,7 +550,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     return match?.[1] ?? null;
   }
 
-  private formatTrackInfo(trackInfo: TrackYandex, generation = false): SearchTrackResult {
+  private formatTrackInfo(
+    trackInfo: TrackYandex,
+    generation = false,
+  ): SearchTrackResult {
     return {
       id: trackInfo.id.toString(),
       title: trackInfo.title,
@@ -598,11 +566,13 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     };
   }
 
-  private validateTrackResult(searchResult: SearchTrackResult): SearchTrackResult | null {
+  private validateTrackResult(
+    searchResult: SearchTrackResult,
+  ): SearchTrackResult | null {
     const validation = TrackResultSchema.safeParse(searchResult);
 
     if (!validation.success) {
-      bot.logger.warn(
+      this.logger.warn(
         bot.locale.t("plugins.yandex.errors.track.invalid_data", {
           error: JSON.stringify(validation.error),
         }),
@@ -620,18 +590,24 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     const password = process.env.YM_USER_PASSWORD;
 
     if (!access_token || isNaN(uid)) {
-      throw new Error(bot.locale.t("plugins.yandex.errors.plugin.missing_config"));
+      throw new Error(
+        bot.locale.t("plugins.yandex.errors.plugin.missing_config"),
+      );
     }
 
     const config: any =
-      username || password ? { access_token, uid, username, password } : { access_token, uid };
+      username || password
+        ? { access_token, uid, username, password }
+        : { access_token, uid };
 
     const validation = ConfigSchema.safeParse(config);
 
     if (!validation.success) {
       throw new Error(
         bot.locale.t("plugins.yandex.errors.plugin.invalid_config", {
-          errors: validation.error.issues.map((err: { message: string }) => err.message).join(", "),
+          errors: validation.error.issues
+            .map((err: { message: string }) => err.message)
+            .join(", "),
         }),
       );
     }
@@ -650,10 +626,12 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
       await Promise.all([this.wrapper.init(config), this.api.init(config)]);
       this.initialized = true;
     } catch (error) {
-      bot.logger.error(
-        `${bot.locale.t("plugins.yandex.errors.error_initializing_service")}: ${error instanceof Error ? error.message : String(error)}`,
+      this.logger.error(
+        `${bot.locale.t("plugins.yandex.errors.error_initializing_service")}: ${getErrorMessage(error)}`,
       );
-      throw new Error(bot.locale.t("plugins.yandex.errors.failed_to_initialize"));
+      throw new Error(
+        bot.locale.t("plugins.yandex.errors.failed_to_initialize"),
+      );
     } finally {
       release();
     }
@@ -667,7 +645,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
       const result = await retry(() => this.api.search.tracks(trackName), {
         retries: RETRY_CONFIG.retries,
         onRetry: (error: Error) =>
-          bot.logger.warn(
+          this.logger.warn(
             `${bot.locale.t("plugins.yandex.errors.retrying_search", {
               trackName,
             })}: ${error.message}`,
@@ -685,10 +663,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
 
       return validatedTracks;
     } catch (error) {
-      bot.logger.warn(
+      this.logger.warn(
         bot.locale.t("plugins.yandex.errors.track.search", {
           query: trackName,
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         }),
       );
       return [];
@@ -696,14 +674,10 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
   }
 
   private startCacheCleanup(): void {
-    const env = process.env.USE_CACHE?.toLowerCase();
-    const useCache = env === "true" || env === undefined;
-
-    if (!useCache) return;
+    if (!useCache()) return;
 
     this.cacheCleanupInterval = setInterval(() => {
-      const stats = this.cache.getStats();
-      if (stats.size > CACHE_CLEANUP_THRESHOLD) {
+      if (this.cache.size > CACHE_CLEANUP_THRESHOLD) {
         this.cache.clear();
       }
     }, CACHE_CHECK_PERIOD);

@@ -4,6 +4,7 @@ import { resolve } from "@discordx/importer";
 import { dirname } from "dirname-filename-esm";
 import { bot } from "./bot.js";
 import { setCommandDeps } from "./commands/commandDeps.js";
+import { getErrorMessage } from "./utils/error.js";
 import { config } from "@dotenvx/dotenvx";
 import { resolve as r } from "path";
 
@@ -40,14 +41,10 @@ async function loadFiles(src: string): Promise<void> {
 
     const files = await resolve(src);
     await Promise.all(
-      files.map((file) =>
-        import(file).catch((error) =>
-          bot.logger.error(error instanceof Error ? error.message : String(error)),
-        ),
-      ),
+      files.map((file) => import(file).catch((error) => bot.logger.error(getErrorMessage(error)))),
     );
   } catch (error) {
-    bot.logger.error(error instanceof Error ? error.message : String(error));
+    bot.logger.error(getErrorMessage(error));
   }
 }
 
@@ -65,7 +62,7 @@ async function reload(): Promise<void> {
     bot.removeEvents();
     bot.initEvents();
   } catch (error) {
-    bot.logger.error(error instanceof Error ? error.message : String(error));
+    bot.logger.error(getErrorMessage(error));
   }
 }
 
@@ -121,7 +118,7 @@ async function run(): Promise<void> {
         .on("unlink", debouncedReload());
     }
   } catch (error) {
-    bot.logger.error(error instanceof Error ? error.message : String(error));
+    bot.logger.error(getErrorMessage(error));
     process.exit(1);
   }
 }

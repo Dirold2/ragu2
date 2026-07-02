@@ -21,6 +21,7 @@ Discord music bot with Yandex Music integration, audio processing, and localizat
 | Platform | Status |
 |----------|--------|
 | Yandex Music | ✅ |
+| Hitmo Music | ✅ |
 
 ## Installation
 
@@ -38,6 +39,7 @@ BOT_LOCALE="en"           # en / ru
 FFPROBE_PATH=""           # optional, path to ffprobe
 YM_USER_ID=""             # https://mail.yandex.ru/
 YM_API_KEY=""             # https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d
+HM_SESSION_COOKIE=""      # optional, Hitmo Music session cookie
 ```
 
 ## Usage
@@ -61,7 +63,7 @@ npm run pm2:start
 | `/pause` | Pause / resume |
 | `/skip` | Skip to next track |
 | `/volume <0–100>` | Set volume |
-| `/equalizer <bass> <treble> <compressor>` | Adjust audio |
+| `/eq <bass> <treble>` | Adjust equalizer (bass, treble) |
 | `/loop` | Toggle queue loop |
 | `/shuffle` | Shuffle queue |
 | `/queue` | Show queue |
@@ -85,7 +87,7 @@ src/
 
 ## Configuration
 
-`config.json` — volume limits, equalizer ranges, fade timing.
+`config.json` — audio settings (volume, equalizer, fade), playback start position.
 
 `ecosystem.config.json` — PM2 process settings.
 

@@ -1,7 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
+import { createLogger } from "dlog2";
 import { PathResolver } from "./pathResolver.js";
-import { bot } from "../bot.js";
+
+const logger = createLogger("localeCache");
 
 interface CachedTranslation {
   data: any;
@@ -108,7 +110,7 @@ export async function loadTranslation(moduleName: string, language: string): Pro
     await translationCache.set(moduleName, language, data);
 
     // Only log on first load, not from cache
-    bot.logger.debug(`Loaded translations for ${moduleName}:${language}`);
+    logger.debug(`Loaded translations for ${moduleName}:${language}`);
 
     return data;
   } catch {

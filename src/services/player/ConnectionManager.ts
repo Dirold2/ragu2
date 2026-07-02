@@ -14,7 +14,7 @@ import {
   type VoiceConnection,
   VoiceConnectionStatus,
 } from "@discordjs/voice";
-import { ms } from "humanize-ms";
+import ms from "ms";
 
 interface ClientSubset {
   user?: { id: string } | null;
@@ -45,12 +45,6 @@ export class ConnectionManager extends EventEmitter {
     super();
   }
 
-  private parseMs(value: string | number): number {
-    const result = ms(value);
-    if (typeof result !== "number") throw new Error(`Invalid time string: ${value}`);
-    return result;
-  }
-
   async joinChannel(interaction: CommandInteraction): Promise<VoiceConnection> {
     const member = interaction.member as GuildMember;
     const voiceChannelId = member.voice.channel?.id;
@@ -73,7 +67,10 @@ export class ConnectionManager extends EventEmitter {
       }
     }
 
-    this.connection = await this.establishConnection(voiceChannelId, interaction);
+    this.connection = await this.establishConnection(
+      voiceChannelId,
+      interaction,
+    );
     this.setupConnectionHandlers();
     this.startEmptyCheck();
     this.startIdleTimeout();
@@ -89,7 +86,8 @@ export class ConnectionManager extends EventEmitter {
     const connection = joinVoiceChannel({
       channelId,
       guildId: this.guildId,
-      adapterCreator: interaction.guild.voiceAdapterCreator as DiscordGatewayAdapterCreator,
+      adapterCreator: interaction.guild
+        .voiceAdapterCreator as DiscordGatewayAdapterCreator,
       selfDeaf: false,
       selfMute: false,
     });
@@ -102,7 +100,8 @@ export class ConnectionManager extends EventEmitter {
   private hasVoiceAccess(member: GuildMember): boolean {
     const voiceChannel = member.voice.channel;
     return Boolean(
-      voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) && voiceChannel.id,
+      voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) &&
+      voiceChannel.id,
     );
   }
 
@@ -137,7 +136,10 @@ export class ConnectionManager extends EventEmitter {
       this.forceCleanup();
     };
 
-    this.connection.on(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
+    this.connection.on(
+      VoiceConnectionStatus.Disconnected,
+      this.disconnectHandler,
+    );
     this.connection.on(VoiceConnectionStatus.Destroyed, destroyHandler);
 
     // FIX: Defensive checks to prevent accessing .state of null during recurring interval
@@ -172,7 +174,7 @@ export class ConnectionManager extends EventEmitter {
   private startEmptyCheck(): void {
     if (this.emptyChannelInterval) clearInterval(this.emptyChannelInterval);
 
-    this.emptyChannelInterval = setInterval(() => this.checkEmpty(), this.parseMs("30s"));
+    this.emptyChannelInterval = setInterval(() => this.checkEmpty(), ms("30s"));
   }
 
   private async checkEmpty(): Promise<void> {
@@ -186,14 +188,16 @@ export class ConnectionManager extends EventEmitter {
     }
 
     const userId = this.client.user?.id;
-    const membersCount = channel.members.filter((m) => !m.user.bot && m.id !== userId).size;
+    const membersCount = channel.members.filter(
+      (m) => !m.user.bot && m.id !== userId,
+    ).size;
 
     if (membersCount === 0) {
       if (!this.emptyChannelTimeout) {
         this.emptyChannelTimeout = setTimeout(() => {
           this.emit("empty");
           this.leaveChannel();
-        }, this.parseMs("30s"));
+        }, ms("30s"));
       }
     } else if (this.emptyChannelTimeout) {
       clearTimeout(this.emptyChannelTimeout);
@@ -205,9 +209,11 @@ export class ConnectionManager extends EventEmitter {
   startIdleTimeout(): void {
     if (this.idleTimeout) clearTimeout(this.idleTimeout);
     this.idleTimeout = setTimeout(() => {
-      this.logger.debug("[ConnectionManager] Idle for 10 minutes, leaving channel");
+      this.logger.debug(
+        "[ConnectionManager] Idle for 10 minutes, leaving channel",
+      );
       this.leaveChannel();
-    }, this.parseMs("10m"));
+    }, ms("10m"));
   }
 
   /** Сбрасываем таймер простоя (например, при начале нового трека) */
@@ -248,7 +254,10 @@ export class ConnectionManager extends EventEmitter {
 
   getConnection(): VoiceConnection | null {
     // Defensive: only access state if this.connection is not null
-    if (this.connection && this.connection.state?.status === VoiceConnectionStatus.Destroyed) {
+    if (
+      this.connection &&
+      this.connection.state?.status === VoiceConnectionStatus.Destroyed
+    ) {
       this.forceCleanup();
       return null;
     }
@@ -257,9 +266,15 @@ export class ConnectionManager extends EventEmitter {
 
   private forceCleanup(): void {
     if (this.connection && this.disconnectHandler) {
-      this.connection.off(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
+      this.connection.off(
+        VoiceConnectionStatus.Disconnected,
+        this.disconnectHandler,
+      );
       // Defensive: make sure handler is removed only if handler was attached at this key
-      this.connection.off(VoiceConnectionStatus.Destroyed, this.disconnectHandler);
+      this.connection.off(
+        VoiceConnectionStatus.Destroyed,
+        this.disconnectHandler,
+      );
     }
 
     this.disconnectHandler = null;

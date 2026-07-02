@@ -2,6 +2,7 @@ import { ApplicationCommandOptionType, CommandInteraction } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
+import { getErrorMessage } from "../utils/error.js";
 import config from "../../config.json" with { type: "json" };
 
 @Discord()
@@ -14,7 +15,7 @@ export class VolumeCommand {
     @SlashOption({
       name: "number",
       description: t("commands.volume.option_number", {
-        max: config.volume.max * 100,
+        max: config.audio.volume.range.max * 100,
       }),
       type: ApplicationCommandOptionType.Number,
       required: true,
@@ -23,10 +24,14 @@ export class VolumeCommand {
     interaction: CommandInteraction,
   ): Promise<void> {
     const { playerManager, commandService, logger } = getDeps();
-    if (volume < 0 || volume > config.volume.max * 100) {
-      return commandService.reply(interaction, "commands.volume.errors.error_max", {
-        maxVolume: config.volume.max * 100,
-      });
+    if (volume < 0 || volume > config.audio.volume.range.max * 100) {
+      return commandService.reply(
+        interaction,
+        "commands.volume.errors.error_max",
+        {
+          maxVolume: config.audio.volume.range.max * 100,
+        },
+      );
     }
 
     try {
@@ -37,12 +42,16 @@ export class VolumeCommand {
     } catch (error) {
       logger.error(
         getDeps().t("commands.volume.errors.playback", {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         }),
       );
-      await commandService.reply(interaction, "commands.volume.errors.playback", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      await commandService.reply(
+        interaction,
+        "commands.volume.errors.playback",
+        {
+          error: getErrorMessage(error),
+        },
+      );
     }
   }
 }

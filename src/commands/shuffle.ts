@@ -2,6 +2,7 @@ import { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
+import { getErrorMessage } from "../utils/error.js";
 
 @Discord()
 export class ShuffleCommand {
@@ -42,11 +43,11 @@ export class ShuffleCommand {
     } catch (error) {
       logger.error(
         getDeps().t("commands.shuffle.errors.playback", {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         }),
       );
       await commandService.reply(interaction, "commands.shuffle.errors.playback", {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

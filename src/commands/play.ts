@@ -4,7 +4,8 @@ import {
   type CommandInteraction,
 } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
-import { bot } from "../bot.js";
+import { getDeps, t } from "./commandDeps.js";
+import { getErrorMessage } from "../utils/error.js";
 
 @Discord()
 export class PlayCommand {
@@ -16,12 +17,12 @@ export class PlayCommand {
 
   @Slash({
     name: "play",
-    description: bot.locale.t("commands.play.description"),
+    description: t("commands.play.description"),
   })
   async play(
     @SlashOption({
       name: "track",
-      description: bot.locale.t("commands.play.option_track"),
+      description: t("commands.play.option_track"),
       type: ApplicationCommandOptionType.String,
       required: false,
       autocomplete: true,
@@ -55,15 +56,14 @@ export class PlayCommand {
       return;
     }
 
+    const { nameService, logger } = getDeps();
     try {
-      const results = await bot.nameService.searchName(query);
+      const results = await nameService.searchName(query);
       const choices = this.buildAutocompleteChoices(results, query);
 
       await this.safeRespond(interaction, choices);
     } catch (error) {
-      bot.logger.error(
-        `Autocomplete failed for "${query}": ${error instanceof Error ? error.message : String(error)}`,
-      );
+      logger.error(`Autocomplete failed for "${query}": ${getErrorMessage(error)}`);
       await this.safeRespond(interaction, []);
     }
   }
@@ -78,43 +78,41 @@ export class PlayCommand {
       return;
     }
 
+    const { commandService, nameService, logger } = getDeps();
     try {
-      await bot.commandService.reply(interaction, "commands.play.searching", {
+      await commandService.reply(interaction, "commands.play.searching", {
         query,
       });
 
-      const results = await bot.nameService.searchName(query);
+      const results = await nameService.searchName(query);
 
       if (!results.length) {
         await interaction.editReply(
-          bot.locale.t(
-            "commands.play.errors.search",
-            { query },
-            interaction.guild?.preferredLocale || "en",
-          ),
+          t("commands.play.errors.search", { query }, interaction.guild?.preferredLocale || "en"),
         );
         return;
       }
 
-      await bot.nameService.trackAndUrl(query, results, interaction);
+      await nameService.trackAndUrl(query, results, interaction);
     } catch (error) {
-      await this.handleCommandError(interaction, error);
+      await this.handleCommandError(interaction, error, logger);
     }
   }
 
   private async handleEmptyQuery(interaction: CommandInteraction): Promise<void> {
-    const player = bot.playerManager.getPlayer(interaction.guildId!);
+    const { playerManager, commandService } = getDeps();
+    const player = playerManager.getPlayer(interaction.guildId!);
 
     if (!player.state.currentTrack?.info) {
-      await bot.commandService.reply(interaction, "commands.play.player.status.nothing_playing");
+      await commandService.reply(interaction, "commands.play.player.status.nothing_playing");
       return;
     }
 
-    await bot.commandService.reply(interaction, "commands.play.started_playing", {
+    await commandService.reply(interaction, "commands.play.started_playing", {
       track: player.state.currentTrack.info,
     });
 
-    await bot.playerManager.joinChannel(interaction);
+    await playerManager.joinChannel(interaction);
   }
 
   private buildAutocompleteChoices(
@@ -157,26 +155,31 @@ export class PlayCommand {
 
       return { name: displayText, value: displayText, relevance };
     } catch (error) {
-      bot.logger.warn(
-        bot.locale.t("commands.play.errors.processing", {
-          error: error instanceof Error ? error.message : String(error),
+      const { logger } = getDeps();
+      logger.warn(
+        t("commands.play.errors.processing", {
+          error: getErrorMessage(error),
         }),
       );
       return null;
     }
   }
 
-  private async handleCommandError(interaction: CommandInteraction, error: unknown): Promise<void> {
-    bot.logger.error(
-      bot.locale.t("commands.play.errors.processing", {
-        error: error instanceof Error ? error.message : String(error),
+  private async handleCommandError(
+    interaction: CommandInteraction,
+    error: unknown,
+    logger?: import("dlog2").Logger,
+  ): Promise<void> {
+    logger?.error(
+      t("commands.play.errors.processing", {
+        error: getErrorMessage(error),
       }),
     );
 
     if (interaction.deferred || interaction.replied) {
       await interaction
         .editReply(
-          bot.locale.t(
+          t(
             "commands.play.errors.processing",
             undefined,
             interaction.guild?.preferredLocale || "en",

@@ -21,6 +21,7 @@ Discord-музыкальный бот с интеграцией Яндекс.М�
 | Платформа | Статус |
 |-----------|--------|
 | Яндекс.Музыка | ✅ |
+| Hitmo Music | ✅ |
 
 ## Установка
 
@@ -38,6 +39,7 @@ BOT_LOCALE="ru"           # en / ru
 FFPROBE_PATH=""           # опционально, путь к ffprobe
 YM_USER_ID=""             # https://mail.yandex.ru/
 YM_API_KEY=""             # https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d
+HM_SESSION_COOKIE=""      # опционально, сессионная кука Hitmo Music
 ```
 
 ## Запуск
@@ -61,7 +63,7 @@ npm run pm2:start
 | `/pause` | Пауза / продолжить |
 | `/skip` | Следующий трек |
 | `/volume <0–100>` | Громкость |
-| `/equalizer <басы> <высокие> <компрессор>` | Эквалайзер |
+| `/eq <басы> <высокие>` | Эквалайзер (басы, высокие) |
 | `/loop` | Зациклить очередь |
 | `/shuffle` | Перемешать очередь |
 | `/queue` | Показать очередь |

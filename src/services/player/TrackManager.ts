@@ -24,7 +24,11 @@ export class TrackManager extends EventEmitter {
   constructor(
     private readonly logger: Logger,
     private readonly pluginManager: PluginManagerSubset,
-    private readonly t: (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string,
+    private readonly t: (
+      key: string,
+      params?: Record<string, unknown>,
+      lang?: string | boolean,
+    ) => string,
   ) {
     super();
   }

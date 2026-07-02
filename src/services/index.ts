@@ -9,4 +9,4 @@ export { default as PlayerService } from "./player/PlayerService.js";
 export { default as PlayerManager } from "./player/PlayerManager.js";
 export { default as PluginManager } from "./PluginManager.js";
 export { default as NameService } from "./NameService.js";
-export { default as CacheQueueService } from "./CacheQueueService.js";
+export { default as CacheQueueService } from "./player/QueueService.js";

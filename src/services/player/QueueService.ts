@@ -1,8 +1,9 @@
-import { LRUCache } from "lru-cache";
 import type { Logger } from "dlog2";
-import { type Track, TrackSchema } from "../types/index.js";
-import type { QueueResult } from "../interfaces/index.js";
-import config from "../../config.json" with { type: "json" };
+import { type Track, TrackSchema } from "../../types/index.js";
+import type { QueueResult } from "../../interfaces/index.js";
+import { CacheManager } from "hcacher";
+import { getErrorMessage } from "../../utils/error.js";
+import config from "../../../config.json" with { type: "json" };
 
 interface EnhancedQueueResult extends QueueResult {
   loop?: boolean;
@@ -10,27 +11,32 @@ interface EnhancedQueueResult extends QueueResult {
 }
 
 export default class CacheQueueService {
-  private static readonly DEFAULT_VOLUME = config.volume.default * 100 || 20;
+  private static readonly DEFAULT_VOLUME =
+    config.audio.volume.default * 100 || 20;
   private static readonly CACHE_TTL = 60000;
 
   private readonly trackCache = new Map<string, Map<string, Track>>();
-  private readonly queueCache: LRUCache<string, EnhancedQueueResult>;
-  private readonly metaCache: LRUCache<string, any>;
+  private readonly queueCache: CacheManager<EnhancedQueueResult>;
+  private readonly metaCache: CacheManager<any>;
 
   constructor(
     private readonly logger: Logger,
     private readonly locale: {
-      t(key: string, params?: Record<string, unknown>, lang?: string | boolean): string;
+      t(
+        key: string,
+        params?: Record<string, unknown>,
+        lang?: string | boolean,
+      ): string;
     },
     ttl = 3600,
   ) {
-    this.queueCache = new LRUCache<string, EnhancedQueueResult>({
-      max: 1000,
+    this.queueCache = new CacheManager<EnhancedQueueResult>({
+      maxSize: 1000,
       ttl: CacheQueueService.CACHE_TTL,
     });
 
-    this.metaCache = new LRUCache<string, any>({
-      max: 5000,
+    this.metaCache = new CacheManager<any>({
+      maxSize: 5000,
       ttl: ttl * 1000,
     });
   }
@@ -53,7 +59,7 @@ export default class CacheQueueService {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.get_track", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
       return null;
     }
@@ -64,7 +70,8 @@ export default class CacheQueueService {
       this.clearWaveState(guildId);
       const validatedTrack = TrackSchema.parse(track) as Track;
 
-      const guildCache = this.getGuildTracks(guildId) || new Map<string, Track>();
+      const guildCache =
+        this.getGuildTracks(guildId) || new Map<string, Track>();
       guildCache.set(track.trackId, validatedTrack);
       this.trackCache.set(guildId, guildCache);
       this.invalidateQueueCache(guildId);
@@ -76,7 +83,7 @@ export default class CacheQueueService {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.set_track", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
     }
   }
@@ -86,9 +93,12 @@ export default class CacheQueueService {
       if (!tracks?.length) return;
 
       this.clearWaveState(guildId);
-      const validatedTracks = tracks.map((track) => TrackSchema.parse(track) as Track);
+      const validatedTracks = tracks.map(
+        (track) => TrackSchema.parse(track) as Track,
+      );
 
-      const guildCache = this.getGuildTracks(guildId) || new Map<string, Track>();
+      const guildCache =
+        this.getGuildTracks(guildId) || new Map<string, Track>();
 
       for (const track of validatedTracks) {
         guildCache.set(track.trackId, track);
@@ -103,7 +113,7 @@ export default class CacheQueueService {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.set_tracks", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
     }
   }
@@ -130,7 +140,7 @@ export default class CacheQueueService {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.get_queue", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
       return {
         tracks: [],
@@ -153,7 +163,7 @@ export default class CacheQueueService {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.get_queue_length", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
       return 0;
     }
@@ -180,14 +190,16 @@ export default class CacheQueueService {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.shuffle_tracks", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
       return 0;
     }
   }
 
   private getMetaData<T>(guildId: string, key: string, defaultValue: T): T {
-    return (this.metaCache.get(`${key}:${guildId}`) as T | undefined) ?? defaultValue;
+    return (
+      (this.metaCache.get(`${key}:${guildId}`) as T | undefined) ?? defaultValue
+    );
   }
 
   private setMetaData(guildId: string, key: string, value: unknown): void {
@@ -228,7 +240,11 @@ export default class CacheQueueService {
   }
 
   getVolume(guildId: string): number {
-    return this.getMetaData(guildId, "volume", CacheQueueService.DEFAULT_VOLUME);
+    return this.getMetaData(
+      guildId,
+      "volume",
+      CacheQueueService.DEFAULT_VOLUME,
+    );
   }
 
   setVolume(guildId: string, volume: number): void {
@@ -236,7 +252,9 @@ export default class CacheQueueService {
   }
 
   clearWaveState(guildId: string): void {
-    ["waveSeed", "wavePos"].forEach((key) => this.metaCache.delete(`${key}:${guildId}`));
+    ["waveSeed", "wavePos"].forEach((key) =>
+      this.metaCache.delete(`${key}:${guildId}`),
+    );
   }
 
   private getGuildTracks(guildId: string): Map<string, Track> | undefined {
@@ -255,7 +273,7 @@ export default class CacheQueueService {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.remove_track", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
     }
   }
@@ -264,14 +282,20 @@ export default class CacheQueueService {
     try {
       this.trackCache.delete(guildId);
       this.queueCache.delete(guildId);
-      ["lastTrack", "lastTrackId", "loop", "waveStatus", "volume", "waveSeed", "wavePos"].forEach(
-        (key) => this.metaCache.delete(`${key}:${guildId}`),
-      );
+      [
+        "lastTrack",
+        "lastTrackId",
+        "loop",
+        "waveStatus",
+        "volume",
+        "waveSeed",
+        "wavePos",
+      ].forEach((key) => this.metaCache.delete(`${key}:${guildId}`));
     } catch (error) {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.clear_queue", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
     }
   }
@@ -290,7 +314,7 @@ export default class CacheQueueService {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.peek_track", {
           guildId,
-        })}: ${error instanceof Error ? error.message : String(error)}`,
+        })}: ${getErrorMessage(error)}`,
       );
       return null;
     }

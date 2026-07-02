@@ -4,18 +4,18 @@ import { importx } from "@discordx/importer";
 
 import { bot } from "./bot.js";
 import { setCommandDeps } from "./commands/commandDeps.js";
-import { createLocale, createLogger, initLogger } from "./utils/index.js";
+import { createLocale } from "./utils/index.js";
 import { registerShutdownHandlers } from "./utils/gracefulShutdown.js";
 import translations from "./locales/en.json" with { type: "json" };
 
 import { config } from "@dotenvx/dotenvx";
 import { resolve } from "path";
+import createLogger, { initLogger } from "dlog2/index.js";
 
 config({ path: resolve(dirname(import.meta), "../.env") });
 
 const __dirname = dirname(import.meta);
 
-// Initialize logger and register error handlers
 initLogger({ registerHandlers: true });
 
 const logger = createLogger(`ragu2`);

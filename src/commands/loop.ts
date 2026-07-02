@@ -2,6 +2,7 @@ import { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
+import { getErrorMessage } from "../utils/error.js";
 
 @Discord()
 export class LoopCommand {
@@ -17,9 +18,9 @@ export class LoopCommand {
         return await commandService.reply(interaction, "commands.loop.errors.not_found");
       }
 
-      player.state.loop = !player.state.loop;
+      const newLoop = !player.state.loop;
 
-      await playerManager.setLoop(interaction.guildId!, player.state.loop);
+      await playerManager.setLoop(interaction.guildId!, newLoop);
 
       return await commandService.reply(
         interaction,
@@ -29,11 +30,11 @@ export class LoopCommand {
     } catch (error) {
       logger.error(
         getDeps().t("commands.loop.errors.playback", {
-          error: error instanceof Error ? error.message : String(error),
+          error: getErrorMessage(error),
         }),
       );
       return await commandService.reply(interaction, "commands.loop.errors.playback", {
-        error: error instanceof Error ? error.message : String(error),
+        error: getErrorMessage(error),
       });
     }
   }

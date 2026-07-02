@@ -1,4 +1,9 @@
-import { type ClientEvents, IntentsBitField, type Interaction, type Message } from "discord.js";
+import {
+  type ClientEvents,
+  IntentsBitField,
+  type Interaction,
+  type Message,
+} from "discord.js";
 import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
@@ -13,13 +18,12 @@ import {
 } from "./services/index.js";
 
 import { dirname } from "dirname-filename-esm";
-import { createLogger, createLocale } from "./utils/index.js";
 import { MusicServicePlugin } from "./interfaces/index.js";
+import { getErrorMessage } from "./utils/error.js";
 import translations from "./locales/en.json" with { type: "json" };
+import createLogger from "dlog2";
+import { createLocale } from "./utils/locale.js";
 
-/**
- * Bot class
- */
 export class Bot {
   public readonly client: Client;
   public nameService!: NameService;
@@ -46,19 +50,14 @@ export class Bot {
     });
   }
 
-  /** ----------------------------- */
-  /** Initialization                */
-  /** ----------------------------- */
-
   public async initialize(): Promise<void> {
     try {
-      // Load Russian translations first
       await this.locale.load();
       this.setupEvents();
       await this.initServices();
     } catch (error) {
       this.logger.error(
-        `${this.locale.t("messages.bot.status.init_failed")}: ${error instanceof Error ? error.message : String(error)}`,
+        `${this.locale.t("messages.bot.status.init_failed")}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -77,12 +76,18 @@ export class Bot {
         this.commandService,
         this.client,
         this.pluginManager,
-        (key: string, params?: Record<string, unknown>, lang?: string | boolean) =>
-          (this.locale.t as (
-            key: string,
-            params?: Record<string, unknown>,
-            lang?: string | boolean,
-          ) => string)(key, params, lang),
+        (
+          key: string,
+          params?: Record<string, unknown>,
+          lang?: string | boolean,
+        ) =>
+          (
+            this.locale.t as (
+              key: string,
+              params?: Record<string, unknown>,
+              lang?: string | boolean,
+            ) => string
+          )(key, params, lang),
         this.logger,
       );
 
@@ -92,7 +97,11 @@ export class Bot {
         this.pluginManager,
         this.commandService,
         this.logger,
-        (key: string, params?: Record<string, unknown>, lang?: string | boolean) =>
+        (
+          key: string,
+          params?: Record<string, unknown>,
+          lang?: string | boolean,
+        ) =>
           (
             this.locale.t as (
               key: string,
@@ -103,15 +112,11 @@ export class Bot {
       );
     } catch (error) {
       this.logger.error(
-        `${this.locale.t("messages.bot.initialization.failed")}: ${error instanceof Error ? error.message : String(error)}`,
+        `${this.locale.t("messages.bot.initialization.failed")}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
   }
-
-  /** ----------------------------- */
-  /** Plugin Loading               */
-  /** ----------------------------- */
 
   private isMusicServicePlugin(obj: any): obj is MusicServicePlugin {
     return (
@@ -128,7 +133,9 @@ export class Bot {
 
     try {
       const files = await fs.promises.readdir(pluginsDir);
-      const pluginFiles = files.filter((file) => file.endsWith(".ts") || file.endsWith(".js"));
+      const pluginFiles = files.filter(
+        (file) => file.endsWith(".ts") || file.endsWith(".js"),
+      );
 
       await Promise.all(
         pluginFiles.map(async (file) => {
@@ -159,7 +166,8 @@ export class Bot {
               return;
             }
 
-            const registered = this.pluginManager.registerPlugin(pluginInstance);
+            const registered =
+              this.pluginManager.registerPlugin(pluginInstance);
             if (registered) {
               this.logger.info(
                 this.locale.t(
@@ -175,7 +183,7 @@ export class Bot {
             this.logger.error(
               `${this.locale.t("messages.bot.errors.register_error_files", {
                 file,
-              })}: ${error instanceof Error ? error.message : String(error)}`,
+              })}: ${getErrorMessage(error)}`,
             );
           }
         }),
@@ -184,15 +192,11 @@ export class Bot {
       await this.pluginManager.initializePlugins();
     } catch (error) {
       this.logger.error(
-        `${this.locale.t("messages.bot.errors.register_error")}: ${error instanceof Error ? error.message : String(error)}`,
+        `${this.locale.t("messages.bot.errors.register_error")}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
   }
-
-  /** ----------------------------- */
-  /** Events                        */
-  /** ----------------------------- */
 
   private setupEvents(): void {
     const readyHandler = async () => {
@@ -200,7 +204,7 @@ export class Bot {
         await this.client.initApplicationCommands();
       } catch (error) {
         this.logger.error(
-          `${this.locale.t("messages.bot.status.init_failed")}: ${error instanceof Error ? error.message : String(error)}`,
+          `${this.locale.t("messages.bot.status.init_failed")}: ${getErrorMessage(error)}`,
         );
       }
     };
@@ -223,10 +227,6 @@ export class Bot {
 
     this.logger.debug("Discord client events are set");
   }
-
-  /** ----------------------------- */
-  /** Bot control                   */
-  /** ----------------------------- */
 
   public async start(token: string): Promise<void> {
     try {

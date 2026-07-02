@@ -1,31 +1,36 @@
 {
+  "audio": {
     "volume": {
+      "default": 0.05,
+      "range": {
         "min": 0,
-        "max": 1,
-        "default": 0.1,
-        "fadeInStart": 0
+        "max": 1
+      }
+    },
+    "effects": {
+      "bass": {
+        "default": 3,
+        "range": {
+          "min": -20,
+          "max": 20
+        }
+      },
+      "treble": {
+        "default": 10,
+        "range": {
+          "min": -10,
+          "max": 20
+        }
+      },
+      "compressor": false,
+      "normalize": false
     },
     "fade": {
-        "fadeout_before_end": 3000,
-        "fadein": 3000
-    },
-    "equalizer": {
-        "bass_min": -20,
-        "bass_max": 20,
-        "treble_min": -10,
-        "treble_max": 20,
-        "bass_default": 1,
-        "treble_default": 15
-    },
-    "compressor": {
-        "default": false
-    },
-    "normalize": {
-        "default": false
-    },
-    "time": {
-        "play": {
-            "default": 1000
-        }
+      "in": 3000,
+      "outBeforeEnd": 3000
     }
+  },
+  "playback": {
+    "startPosition": 1000
+  }
 }
