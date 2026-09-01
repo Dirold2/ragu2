@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.1 (2026-09-01)
+
+### Added
+- `hemmiter` typed event emitter for player, connection, and audio service events
+
+### Changed
+- Migrated player and voice services from Node.js `EventEmitter` to `hemmiter` `MiniEmitter`
+- Updated runtime and development dependencies, including `discord.js`, `fluent-streamer`, `yamd2`, TypeScript, Ox tools, and Zod
+
+### Fixed
+- Yandex Music playback uses the direct streaming URL as FFmpeg input, preventing premature end-of-stream failures
+- Forced track stops after fade-out continue to the next queued track or recommendation
+- Playback transitions continue when Discord does not emit `AudioPlayerStatus.Idle` after FFmpeg reaches EOF
+- Stale Discord `Idle` events can no longer interrupt a newly started track
+- Normalized `ERR_STREAM_PREMATURE_CLOSE` after successful FFmpeg EOF so radio playback continues
+- `/skip` no longer allows completion events from the stopped process to interrupt the replacement track
+- My Wave renews its Yandex radio session and retries once after an empty recommendation batch
+- Single-track `/play` now joins the voice channel before starting playback, eliminating the join/play race
+- Playlist enqueueing no longer duplicates the first track
+- Queue entries use unique IDs, allowing repeated tracks and correct priority/removal handling
+- Loop playback retains the finished track as the source for the next loop iteration
+- Voice connections are correctly destroyed and cleaned up; reused connections emit `connected`
+- Idle disconnect starts only when the queue and recommendations are exhausted
+- Player cache cleanup no longer removes active players
+- Plugin search only considers active plugins
+
 ## 0.2.0 (2026-07-02)
 
 ### Added

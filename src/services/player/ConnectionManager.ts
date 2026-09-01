@@ -1,5 +1,5 @@
 import type { Logger } from "dlog2";
-import EventEmitter from "events";
+import { MiniEmitter } from "hemmiter";
 import {
   type CommandInteraction,
   type GuildMember,
@@ -27,9 +27,19 @@ interface ClientSubset {
   };
 }
 
-export class ConnectionManager extends EventEmitter {
+type ConnectionManagerEvents = {
+  connected: [channelId: string];
+  disconnected: [];
+  reconnected: [];
+  empty: [];
+  left: [];
+  cleanup: [];
+};
+
+export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
   private connection: VoiceConnection | null = null;
   private disconnectHandler: (() => Promise<void>) | null = null;
+  private destroyHandler: (() => void) | null = null;
   private emptyChannelInterval: NodeJS.Timeout | null = null;
   private emptyChannelTimeout: NodeJS.Timeout | null = null;
   private idleTimeout: NodeJS.Timeout | null = null;
@@ -63,6 +73,7 @@ export class ConnectionManager extends EventEmitter {
       } else {
         this.connection = existingConnection;
         this.setupConnectionHandlers();
+        this.emit("connected", voiceChannelId);
         return existingConnection;
       }
     }
@@ -74,6 +85,7 @@ export class ConnectionManager extends EventEmitter {
     this.setupConnectionHandlers();
     this.startEmptyCheck();
     this.startIdleTimeout();
+    this.emit("connected", voiceChannelId);
     return this.connection;
   }
 
@@ -135,6 +147,7 @@ export class ConnectionManager extends EventEmitter {
       this.emit("disconnected");
       this.forceCleanup();
     };
+    this.destroyHandler = destroyHandler;
 
     this.connection.on(
       VoiceConnectionStatus.Disconnected,
@@ -216,6 +229,13 @@ export class ConnectionManager extends EventEmitter {
     }, ms("10m"));
   }
 
+  clearIdleTimeout(): void {
+    if (this.idleTimeout) {
+      clearTimeout(this.idleTimeout);
+      this.idleTimeout = null;
+    }
+  }
+
   /** Сбрасываем таймер простоя (например, при начале нового трека) */
   resetIdleTimeout(): void {
     this.startIdleTimeout();
@@ -247,8 +267,9 @@ export class ConnectionManager extends EventEmitter {
   }
 
   leaveChannel(): void {
-    if (this.connection) this.connection.destroy();
+    const connection = this.connection;
     this.forceCleanup();
+    connection?.destroy();
     this.emit("left");
   }
 
@@ -270,14 +291,13 @@ export class ConnectionManager extends EventEmitter {
         VoiceConnectionStatus.Disconnected,
         this.disconnectHandler,
       );
-      // Defensive: make sure handler is removed only if handler was attached at this key
-      this.connection.off(
-        VoiceConnectionStatus.Destroyed,
-        this.disconnectHandler,
-      );
+    }
+    if (this.connection && this.destroyHandler) {
+      this.connection.off(VoiceConnectionStatus.Destroyed, this.destroyHandler);
     }
 
     this.disconnectHandler = null;
+    this.destroyHandler = null;
     if (this.emptyChannelInterval) clearInterval(this.emptyChannelInterval);
     if (this.emptyChannelTimeout) clearTimeout(this.emptyChannelTimeout);
     if (this.idleTimeout) clearTimeout(this.idleTimeout);
@@ -292,8 +312,12 @@ export class ConnectionManager extends EventEmitter {
   }
 
   destroy(): void {
+    if (this.isDestroyed) return;
+
     this.isDestroyed = true;
+    const connection = this.connection;
     this.forceCleanup();
+    connection?.destroy();
     this.removeAllListeners();
   }
 }

@@ -1,4 +1,5 @@
 import type { Logger } from "dlog2";
+import { randomUUID } from "node:crypto";
 import { type Track, TrackSchema } from "../../types/index.js";
 import type { QueueResult } from "../../interfaces/index.js";
 import { CacheManager } from "hcacher";
@@ -69,10 +70,20 @@ export default class CacheQueueService {
     try {
       this.clearWaveState(guildId);
       const validatedTrack = TrackSchema.parse(track) as Track;
-
       const guildCache =
         this.getGuildTracks(guildId) || new Map<string, Track>();
-      guildCache.set(track.trackId, validatedTrack);
+
+      if (validatedTrack.priority) {
+        const existingEntries = Array.from(guildCache.entries());
+        guildCache.clear();
+        guildCache.set(randomUUID(), validatedTrack);
+        for (const [key, existingTrack] of existingEntries) {
+          guildCache.set(key, existingTrack);
+        }
+      } else {
+        guildCache.set(randomUUID(), validatedTrack);
+      }
+
       this.trackCache.set(guildId, guildCache);
       this.invalidateQueueCache(guildId);
 
@@ -101,7 +112,7 @@ export default class CacheQueueService {
         this.getGuildTracks(guildId) || new Map<string, Track>();
 
       for (const track of validatedTracks) {
-        guildCache.set(track.trackId, track);
+        guildCache.set(randomUUID(), track);
         if (track.source === "yandex") {
           this.setLastTrackID(guildId, track.trackId);
         }
@@ -265,7 +276,10 @@ export default class CacheQueueService {
     try {
       const guildCache = this.getGuildTracks(guildId);
       if (guildCache) {
-        guildCache.delete(trackId);
+        const entry = Array.from(guildCache.entries()).find(
+          ([, track]) => track.trackId === trackId,
+        );
+        if (entry) guildCache.delete(entry[0]);
         if (guildCache.size === 0) this.trackCache.delete(guildId);
         this.invalidateQueueCache(guildId);
       }

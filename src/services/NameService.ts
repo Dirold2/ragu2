@@ -151,10 +151,8 @@ export default class NameService {
       track: track.info,
     });
 
-    await Promise.allSettled([
-      this.playerManager.joinChannel(interaction),
-      this.playerManager.playOrQueueTrack(guildId, track),
-    ]);
+    await this.playerManager.joinChannel(interaction);
+    await this.playerManager.playOrQueueTrack(guildId, track);
   }
 
   /**
@@ -197,7 +195,7 @@ export default class NameService {
    */
   private async searchAcrossPlugins(trackName: string): Promise<SearchTrackResult[]> {
     const results = await Promise.allSettled(
-      this.pluginManager.getAllPlugins().map((plugin) => this.searchWithPlugin(plugin, trackName)),
+      this.pluginManager.getActivePlugins().map((plugin) => this.searchWithPlugin(plugin, trackName)),
     );
 
     return results
@@ -271,29 +269,38 @@ export default class NameService {
     requestedBy?: string,
     interaction?: CommandInteraction,
   ): Promise<void> {
+    if (tracks.length === 0) return;
+
+    const queuedTracks = interaction ? tracks.slice(1) : tracks;
     const BATCH_SIZE = 100;
-
-    await this.processInBatches(tracks, BATCH_SIZE, 300, async (batchTracks) => {
-      const currentBatch = Math.ceil((tracks.indexOf(batchTracks[0]) + 1) / BATCH_SIZE);
-      const totalBatches = Math.ceil(tracks.length / BATCH_SIZE);
-
-      this.logger.debug(
-        this.localeT("messages.nameService.success.processing_batch", {
-          current: currentBatch,
-          total: totalBatches,
-          batchSize: batchTracks.length,
-        }),
-      );
-
-      await this.processPlaylistTrack(batchTracks, guildId, requestedBy);
-    });
 
     if (interaction) {
       await this.playerManager.joinChannel(interaction);
       const firstTrack = this.createTrackInfo(tracks[0], interaction, false);
-
       await this.playerManager.playOrQueueTrack(guildId, firstTrack);
     }
+
+    await this.processInBatches(
+      queuedTracks,
+      BATCH_SIZE,
+      300,
+      async (batchTracks) => {
+        const currentBatch = Math.ceil(
+          (queuedTracks.indexOf(batchTracks[0]) + 1) / BATCH_SIZE,
+        );
+        const totalBatches = Math.ceil(queuedTracks.length / BATCH_SIZE);
+
+        this.logger.debug(
+          this.localeT("messages.nameService.success.processing_batch", {
+            current: currentBatch,
+            total: totalBatches,
+            batchSize: batchTracks.length,
+          }),
+        );
+
+        await this.processPlaylistTrack(batchTracks, guildId, requestedBy);
+      },
+    );
   }
 
   /**

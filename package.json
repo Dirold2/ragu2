@@ -1,6 +1,6 @@
 {
   "name": "ragu2",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Discord bot module for RAGU2",
   "repository": {
     "type": "git",
@@ -28,30 +28,32 @@
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
     "@discordx/importer": "^1.3.3",
-    "@dotenvx/dotenvx": "^2.0.0",
+    "@dotenvx/dotenvx": "^2.23.0",
     "async-retry": "^1.3.3",
-    "discord.js": "^14.26.4",
+    "discord.js": "^14.27.0",
     "discordx": "^11.13.3",
-    "dlog2": "^0.1.2",
-    "execa": "^9.6.1",
-    "fluent-streamer": "^0.5.4",
+    "dlog2": "^0.1.3",
+    "execa": "^10.0.1",
+    "fluent-streamer": "^0.5.5",
     "get-audio-duration": "^4.0.1",
-    "hcacher": "^0.1.0",
+    "hcacher": "^0.3.0",
+    "hemmiter": "^0.1.0",
     "opusscript": "^0.1.1",
     "prom-client": "^15.1.3",
-    "typescript": "^6.0.3",
-    "yamd2": "^1.4.0"
+    "typescript": "^7.0.2",
+    "yamd2": "^1.5.2"
   },
   "devDependencies": {
-    "@dirold2/dev-tools": "^1.1.0",
+    "@dirold2/dev-tools": "^1.1.3",
     "@types/ms": "^2.1.0",
-    "@types/node": "^26.1.0",
+    "@types/node": "^26.4.0",
     "chokidar": "^5.0.0",
     "dirname-filename-esm": "^1.1.2",
     "ms": "^2.1.3",
-    "oxfmt": "^0.57.0",
-    "oxlint": "^1.72.0",
-    "zod": "^4.4.3"
+    "oxfmt": "^0.66.0",
+    "oxlint": "^1.81.0",
+    "zod": "^4.5.4",
+    "esbuild": "latest"
   },
   "imports": {
     "#*": "./src/*",

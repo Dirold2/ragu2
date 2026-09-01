@@ -6,7 +6,7 @@ import {
   PlayerService,
 } from "../index.js";
 import { createLogger, type Logger } from "dlog2";
-import EventEmitter from "events";
+import { MiniEmitter } from "hemmiter";
 import type { MusicServicePlugin } from "../../interfaces/index.js";
 
 interface PlayerCacheEntry {
@@ -32,7 +32,13 @@ interface PlayerServiceDeps {
   ) => string;
 }
 
-export default class PlayerManager extends EventEmitter {
+type PlayerManagerEvents = {
+  playerCreated: [guildId: string];
+  playerRestored: [guildId: string];
+  playerDestroyed: [guildId: string];
+};
+
+export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
   private readonly players: Map<string, PlayerService> = new Map();
   private readonly playerCache: Map<string, PlayerCacheEntry> = new Map();
   private readonly CACHE_CLEANUP_INTERVAL = 30 * 60 * 1000;
@@ -238,9 +244,8 @@ export default class PlayerManager extends EventEmitter {
 
     try {
       await player.destroy();
-      player.connectionManager.leaveChannel();
       this.players.delete(guildId);
-      this.updateCache(guildId, player);
+      this.playerCache.delete(guildId);
       this.logger?.debug?.(
         `[PlayerManager] Left channel and destroyed player: ${guildId}`,
       );
@@ -256,7 +261,6 @@ export default class PlayerManager extends EventEmitter {
     for (const [_guildId, player] of this.players.entries()) {
       try {
         await player.destroy();
-        player.connectionManager.leaveChannel();
       } catch {
         // Ignore errors during cleanup
       }
@@ -273,6 +277,8 @@ export default class PlayerManager extends EventEmitter {
       const now = Date.now();
 
       for (const [guildId, entry] of this.playerCache.entries()) {
+        if (this.players.has(guildId)) continue;
+
         if (now - entry.lastUsed > this.INACTIVE_TIMEOUT) {
           this.logger?.debug?.(
             `[PlayerManager] Removing inactive player from cache: ${guildId}`,

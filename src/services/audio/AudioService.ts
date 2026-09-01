@@ -9,9 +9,19 @@ import {
   DEFAULT_NORMALIZE,
 } from "../../utils/constants.js";
 import { Mutex } from "../../utils/mutex.js";
-import EventEmitter from "events";
+import { MiniEmitter } from "hemmiter";
 
-export class AudioService extends EventEmitter {
+type AudioServiceEvents = {
+  error: [error: Error];
+  ended: [];
+  debug: [message: string];
+  volumeChanged: [volume: number];
+  equalizerChanged: [options: Required<AudioProcessingOptions>];
+  compressorChanged: [enabled: boolean];
+  normalizeChanged: [enabled: boolean];
+};
+
+export class AudioService extends MiniEmitter<AudioServiceEvents> {
   private ffmpeg!: FluentStream;
   private currentOptions: Required<AudioProcessingOptions>;
   private _fadeInterval?: NodeJS.Timeout;
@@ -92,9 +102,23 @@ export class AudioService extends EventEmitter {
       const { output, done, stop } = await this.ffmpeg.run();
       this.currentProcess = { stop, done };
 
-      done.catch((err: Error) => {
-        this.emit("error", err);
-      });
+      done
+        .then(() => {
+          if (this.currentProcess?.done !== done) return;
+          this.currentProcess = undefined;
+          this.emit("ended");
+        })
+        .catch((err: Error) => {
+          if (this.currentProcess?.done !== done) return;
+
+          this.currentProcess = undefined;
+          if (err.message.includes("Premature close")) {
+            this.emit("ended");
+            return;
+          }
+
+          this.emit("error", err);
+        });
 
       this.emit(
         "debug",

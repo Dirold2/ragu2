@@ -401,7 +401,16 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     trackId: string,
   ): Promise<SearchTrackResult[]> {
     try {
-      const results = await this.fetchStationTracks(trackId, true);
+      let results = await this.fetchStationTracks(trackId, true);
+
+      if (results.length === 0) {
+        this.logger.warn(
+          `[Yandex] Empty recommendation batch for trackId:${trackId}; renewing radio session`,
+          { module: "Yandex" },
+        );
+        this.radioManager.reset(trackId);
+        results = await this.fetchStationTracks(trackId, false);
+      }
 
       if (results.length > 0) {
         this.recommendationsCache.set(trackId, results);

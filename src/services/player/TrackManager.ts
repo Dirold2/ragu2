@@ -1,5 +1,4 @@
 import type { Logger } from "dlog2";
-import EventEmitter from "events";
 import type { Track } from "../../types/index.js";
 import type { MusicServicePlugin } from "../../interfaces/index.js";
 import { getAudioDurationInSeconds } from "get-audio-duration";
@@ -17,7 +16,7 @@ interface PluginManagerSubset {
   getPlugin(name: string): MusicServicePlugin | undefined;
 }
 
-export class TrackManager extends EventEmitter {
+export class TrackManager {
   private readonly durationCache = new Map<string, { value: number; cachedAt: number }>();
   private readonly CACHE_TTL = 3600000;
 
@@ -29,9 +28,7 @@ export class TrackManager extends EventEmitter {
       params?: Record<string, unknown>,
       lang?: string | boolean,
     ) => string,
-  ) {
-    super();
-  }
+  ) {}
 
   /**
    * Gets track URL dynamically with caching and validation

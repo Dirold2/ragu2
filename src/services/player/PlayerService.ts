@@ -6,7 +6,7 @@ import {
   createAudioResource,
   NoSubscriberBehavior,
 } from "@discordjs/voice";
-import EventEmitter from "events";
+import { MiniEmitter } from "hemmiter";
 import { Readable } from "node:stream";
 import { AudioService } from "../audio/AudioService.js";
 import { TrackManager } from "./TrackManager.js";
@@ -55,7 +55,19 @@ interface PlayerServiceDeps {
   ) => string;
 }
 
-export default class PlayerService extends EventEmitter {
+type PlayerServiceEventMap = {
+  [PlayerServiceEvents.PLAYING]: [];
+  [PlayerServiceEvents.PAUSED]: [];
+  [PlayerServiceEvents.TRACK_STARTED]: [track: Track];
+  [PlayerServiceEvents.TRACK_ENDED]: [track: Track | null];
+  [PlayerServiceEvents.QUEUE_EMPTY]: [];
+  [PlayerServiceEvents.VOLUME_CHANGED]: [volume: number];
+  [PlayerServiceEvents.CONNECTED]: [channelId: string];
+  [PlayerServiceEvents.DISCONNECTED]: [];
+  [PlayerServiceEvents.TRACK_QUEUED]: [track: Track];
+};
+
+export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
   private readonly player = createAudioPlayer({
     behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
   });
@@ -64,6 +76,7 @@ export default class PlayerService extends EventEmitter {
   private trackManager: TrackManager;
   public connectionManager: ConnectionManager;
   private fadeOutTimer: NodeJS.Timeout | null = null;
+  private handlingTrackEnd = false;
   public state: PlayerState;
   public status: PlayerStatus = PlayerStatus.IDLE;
 
@@ -333,8 +346,8 @@ export default class PlayerService extends EventEmitter {
     });
 
     this.player.on(AudioPlayerStatus.Idle, () => {
-      if (this.status === PlayerStatus.DESTROYED) return;
-      this.handleTrackEnd();
+      // Track transitions are driven by AudioService.ended to avoid stale
+      // Idle events from a previous audio resource ending a new track.
     });
 
     this.player.on("error", (error) => {
@@ -383,6 +396,16 @@ export default class PlayerService extends EventEmitter {
           this.status = PlayerStatus.IDLE;
         }
       }
+    });
+
+    this.audioService.on("ended", () => {
+      if (
+        this.status === PlayerStatus.DESTROYED ||
+        this.status === PlayerStatus.TRANSITIONING
+      )
+        return;
+
+      void this.handleTrackEnd();
     });
 
     this.audioService.on("debug", (message: string) => {
@@ -453,6 +476,7 @@ export default class PlayerService extends EventEmitter {
     try {
       this.logDebug("Skipping track");
       await this.performFadeOutAndStop();
+      await this.handleTrackEnd();
     } catch (error) {
       this.logError(`Error in skip: ${(error as Error).message}`);
     } finally {
@@ -466,8 +490,8 @@ export default class PlayerService extends EventEmitter {
     if (!track || this.status === PlayerStatus.DESTROYED) return false;
 
     try {
-      this.logDebug(`Playing: ${track.info}`);
-      this.connectionManager.resetIdleTimeout();
+        this.logDebug(`Playing: ${track.info}`);
+      this.connectionManager.clearIdleTimeout();
 
       const trackUrl = await this.trackManager.getTrackUrl(
         track.trackId,
@@ -483,9 +507,7 @@ export default class PlayerService extends EventEmitter {
       const headers = plugin?.getApiHeaders?.(trackUrl) ?? {};
       const streamResult = await this.audioService.createAudioStreamForDiscord(
         trackUrl,
-        {
-          headers,
-        },
+        { headers },
       );
       const { stream, type } = streamResult;
       const nodeStream = Readable.fromWeb(stream as any);
@@ -510,6 +532,7 @@ export default class PlayerService extends EventEmitter {
           if (this.state.currentTrack?.trackId === scheduledForTrackId) {
             this.logDebug("Track did not end after fade-out, forcing stop");
             this.player.stop();
+            await this.handleTrackEnd();
           }
         }
       });
@@ -517,7 +540,7 @@ export default class PlayerService extends EventEmitter {
       this.emit(PlayerServiceEvents.TRACK_STARTED, track);
       return true;
     } catch (error) {
-      this.logError(`Error playing track: ${(error as Error).message}`);
+        this.logError(`Error playing track: ${(error as Error).message}`);
       return await this.playNextOrRecommendations();
     }
   }
@@ -542,17 +565,22 @@ export default class PlayerService extends EventEmitter {
   }
 
   private async handleTrackEnd(): Promise<void> {
-    if (this.status === PlayerStatus.DESTROYED) return;
+    if (this.status === PlayerStatus.DESTROYED || this.handlingTrackEnd) return;
 
-    this.clearFadeTimer();
+    this.handlingTrackEnd = true;
+    try {
+      this.clearFadeTimer();
 
-    const prevTrack = this.state.currentTrack;
-    this.state.currentTrack = null;
-    this.state.isPlaying = false;
-    this.state.pause = false;
+      const prevTrack = this.state.currentTrack;
+      this.state.currentTrack = null;
+      this.state.isPlaying = false;
+      this.state.pause = false;
 
-    this.emit(PlayerServiceEvents.TRACK_ENDED, prevTrack);
-    await this.playNextOrRecommendations();
+      this.emit(PlayerServiceEvents.TRACK_ENDED, prevTrack);
+      await this.playNextOrRecommendations(prevTrack);
+    } finally {
+      this.handlingTrackEnd = false;
+    }
   }
 
   async joinChannel(interaction: CommandInteraction): Promise<void> {
@@ -588,11 +616,12 @@ export default class PlayerService extends EventEmitter {
     }
   }
 
-  private async playNextOrRecommendations(): Promise<boolean> {
+  private async playNextOrRecommendations(
+    currentTrack: Track | null = this.state.currentTrack,
+  ): Promise<boolean> {
     this.status = PlayerStatus.TRANSITIONING;
     try {
-      const lastTrack = this.state.currentTrack;
-      const nextTrack = await this.getNextTrack(lastTrack, this.state.loop);
+      const nextTrack = await this.getNextTrack(currentTrack, this.state.loop);
       if (nextTrack) {
         return await this.playTrack(nextTrack);
       }
@@ -604,6 +633,7 @@ export default class PlayerService extends EventEmitter {
         return await this.playTrack(recommendation);
       }
 
+      this.connectionManager.startIdleTimeout();
       this.emit(PlayerServiceEvents.QUEUE_EMPTY);
       return false;
     } catch (error) {
