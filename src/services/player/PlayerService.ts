@@ -224,10 +224,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
         return;
       }
 
-      await this.deps.queueService?.setTrack?.(this.guildId, {
-        ...track,
-        priority: true,
-      });
+      await this.deps.queueService?.setTrack?.(this.guildId, track);
 
       this.emit(PlayerServiceEvents.TRACK_QUEUED, track);
     } catch (error) {

@@ -119,7 +119,7 @@ export default class NameService {
   ): Promise<void> {
     try {
       const { guildId } = this.getVoiceChannelInfo(interaction);
-      const track = this.createTrackInfo(selectedTrack, interaction, true);
+      const track = this.createTrackInfo(selectedTrack, interaction);
 
       await this.addTrackToQueue(track, guildId, interaction);
       trackPlayCounter.inc({ status: "success" });

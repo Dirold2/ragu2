@@ -5,9 +5,13 @@ import { HITApi } from "hitd2";
 
 export default class HitmoMusicPlugin implements MusicServicePlugin {
   name = "hitmos";
-  urlPatterns = [/hitmos\.me/, /rus\.hitmoz\.org/];
+  urlPatterns = [
+    /(?:^|\.)hitmos\.(?:me|fm)(?:\/|$)/,
+    /(?:^|\.)hitmoz\.org(?:\/|$)/,
+  ];
 
   private api: HITApi;
+  private readonly sourceUrls = new Map<string, string>();
   public logger = createLogger(this.name);
 
   constructor(sessionCookie?: string) {
@@ -48,13 +52,8 @@ export default class HitmoMusicPlugin implements MusicServicePlugin {
 
   async searchURL(url: string): Promise<SearchTrackResult[]> {
     try {
-      const match = url.match(/(?:song|track)\/([a-zA-Z0-9_-]+)/);
-      if (!match || !match[1]) {
-        return [];
-      }
-
-      const trackId = match[1];
-      const meta = await this.api.getTrack(trackId);
+      const meta = await this.api.getTrackByUrl(url);
+      this.sourceUrls.set(meta.id, url);
 
       return [
         {
@@ -79,7 +78,10 @@ export default class HitmoMusicPlugin implements MusicServicePlugin {
   }
 
   async getTrackUrl(trackId: string): Promise<string> {
-    const audio = await this.api.getAudio(trackId);
+    const sourceUrl = this.sourceUrls.get(trackId);
+    const audio = sourceUrl
+      ? await this.api.getAudioByUrl(sourceUrl)
+      : await this.api.getAudio(trackId);
     if (!audio.url) {
       throw new Error("Audio URL is empty");
     }

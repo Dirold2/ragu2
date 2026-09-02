@@ -84,16 +84,22 @@ export class PlayCommand {
         query,
       });
 
-      const results = await nameService.searchName(query);
+      const selection = this.parseAutocompleteSelection(query);
+      const searchQuery = selection?.query ?? query;
+      const results = await nameService.searchName(searchQuery);
 
-      if (!results.length) {
+      const filteredResults = selection
+        ? results.filter((result) => result.source === selection.source)
+        : results;
+
+      if (!filteredResults.length) {
         await interaction.editReply(
-          t("commands.play.errors.search", { query }, interaction.guild?.preferredLocale || "en"),
+          t("commands.play.errors.search", { query: searchQuery }, interaction.guild?.preferredLocale || "en"),
         );
         return;
       }
 
-      await nameService.trackAndUrl(query, results, interaction);
+      await nameService.trackAndUrl(searchQuery, filteredResults, interaction);
     } catch (error) {
       await this.handleCommandError(interaction, error, logger);
     }
@@ -117,7 +123,9 @@ export class PlayCommand {
 
   private buildAutocompleteChoices(
     results: Array<{
+      id: string;
       title: string;
+      source: string;
       artists?: Array<{ name: string }>;
     }>,
     query: string,
@@ -133,12 +141,21 @@ export class PlayCommand {
       .sort((a, b) => b.relevance - a.relevance)
       .map(({ name, value }) => ({
         name: this.truncate(name, PlayCommand.MAX_CHOICE_LENGTH),
-        value: this.truncate(value, PlayCommand.MAX_CHOICE_LENGTH),
+        value: value,
       }));
   }
 
+  private parseAutocompleteSelection(
+    value: string,
+  ): { source: string; query: string } | null {
+    const match = /^__ragu__:(?<source>[^:]+):(?<query>.+)$/u.exec(value);
+    if (!match?.groups) return null;
+
+    return { source: match.groups.source, query: match.groups.query };
+  }
+
   private formatTrackChoice(
-    track: { title: string; artists?: Array<{ name: string }> },
+    track: { id: string; title: string; source: string; artists?: Array<{ name: string }> },
     lowercaseQuery: string,
   ) {
     try {
@@ -151,9 +168,14 @@ export class PlayCommand {
       const titleMatch = track.title.toLowerCase().includes(lowercaseQuery);
 
       const displayText = `${artists} - ${title}`;
+      const autocompletePrefix = `__ragu__:${track.source}:`;
+      const value = `${autocompletePrefix}${this.truncate(
+        displayText,
+        PlayCommand.MAX_CHOICE_LENGTH - autocompletePrefix.length,
+      )}`;
       const relevance = (artistMatch ? 2 : 0) + (titleMatch ? 1 : 0);
 
-      return { name: displayText, value: displayText, relevance };
+      return { name: displayText, value, relevance };
     } catch (error) {
       const { logger } = getDeps();
       logger.warn(

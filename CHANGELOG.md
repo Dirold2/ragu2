@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2 (2026-09-02)
+
+### Added
+- Hitmo music plugin with text search, direct URL handling, metadata lookup, and audio playback
+- Source-aware autocomplete values for selecting the exact plugin result
+
+### Changed
+- Normal `/play` additions now use FIFO queue ordering instead of priority insertion
+- Autocomplete selections preserve the selected source and search within that plugin only
+- Internal autocomplete values use a reserved prefix that does not conflict with `http://` or `https://` URLs
+
+### Fixed
+- `/skip` now plays the earliest queued track instead of the most recently added track
+- Normal search results are no longer silently replaced by a result from Yandex when Hitmo is selected
+- Hitmo search results now resolve to Hitmo audio URLs instead of Yandex streams
+- Direct Hitmo URLs are routed to the Hitmo plugin without being misinterpreted as autocomplete selections
+- Queued tracks retain their insertion order when multiple tracks are added during playback
+
 ## 0.2.1 (2026-09-01)
 
 ### Added
