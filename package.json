@@ -7,24 +7,8 @@
     "url": "https://github.com/dirold2/ragu2.git"
   },
   "type": "module",
-  "private": true,
-  "main": "index.js",
-  "types": "index.d.ts",
-  "scripts": {
-    "build": "tsc && esbuild 'dist/**/*.js' --outdir=dist --allow-overwrite --minify --sourcemap && d-build",
-    "dev": "tsx src/main.ts",
-    "start": "node --enable-source-maps --trace-warnings --experimental-specifier-resolution=node dist/main.js",
-    "dist": "d-dist",
-    "lint": "oxlint src",
-    "lint:fix": "oxlint src --fix",
-    "format": "oxfmt src",
-    "format:check": "oxfmt src --check",
-    "pm2:start": "pm2 start ecosystem.config.json",
-    "pm2:restart": "pm2 restart ragu2",
-    "pm2:stop": "pm2 stop ragu2",
-    "pm2:delete": "pm2 delete ragu2",
-    "pm2:list": "pm2 list"
-  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
     "@discordx/importer": "^1.3.3",
@@ -44,20 +28,9 @@
     "yamd2": "^1.5.2",
     "hitd2": "^1.2.1"
   },
-  "devDependencies": {
-    "@dirold2/dev-tools": "^1.1.3",
-    "@types/ms": "^2.1.0",
-    "@types/node": "^26.4.1",
-    "chokidar": "^5.0.0",
-    "dirname-filename-esm": "^1.1.2",
-    "ms": "^2.1.3",
-    "oxfmt": "^0.66.0",
-    "oxlint": "^1.81.0",
-    "zod": "^4.5.4",
-    "esbuild": "latest"
-  },
   "imports": {
     "#*": "./src/*",
     "#utils": "./utils/*"
-  }
+  },
+  "private": false
 }

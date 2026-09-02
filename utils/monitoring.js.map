@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/utils/monitoring.ts"],
+  "sourcesContent": ["import client from \"prom-client\";\n\n// Create a Registry which registers the metrics\nconst register = new client.Registry();\n\n// Add a default label which is added to all metrics\nregister.setDefaultLabels({\n  app: \"discord-music-bot\",\n});\n\n// Enable the collection of default metrics\nclient.collectDefaultMetrics({ register });\n\n// Create a custom counter for track plays\nconst trackPlayCounter = new client.Counter({\n  name: \"track_plays_total\",\n  help: \"Total number of tracks played\",\n  labelNames: [\"status\"],\n});\n\nregister.registerMetric(trackPlayCounter);\n\nexport { register, trackPlayCounter };\n"],
+  "mappings": "aAAA,OAAOA,MAAY,cAGnB,MAAMC,EAAW,IAAID,EAAO,SAG5BC,EAAS,iBAAiB,CACxB,IAAK,oBACN,EAGDD,EAAO,sBAAsB,CAAE,SAAAC,CAAQ,CAAE,EAGzC,MAAMC,EAAmB,IAAIF,EAAO,QAAQ,CAC1C,KAAM,oBACN,KAAM,gCACN,WAAY,CAAC,QAAQ,EACtB,EAEDC,EAAS,eAAeC,CAAgB,EAExC,OAASD,KAAA,SAAUC,KAAA",
+  "names": ["client", "register", "trackPlayCounter"]
+}

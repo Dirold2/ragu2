@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/errors/index.ts"],
+  "sourcesContent": ["export class UserNotInVoiceChannelError extends Error {\n  constructor() {\n    super(\"User is not in a voice channel\");\n    this.name = \"UserNotInVoiceChannelError\";\n  }\n}\n\nexport class TrackNotFoundError extends Error {\n  constructor(trackId: string) {\n    super(`Track not found: ${trackId}`);\n    this.name = \"TrackNotFoundError\";\n  }\n}\n\nexport class VoiceConnectionError extends Error {\n  constructor(message: string) {\n    super(message);\n    this.name = \"VoiceConnectionError\";\n  }\n}\n\nexport class PluginNotFoundError extends Error {\n  constructor(source: string) {\n    super(`Plugin not found for source: ${source}`);\n    this.name = \"PluginNotFoundError\";\n  }\n}\n\nexport class ValidationError extends Error {\n  constructor(message: string) {\n    super(message);\n    this.name = \"ValidationError\";\n  }\n}\n"],
+  "mappings": "aAAM,aAAO,mCAAmC,KAAK,CACnD,aAAA,CACE,MAAM,gCAAgC,EACtC,KAAK,KAAO,4BACd,EAGI,aAAO,2BAA2B,KAAK,CAC3C,YAAYA,EAAe,CACzB,MAAM,oBAAoBA,CAAO,EAAE,EACnC,KAAK,KAAO,oBACd,EAGI,aAAO,6BAA6B,KAAK,CAC7C,YAAYC,EAAe,CACzB,MAAMA,CAAO,EACb,KAAK,KAAO,sBACd,EAGI,aAAO,4BAA4B,KAAK,CAC5C,YAAYC,EAAc,CACxB,MAAM,gCAAgCA,CAAM,EAAE,EAC9C,KAAK,KAAO,qBACd,EAGI,aAAO,wBAAwB,KAAK,CACxC,YAAYD,EAAe,CACzB,MAAMA,CAAO,EACb,KAAK,KAAO,iBACd",
+  "names": ["trackId", "message", "source"]
+}

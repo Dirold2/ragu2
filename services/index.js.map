@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/services/index.ts"],
+  "sourcesContent": ["// SCHEMA TYPE\nexport { TrackSchema, TrackResultSchema } from \"../types/index.js\";\n// TYPE\nexport type { Track, SearchTrackResult } from \"../types/index.js\";\n\n// SERVICE\nexport { default as CommandService } from \"./CommandService.js\";\nexport { default as PlayerService } from \"./player/PlayerService.js\";\nexport { default as PlayerManager } from \"./player/PlayerManager.js\";\nexport { default as PluginManager } from \"./PluginManager.js\";\nexport { default as NameService } from \"./NameService.js\";\nexport { default as CacheQueueService } from \"./player/QueueService.js\";\n"],
+  "mappings": "aACA,OAAS,YAAa,sBAAyB,oBAK/C,OAAS,WAAW,mBAAsB,sBAC1C,OAAS,WAAW,kBAAqB,4BACzC,OAAS,WAAW,kBAAqB,4BACzC,OAAS,WAAW,kBAAqB,qBACzC,OAAS,WAAW,gBAAmB,mBACvC,OAAS,WAAW,sBAAyB",
+  "names": []
+}
