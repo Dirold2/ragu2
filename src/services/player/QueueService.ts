@@ -12,8 +12,7 @@ interface EnhancedQueueResult extends QueueResult {
 }
 
 export default class CacheQueueService {
-  private static readonly DEFAULT_VOLUME =
-    config.audio.volume.default * 100 || 20;
+  private static readonly DEFAULT_VOLUME = config.audio.volume.default * 100 || 20;
   private static readonly CACHE_TTL = 60000;
 
   private readonly trackCache = new Map<string, Map<string, Track>>();
@@ -23,11 +22,7 @@ export default class CacheQueueService {
   constructor(
     private readonly logger: Logger,
     private readonly locale: {
-      t(
-        key: string,
-        params?: Record<string, unknown>,
-        lang?: string | boolean,
-      ): string;
+      t(key: string, params?: Record<string, unknown>, lang?: string | boolean): string;
     },
     ttl = 3600,
   ) {
@@ -68,10 +63,8 @@ export default class CacheQueueService {
 
   async setTrack(guildId: string, track: Track): Promise<void> {
     try {
-      this.clearWaveState(guildId);
       const validatedTrack = TrackSchema.parse(track) as Track;
-      const guildCache =
-        this.getGuildTracks(guildId) || new Map<string, Track>();
+      const guildCache = this.getGuildTracks(guildId) || new Map<string, Track>();
 
       if (validatedTrack.priority) {
         const existingEntries = Array.from(guildCache.entries());
@@ -103,13 +96,9 @@ export default class CacheQueueService {
     try {
       if (!tracks?.length) return;
 
-      this.clearWaveState(guildId);
-      const validatedTracks = tracks.map(
-        (track) => TrackSchema.parse(track) as Track,
-      );
+      const validatedTracks = tracks.map((track) => TrackSchema.parse(track) as Track);
 
-      const guildCache =
-        this.getGuildTracks(guildId) || new Map<string, Track>();
+      const guildCache = this.getGuildTracks(guildId) || new Map<string, Track>();
 
       for (const track of validatedTracks) {
         guildCache.set(randomUUID(), track);
@@ -208,9 +197,7 @@ export default class CacheQueueService {
   }
 
   private getMetaData<T>(guildId: string, key: string, defaultValue: T): T {
-    return (
-      (this.metaCache.get(`${key}:${guildId}`) as T | undefined) ?? defaultValue
-    );
+    return (this.metaCache.get(`${key}:${guildId}`) as T | undefined) ?? defaultValue;
   }
 
   private setMetaData(guildId: string, key: string, value: unknown): void {
@@ -247,25 +234,14 @@ export default class CacheQueueService {
 
   setWave(guildId: string, wave: boolean): void {
     this.setMetaData(guildId, "waveStatus", wave);
-    if (!wave) this.clearWaveState(guildId);
   }
 
   getVolume(guildId: string): number {
-    return this.getMetaData(
-      guildId,
-      "volume",
-      CacheQueueService.DEFAULT_VOLUME,
-    );
+    return this.getMetaData(guildId, "volume", CacheQueueService.DEFAULT_VOLUME);
   }
 
   setVolume(guildId: string, volume: number): void {
     this.setMetaData(guildId, "volume", Number(volume));
-  }
-
-  clearWaveState(guildId: string): void {
-    ["waveSeed", "wavePos"].forEach((key) =>
-      this.metaCache.delete(`${key}:${guildId}`),
-    );
   }
 
   private getGuildTracks(guildId: string): Map<string, Track> | undefined {
@@ -296,15 +272,7 @@ export default class CacheQueueService {
     try {
       this.trackCache.delete(guildId);
       this.queueCache.delete(guildId);
-      [
-        "lastTrack",
-        "lastTrackId",
-        "loop",
-        "waveStatus",
-        "volume",
-        "waveSeed",
-        "wavePos",
-      ].forEach((key) => this.metaCache.delete(`${key}:${guildId}`));
+      this.invalidateQueueCache(guildId);
     } catch (error) {
       this.logger.error(
         `${this.locale.t("messages.cacheQueueService.errors.clear_queue", {
@@ -336,13 +304,5 @@ export default class CacheQueueService {
 
   private invalidateQueueCache(guildId: string): void {
     this.queueCache.delete(guildId);
-  }
-
-  async getLastPlayedTracks(): Promise<Track[]> {
-    return [];
-  }
-
-  async getTopPlayedTracks(): Promise<Track[]> {
-    return [];
   }
 }

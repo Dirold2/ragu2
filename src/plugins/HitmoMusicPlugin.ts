@@ -5,10 +5,7 @@ import { HITApi } from "hitd2";
 
 export default class HitmoMusicPlugin implements MusicServicePlugin {
   name = "hitmos";
-  urlPatterns = [
-    /(?:^|\.)hitmos\.(?:me|fm)(?:\/|$)/,
-    /(?:^|\.)hitmoz\.org(?:\/|$)/,
-  ];
+  urlPatterns = [/(?:^|\.)hitmos\.(?:me|fm)(?:\/|$)/, /(?:^|\.)hitmoz\.org(?:\/|$)/];
 
   private api: HITApi;
   private readonly sourceUrls = new Map<string, string>();
@@ -42,10 +39,7 @@ export default class HitmoMusicPlugin implements MusicServicePlugin {
         generation: false,
       }));
     } catch (error) {
-      console.error(
-        `[Plugin:${this.name}] Search failed for "${trackName}":`,
-        error,
-      );
+      console.error(`[Plugin:${this.name}] Search failed for "${trackName}":`, error);
       return [];
     }
   }
@@ -69,10 +63,7 @@ export default class HitmoMusicPlugin implements MusicServicePlugin {
         },
       ];
     } catch (error) {
-      console.error(
-        `[Plugin:${this.name}] URL processing failed for "${url}":`,
-        error,
-      );
+      console.error(`[Plugin:${this.name}] URL processing failed for "${url}":`, error);
       return [];
     }
   }

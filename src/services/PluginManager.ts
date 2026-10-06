@@ -27,13 +27,6 @@ export default class PluginManager {
     );
   }
 
-  attachHeaders(plugin: MusicServicePlugin, url: string) {
-    return {
-      url,
-      headers: plugin.getApiHeaders?.(url) ?? {},
-    };
-  }
-
   async initializePlugins(): Promise<void> {
     if (this.isInitializing) return;
     this.isInitializing = true;
@@ -64,21 +57,6 @@ export default class PluginManager {
     await Promise.allSettled(initPromises);
     this.isInitializing = false;
     this.logger?.info?.("Plugin initialization process finished");
-  }
-
-  async initializeSinglePlugin(name: string): Promise<void> {
-    const plugin = this.getPlugin(name);
-    if (!plugin || this.disabledPlugins.has(name) || this.initializedPlugins.has(name)) return;
-
-    try {
-      if (typeof plugin.initialize === "function") {
-        await plugin.initialize();
-      }
-      this.initializedPlugins.add(name);
-    } catch (error) {
-      this.handleError("initializeSinglePlugin", error, `Init failed for ${name}`);
-      this.disablePlugin(name);
-    }
   }
 
   registerPlugin(plugin: MusicServicePlugin | null | undefined): boolean {
@@ -121,30 +99,6 @@ export default class PluginManager {
       );
       return false;
     }
-  }
-
-  enablePlugin(name: string): boolean {
-    const normalized = name?.trim();
-    if (!normalized) {
-      this.logger?.warn?.("PluginManager.enablePlugin: empty plugin name");
-      return false;
-    }
-
-    if (!this.plugins.has(normalized)) {
-      this.logger?.warn?.(`Cannot enable unknown plugin "${normalized}"`);
-      return false;
-    }
-
-    if (!this.disabledPlugins.has(normalized)) {
-      this.logger?.debug?.(`Plugin "${normalized}" is already enabled`);
-      return true;
-    }
-
-    this.disabledPlugins.delete(normalized);
-    const plugin = this.plugins.get(normalized);
-    if (plugin) plugin.disabled = false;
-    this.logger?.info?.(`Plugin "${normalized}" enabled`);
-    return true;
   }
 
   disablePlugin(name: string): boolean {

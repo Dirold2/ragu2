@@ -107,7 +107,7 @@ export class TrackManager {
   /**
    * Gets recommendations for a track with type safety
    */
-  async getRecommendations(trackId: string): Promise<Track[]> {
+  async getRecommendations(trackId: string, sessionKey?: string): Promise<Track[]> {
     if (!trackId?.trim()) return [];
 
     try {
@@ -116,7 +116,7 @@ export class TrackManager {
         return [];
       }
 
-      const rawRecommendations = await plugin.getRecommendations(trackId);
+      const rawRecommendations = await plugin.getRecommendations(trackId, sessionKey);
       if (!Array.isArray(rawRecommendations)) {
         return [];
       }
@@ -177,7 +177,7 @@ export class TrackManager {
           .filter(Boolean)
           .join(", ")
       : "";
-    return artists ? `${rec.title} - ${artists}` : rec.title;
+    return artists ? `${artists} - ${rec.title}` : rec.title;
   }
 
   /**

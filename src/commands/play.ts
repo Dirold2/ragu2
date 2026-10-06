@@ -14,6 +14,8 @@ export class PlayCommand {
   private static readonly MIN_QUERY_LENGTH = 2;
   private static readonly MAX_CHOICE_LENGTH = 100;
   private static readonly AUTOCOMPLETE_TIMEOUT = 2500;
+  private static readonly AUTOCOMPLETE_DEBOUNCE = 300;
+  private static readonly latestAutocompleteRequests = new Map<string, string>();
 
   @Slash({
     name: "play",
@@ -44,28 +46,49 @@ export class PlayCommand {
     interaction: AutocompleteInteraction,
     query: string | undefined,
   ): Promise<void> {
-    // Ранний выход для коротких запросов
-    if (!query || query.length < PlayCommand.MIN_QUERY_LENGTH) {
-      await this.safeRespond(interaction, []);
-      return;
-    }
+    const requestKey = `${interaction.guildId ?? "dm"}:${interaction.user.id}`;
+    PlayCommand.latestAutocompleteRequests.set(requestKey, interaction.id);
 
-    // Проверка таймаута перед началом
-    if (Date.now() - interaction.createdTimestamp >= PlayCommand.AUTOCOMPLETE_TIMEOUT) {
-      await this.safeRespond(interaction, []);
-      return;
-    }
-
-    const { nameService, logger } = getDeps();
     try {
-      const results = await nameService.searchName(query);
-      const choices = this.buildAutocompleteChoices(results, query);
+      if (!query || query.length < PlayCommand.MIN_QUERY_LENGTH) {
+        await this.safeRespond(interaction, []);
+        return;
+      }
 
-      await this.safeRespond(interaction, choices);
-    } catch (error) {
-      logger.error(`Autocomplete failed for "${query}": ${getErrorMessage(error)}`);
-      await this.safeRespond(interaction, []);
+      await this.sleep(PlayCommand.AUTOCOMPLETE_DEBOUNCE);
+      if (PlayCommand.latestAutocompleteRequests.get(requestKey) !== interaction.id) {
+        await this.safeRespond(interaction, []);
+        return;
+      }
+
+      if (Date.now() - interaction.createdTimestamp >= PlayCommand.AUTOCOMPLETE_TIMEOUT) {
+        await this.safeRespond(interaction, []);
+        return;
+      }
+
+      const { nameService, logger } = getDeps();
+      try {
+        const results = await nameService.searchName(query);
+        if (PlayCommand.latestAutocompleteRequests.get(requestKey) !== interaction.id) {
+          await this.safeRespond(interaction, []);
+          return;
+        }
+
+        const choices = this.buildAutocompleteChoices(results, query);
+        await this.safeRespond(interaction, choices);
+      } catch (error) {
+        logger.error(`Autocomplete failed for "${query}": ${getErrorMessage(error)}`);
+        await this.safeRespond(interaction, []);
+      }
+    } finally {
+      if (PlayCommand.latestAutocompleteRequests.get(requestKey) === interaction.id) {
+        PlayCommand.latestAutocompleteRequests.delete(requestKey);
+      }
     }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async handleCommand(
@@ -94,7 +117,11 @@ export class PlayCommand {
 
       if (!filteredResults.length) {
         await interaction.editReply(
-          t("commands.play.errors.search", { query: searchQuery }, interaction.guild?.preferredLocale || "en"),
+          t(
+            "commands.play.errors.search",
+            { query: searchQuery },
+            interaction.guild?.preferredLocale || "en",
+          ),
         );
         return;
       }
@@ -145,9 +172,7 @@ export class PlayCommand {
       }));
   }
 
-  private parseAutocompleteSelection(
-    value: string,
-  ): { source: string; query: string } | null {
+  private parseAutocompleteSelection(value: string): { source: string; query: string } | null {
     const match = /^__ragu__:(?<source>[^:]+):(?<query>.+)$/u.exec(value);
     if (!match?.groups) return null;
 

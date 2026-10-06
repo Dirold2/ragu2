@@ -24,28 +24,9 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "skipLibCheck": true,
-    "paths": {
-      "*": ["./node_modules/*", "./src/types/*"],
-      "#utils/*": ["./src/utils/*"],
-      "#service/*": ["./src/services/*"],
-      "#commands/*": ["./src/commands/*"],
-      "#plugins/*": ["./src/plugins/*"],
-      "#*": [
-        "./src/*",
-        "./src/*.ts",
-        "./src/*.tsx",
-        "./src/*.js",
-        "./src/*.jsx",
-        "./utils/*",
-        "./utils/*.ts",
-        "./utils/*.tsx",
-        "./utils/*.js",
-        "./utils/*.jsx",
-      ],
-    },
     "resolveJsonModule": true,
-    "isolatedModules": true,
+    "isolatedModules": true
   },
-  "include": ["src/**/*", "pla.ts"],
-  "exclude": ["node_modules", "dist", "**/*.spec.ts"],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
 }

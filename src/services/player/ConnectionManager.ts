@@ -14,10 +14,12 @@ import {
   type VoiceConnection,
   VoiceConnectionStatus,
 } from "@discordjs/voice";
-import ms from "ms";
 
 interface ClientSubset {
   user?: { id: string } | null;
+  rest: {
+    put(route: string, options: { body: { status: string | null } }): Promise<unknown>;
+  };
   guilds: {
     fetch(id: string): Promise<{
       channels: {
@@ -78,10 +80,7 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
       }
     }
 
-    this.connection = await this.establishConnection(
-      voiceChannelId,
-      interaction,
-    );
+    this.connection = await this.establishConnection(voiceChannelId, interaction);
     this.setupConnectionHandlers();
     this.startEmptyCheck();
     this.startIdleTimeout();
@@ -98,8 +97,7 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
     const connection = joinVoiceChannel({
       channelId,
       guildId: this.guildId,
-      adapterCreator: interaction.guild
-        .voiceAdapterCreator as DiscordGatewayAdapterCreator,
+      adapterCreator: interaction.guild.voiceAdapterCreator as DiscordGatewayAdapterCreator,
       selfDeaf: false,
       selfMute: false,
     });
@@ -112,8 +110,7 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
   private hasVoiceAccess(member: GuildMember): boolean {
     const voiceChannel = member.voice.channel;
     return Boolean(
-      voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) &&
-      voiceChannel.id,
+      voiceChannel?.permissionsFor(member)?.has(PermissionFlagsBits.Connect) && voiceChannel.id,
     );
   }
 
@@ -149,10 +146,7 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
     };
     this.destroyHandler = destroyHandler;
 
-    this.connection.on(
-      VoiceConnectionStatus.Disconnected,
-      this.disconnectHandler,
-    );
+    this.connection.on(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
     this.connection.on(VoiceConnectionStatus.Destroyed, destroyHandler);
 
     // FIX: Defensive checks to prevent accessing .state of null during recurring interval
@@ -187,7 +181,7 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
   private startEmptyCheck(): void {
     if (this.emptyChannelInterval) clearInterval(this.emptyChannelInterval);
 
-    this.emptyChannelInterval = setInterval(() => this.checkEmpty(), ms("30s"));
+    this.emptyChannelInterval = setInterval(() => this.checkEmpty(), 30_000);
   }
 
   private async checkEmpty(): Promise<void> {
@@ -201,16 +195,14 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
     }
 
     const userId = this.client.user?.id;
-    const membersCount = channel.members.filter(
-      (m) => !m.user.bot && m.id !== userId,
-    ).size;
+    const membersCount = channel.members.filter((m) => !m.user.bot && m.id !== userId).size;
 
     if (membersCount === 0) {
       if (!this.emptyChannelTimeout) {
         this.emptyChannelTimeout = setTimeout(() => {
           this.emit("empty");
-          this.leaveChannel();
-        }, ms("30s"));
+          void this.leaveChannel();
+        }, 30_000);
       }
     } else if (this.emptyChannelTimeout) {
       clearTimeout(this.emptyChannelTimeout);
@@ -222,11 +214,9 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
   startIdleTimeout(): void {
     if (this.idleTimeout) clearTimeout(this.idleTimeout);
     this.idleTimeout = setTimeout(() => {
-      this.logger.debug(
-        "[ConnectionManager] Idle for 10 minutes, leaving channel",
-      );
-      this.leaveChannel();
-    }, ms("10m"));
+      this.logger.debug("[ConnectionManager] Idle for 10 minutes, leaving channel");
+      void this.leaveChannel();
+    }, 600_000);
   }
 
   clearIdleTimeout(): void {
@@ -266,7 +256,23 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
     }
   }
 
-  leaveChannel(): void {
+  async setVoiceChannelStatus(status: string | null): Promise<void> {
+    const channel = await this.getVoiceChannel();
+    if (!channel) return;
+
+    try {
+      await this.client.rest.put(`/channels/${channel.id}/voice-status`, {
+        body: { status },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[ConnectionManager] Failed to update voice channel status: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  async leaveChannel(): Promise<void> {
+    await this.setVoiceChannelStatus(null);
     const connection = this.connection;
     this.forceCleanup();
     connection?.destroy();
@@ -275,10 +281,7 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
 
   getConnection(): VoiceConnection | null {
     // Defensive: only access state if this.connection is not null
-    if (
-      this.connection &&
-      this.connection.state?.status === VoiceConnectionStatus.Destroyed
-    ) {
+    if (this.connection && this.connection.state?.status === VoiceConnectionStatus.Destroyed) {
       this.forceCleanup();
       return null;
     }
@@ -287,10 +290,7 @@ export class ConnectionManager extends MiniEmitter<ConnectionManagerEvents> {
 
   private forceCleanup(): void {
     if (this.connection && this.disconnectHandler) {
-      this.connection.off(
-        VoiceConnectionStatus.Disconnected,
-        this.disconnectHandler,
-      );
+      this.connection.off(VoiceConnectionStatus.Disconnected, this.disconnectHandler);
     }
     if (this.connection && this.destroyHandler) {
       this.connection.off(VoiceConnectionStatus.Destroyed, this.destroyHandler);

@@ -1,15 +1,19 @@
 {
   "name": "ragu2",
-  "version": "0.2.2",
+  "version": "0.2.3",
+  "private": true,
   "description": "Discord bot module for RAGU2",
   "repository": {
     "type": "git",
     "url": "https://github.com/dirold2/ragu2.git"
   },
   "type": "module",
-  "private": true,
   "main": "index.js",
   "types": "index.d.ts",
+  "imports": {
+    "#*": "./src/*",
+    "#utils": "./utils/*"
+  },
   "scripts": {
     "build": "tsc && esbuild 'dist/**/*.js' --outdir=dist --allow-overwrite --minify --sourcemap && d-build",
     "dev": "tsx src/main.ts",
@@ -28,36 +32,28 @@
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
     "@discordx/importer": "^1.3.3",
-    "@dotenvx/dotenvx": "^2.23.0",
+    "@dotenvx/dotenvx": "^2.33.0",
     "async-retry": "^1.3.3",
     "discord.js": "^14.27.0",
     "discordx": "^11.13.3",
     "dlog2": "^0.1.3",
-    "execa": "^10.0.1",
     "fluent-streamer": "^0.5.5",
     "get-audio-duration": "^4.0.1",
     "hcacher": "^0.3.0",
     "hemmiter": "^0.1.0",
+    "hitd2": "^1.2.1",
     "opusscript": "^0.1.1",
     "prom-client": "^15.1.3",
     "typescript": "^7.0.2",
-    "yamd2": "^1.5.2",
-    "hitd2": "^1.2.1"
+    "yamd2": "^1.5.2"
   },
   "devDependencies": {
     "@dirold2/dev-tools": "^1.1.3",
-    "@types/ms": "^2.1.0",
-    "@types/node": "^26.4.1",
-    "chokidar": "^5.0.0",
+    "@types/node": "^26.6.4",
     "dirname-filename-esm": "^1.1.2",
-    "ms": "^2.1.3",
-    "oxfmt": "^0.66.0",
-    "oxlint": "^1.81.0",
-    "zod": "^4.5.4",
-    "esbuild": "latest"
-  },
-  "imports": {
-    "#*": "./src/*",
-    "#utils": "./utils/*"
+    "esbuild": "latest",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "zod": "^4.6.5"
   }
 }

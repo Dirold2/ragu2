@@ -28,9 +28,6 @@
     "out_file": "./logs/pm2/out.log",
     "time": true,
     "source_map_support": true,
-    "node_args": [
-      "--enable-source-maps",
-      "--experimental-specifier-resolution=node"
-    ]
+    "node_args": ["--enable-source-maps", "--experimental-specifier-resolution=node"]
   }
 ]

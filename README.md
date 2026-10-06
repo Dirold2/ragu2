@@ -2,26 +2,31 @@
 
 Discord music bot with Yandex Music integration, audio processing, and localization.
 
-[__English__](./README.md), [Русский](./lang/ru/README.md)
+[**English**](./README.md), [Русский](./lang/ru/README.md)
 
 ## Features
 
 - **Playback** — play, pause, skip, shuffle, queue, loop
 - **Equalizer** — bass (`-20`–`20`), treble (`-10`–`20`), compressor
 - **Volume** — adjustable with smooth fade in/out
-- **My Wave** — endless radio from the last track
+- **My Wave** — endless Yandex Music radio seeded by the last manually played Yandex track; tracks from other sources do not reset the station
 - **History & Top** — recently played and most popular tracks
 - **Queue management** — view, clear, auto-advance
+- **Voice channel status** — displays the currently playing track in Discord
 - **Reconnect** — automatic reconnection on network drops
 - **Localization** — English and Russian
 - **Plugin system** — extensible music platform support
 
 ## Supported Platforms
 
-| Platform | Status |
-|----------|--------|
-| Yandex Music | ✅ |
-| Hitmo Music | ✅ |
+| Platform     | Status |
+| ------------ | ------ |
+| Yandex Music | ✅     |
+| Hitmo Music  | ✅     |
+
+## Discord Permissions
+
+To display the current track in a voice channel status, grant the bot the `Set Voice Channel Status` permission. The bot updates the status only after joining the voice channel.
 
 ## Installation
 
@@ -57,20 +62,20 @@ npm run pm2:start
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `/play <query>` | Search and play a track |
-| `/pause` | Pause / resume |
-| `/skip` | Skip to next track |
-| `/volume <0–100>` | Set volume |
+| Command               | Description                     |
+| --------------------- | ------------------------------- |
+| `/play <query>`       | Search and play a track         |
+| `/pause`              | Pause / resume                  |
+| `/skip`               | Skip to next track              |
+| `/volume <0–100>`     | Set volume                      |
 | `/eq <bass> <treble>` | Adjust equalizer (bass, treble) |
-| `/loop` | Toggle queue loop |
-| `/shuffle` | Shuffle queue |
-| `/queue` | Show queue |
-| `/wave` | Start My Wave radio |
-| `/other history` | Recently played |
-| `/other top` | Most popular tracks |
-| `/other queuedel` | Clear queue |
+| `/loop`               | Toggle queue loop               |
+| `/shuffle`            | Shuffle queue                   |
+| `/queue`              | Show queue                      |
+| `/wave`               | Start My Wave radio             |
+| `/other history`      | Recently played                 |
+| `/other top`          | Most popular tracks             |
+| `/other queuedel`     | Clear queue                     |
 
 ## Project Structure
 

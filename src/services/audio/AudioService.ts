@@ -53,6 +53,14 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
     this.ffmpeg.compressor = this.currentOptions.compressor;
   }
 
+  private getStreamOrigin(url: string): string {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return "<invalid URL>";
+    }
+  }
+
   async createAudioStreamForDiscord(
     url: string,
     options?: Partial<AudioProcessingOptions>,
@@ -87,16 +95,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
           url,
         )
         .audioCodec("pcm_s16le")
-        .outputOptions(
-          "-f",
-          "s16le",
-          "-ar",
-          "48000",
-          "-ac",
-          "2",
-          "-af",
-          "volume=0.1",
-        )
+        .outputOptions("-f", "s16le", "-ar", "48000", "-ac", "2", "-af", "volume=0.1")
         .output({ pipe: "pipe:1" });
 
       const { output, done, stop } = await this.ffmpeg.run();
@@ -122,7 +121,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
 
       this.emit(
         "debug",
-        `[AudioService] Stream created successfully for: ${url}`,
+        `[AudioService] Stream created successfully from: ${this.getStreamOrigin(url)}`,
       );
       return { stream: output, type: StreamType.Raw };
     } finally {
@@ -151,11 +150,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
     }
   }
 
-  async setVolume(
-    target: number,
-    duration: number = 1000,
-    set: boolean = true,
-  ) {
+  async setVolume(target: number, duration: number = 1000, set: boolean = true) {
     target = Math.max(0, Math.min(1, target));
     if (set) {
       this.currentOptions.volume = target;
@@ -172,10 +167,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
 
     const changed = this.ffmpeg.changeVolume(volume);
     if (!changed) {
-      this.emit(
-        "debug",
-        `[AudioService] Volume will be applied on next track: ${volume}`,
-      );
+      this.emit("debug", `[AudioService] Volume will be applied on next track: ${volume}`);
     }
 
     this.emit("volumeChanged", volume * 100);
@@ -185,10 +177,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
     this.currentOptions.bass = bass;
     const changed = this.ffmpeg.changeBass(bass);
     if (!changed) {
-      this.emit(
-        "debug",
-        `[AudioService] Bass will be applied on next track: ${bass}`,
-      );
+      this.emit("debug", `[AudioService] Bass will be applied on next track: ${bass}`);
     }
 
     this.emit("equalizerChanged", this.currentOptions);
@@ -198,10 +187,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
     this.currentOptions.treble = treble;
     const changed = this.ffmpeg.changeTreble(treble);
     if (!changed) {
-      this.emit(
-        "debug",
-        `[AudioService] Treble will be applied on next track: ${treble}`,
-      );
+      this.emit("debug", `[AudioService] Treble will be applied on next track: ${treble}`);
     }
 
     this.emit("equalizerChanged", this.currentOptions);
@@ -211,10 +197,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
     this.currentOptions.compressor = enabled;
     const changed = this.ffmpeg.changeCompressor(enabled);
     if (!changed) {
-      this.emit(
-        "debug",
-        `[AudioService] Compressor will be applied on next track: ${enabled}`,
-      );
+      this.emit("debug", `[AudioService] Compressor will be applied on next track: ${enabled}`);
     }
 
     this.emit("compressorChanged", enabled);
@@ -224,10 +207,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
     this.currentOptions.normalize = enabled;
     const changed = this.ffmpeg.changeNormalize(enabled);
     if (!changed) {
-      this.emit(
-        "debug",
-        `[AudioService] Normalize will be applied on next track: ${enabled}`,
-      );
+      this.emit("debug", `[AudioService] Normalize will be applied on next track: ${enabled}`);
     }
 
     this.emit("normalizeChanged", enabled);
@@ -254,10 +234,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
 
       this.emit("debug", "[AudioService] Stream destroyed");
     } catch (e) {
-      this.emit(
-        "debug",
-        `[AudioService] Destroy failed: ${(e as Error).message}`,
-      );
+      this.emit("debug", `[AudioService] Destroy failed: ${(e as Error).message}`);
     }
   }
 }

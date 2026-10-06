@@ -1,5 +1,6 @@
 import { type CommandInteraction, type GuildMember } from "discord.js";
 import { z } from "zod";
+import { CacheManager } from "hcacher";
 import type { Logger } from "dlog2";
 import { PluginNotFoundError, UserNotInVoiceChannelError } from "../errors/index.js";
 import type { MusicServicePlugin } from "../interfaces/index.js";
@@ -15,10 +16,17 @@ import {
 } from "./index.js";
 
 const TrackUrlSchema = z.url();
+const SEARCH_CACHE_TTL = 30_000;
 
 type LocaleT = (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;
 
 export default class NameService {
+  private readonly searchCache = new CacheManager<SearchTrackResult[]>({
+    maxSize: 500,
+    ttl: SEARCH_CACHE_TTL,
+    touchOnGet: true,
+  });
+
   constructor(
     private readonly queueService: CacheQueueService,
     private readonly playerManager: PlayerManager,
@@ -62,19 +70,24 @@ export default class NameService {
 
     if (!trimmedName) return [];
 
-    try {
-      const result = await this.withTimeout(
-        TrackUrlSchema.safeParse(trimmedName).success
-          ? this.searchAndProcessURL(trimmedName)
-          : this.searchAcrossPlugins(trimmedName),
-        TIMEOUT_MS,
-      );
+    const isUrl = TrackUrlSchema.safeParse(trimmedName).success;
+    const cacheKey = isUrl ? trimmedName : trimmedName.toLocaleLowerCase();
 
-      this.logger.debug(`Found ${result.length} results for: ${trimmedName}`);
-      return result;
-    } catch {
-      return [];
-    }
+    return this.searchCache.getOrSet(cacheKey, async () => {
+      try {
+        const result = await this.withTimeout(
+          isUrl
+            ? this.searchAndProcessURL(trimmedName)
+            : this.searchAcrossPlugins(trimmedName),
+          TIMEOUT_MS,
+        );
+
+        this.logger.debug(`Found ${result.length} results for: ${trimmedName}`);
+        return result;
+      } catch {
+        return [];
+      }
+    });
   }
 
   /**
@@ -195,7 +208,9 @@ export default class NameService {
    */
   private async searchAcrossPlugins(trackName: string): Promise<SearchTrackResult[]> {
     const results = await Promise.allSettled(
-      this.pluginManager.getActivePlugins().map((plugin) => this.searchWithPlugin(plugin, trackName)),
+      this.pluginManager
+        .getActivePlugins()
+        .map((plugin) => this.searchWithPlugin(plugin, trackName)),
     );
 
     return results
@@ -280,27 +295,20 @@ export default class NameService {
       await this.playerManager.playOrQueueTrack(guildId, firstTrack);
     }
 
-    await this.processInBatches(
-      queuedTracks,
-      BATCH_SIZE,
-      300,
-      async (batchTracks) => {
-        const currentBatch = Math.ceil(
-          (queuedTracks.indexOf(batchTracks[0]) + 1) / BATCH_SIZE,
-        );
-        const totalBatches = Math.ceil(queuedTracks.length / BATCH_SIZE);
+    await this.processInBatches(queuedTracks, BATCH_SIZE, 300, async (batchTracks) => {
+      const currentBatch = Math.ceil((queuedTracks.indexOf(batchTracks[0]) + 1) / BATCH_SIZE);
+      const totalBatches = Math.ceil(queuedTracks.length / BATCH_SIZE);
 
-        this.logger.debug(
-          this.localeT("messages.nameService.success.processing_batch", {
-            current: currentBatch,
-            total: totalBatches,
-            batchSize: batchTracks.length,
-          }),
-        );
+      this.logger.debug(
+        this.localeT("messages.nameService.success.processing_batch", {
+          current: currentBatch,
+          total: totalBatches,
+          batchSize: batchTracks.length,
+        }),
+      );
 
-        await this.processPlaylistTrack(batchTracks, guildId, requestedBy);
-      },
-    );
+      await this.processPlaylistTrack(batchTracks, guildId, requestedBy);
+    });
   }
 
   /**

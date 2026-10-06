@@ -1,4 +1,4 @@
-import type { SearchTrackResult } from "../types/index.js";
+import type { SearchTrackResult, Track } from "../types/index.js";
 
 export interface MusicServicePlugin {
   /** Уникальное имя плагина (например, "yandex", "spotify"). */
@@ -38,7 +38,10 @@ export interface MusicServicePlugin {
   /**
    * Опционально: получить рекомендации по треку (авторадио / похожие).
    */
-  getRecommendations?(trackId: string): Promise<SearchTrackResult[]>;
+  getRecommendations?(trackId: string, sessionKey?: string): Promise<SearchTrackResult[]>;
+
+  /** Сбрасывает состояние сессии рекомендаций для указанного ключа сессии. */
+  resetRadioSession?(sessionKey?: string): void;
 
   /**
    * Опционально: асинхронная проверка, умеет ли плагин обрабатывать данный URL
@@ -47,27 +50,6 @@ export interface MusicServicePlugin {
   includesUrl?(url: string): Promise<boolean>;
 
   getApiHeaders?(url: string): Record<string, string>;
-}
-
-export interface Track {
-  /** Отформатированная строка для отображения (например, "Artist – Title"). */
-  info: string;
-  /** Источник (например, "yandex", "spotify", "url"). */
-  source: string;
-  /** Идентификатор трека в системе конкретного плагина. */
-  trackId: string;
-
-  addedAt?: bigint;
-  priority?: boolean;
-  waveStatus?: boolean;
-  requestedBy?: string;
-  durationMs?: number;
-
-  /**
-   * Флаг, что трек был сгенерирован (рекомендации/радио),
-   * а не явно запрошен пользователем.
-   */
-  generation: boolean;
 }
 
 export interface QueueResult {

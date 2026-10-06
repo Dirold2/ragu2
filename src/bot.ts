@@ -1,9 +1,4 @@
-import {
-  type ClientEvents,
-  IntentsBitField,
-  type Interaction,
-  type Message,
-} from "discord.js";
+import { type ClientEvents, IntentsBitField, type Interaction, type Message } from "discord.js";
 import { Client } from "discordx";
 import fs from "fs";
 import path from "path";
@@ -32,7 +27,7 @@ export class Bot {
   public commandService!: CommandService;
   public pluginManager!: PluginManager;
   public logger = createLogger(`ragu2`);
-  public locale = createLocale<typeof translations>(`ragu2`);
+  public locale = createLocale<typeof translations>();
   private eventHandlers: Map<string, (...args: any[]) => void> = new Map();
 
   constructor() {
@@ -76,11 +71,7 @@ export class Bot {
         this.commandService,
         this.client,
         this.pluginManager,
-        (
-          key: string,
-          params?: Record<string, unknown>,
-          lang?: string | boolean,
-        ) =>
+        (key: string, params?: Record<string, unknown>, lang?: string | boolean) =>
           (
             this.locale.t as (
               key: string,
@@ -97,11 +88,7 @@ export class Bot {
         this.pluginManager,
         this.commandService,
         this.logger,
-        (
-          key: string,
-          params?: Record<string, unknown>,
-          lang?: string | boolean,
-        ) =>
+        (key: string, params?: Record<string, unknown>, lang?: string | boolean) =>
           (
             this.locale.t as (
               key: string,
@@ -133,9 +120,7 @@ export class Bot {
 
     try {
       const files = await fs.promises.readdir(pluginsDir);
-      const pluginFiles = files.filter(
-        (file) => file.endsWith(".ts") || file.endsWith(".js"),
-      );
+      const pluginFiles = files.filter((file) => file.endsWith(".ts") || file.endsWith(".js"));
 
       await Promise.all(
         pluginFiles.map(async (file) => {
@@ -166,8 +151,7 @@ export class Bot {
               return;
             }
 
-            const registered =
-              this.pluginManager.registerPlugin(pluginInstance);
+            const registered = this.pluginManager.registerPlugin(pluginInstance);
             if (registered) {
               this.logger.info(
                 this.locale.t(
@@ -248,10 +232,6 @@ export class Bot {
     this.eventHandlers.clear();
   }
 
-  public initEvents(): void {
-    this.setupEvents();
-  }
-
   public async destroy(): Promise<void> {
     await this.playerManager.destroyAll();
     this.removeEvents();
@@ -260,4 +240,3 @@ export class Bot {
 }
 
 export const bot = new Bot();
-export const createBot = () => new Bot();

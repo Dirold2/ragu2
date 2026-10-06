@@ -51,19 +51,13 @@ export class EqualizerCommand {
               param.value < config.audio.effects.bass.range.min ||
               param.value > config.audio.effects.bass.range.max
             ) {
-              return bot.commandService.reply(
-                interaction,
-                "commands.bass.errors.error_max",
-                {
-                  minBass: config.audio.effects.bass.range.min,
-                  maxBass: config.audio.effects.bass.range.max,
-                },
-              );
+              return bot.commandService.reply(interaction, "commands.bass.errors.error_max", {
+                minBass: config.audio.effects.bass.range.min,
+                maxBass: config.audio.effects.bass.range.max,
+              });
             }
             await bot.playerManager.setBass(guildId, param.value);
-            results.push(
-              bot.locale.t("commands.bass.set", { bass: param.value }),
-            );
+            results.push(bot.locale.t("commands.bass.set", { bass: param.value }));
             break;
 
           case "treble":
@@ -72,28 +66,19 @@ export class EqualizerCommand {
               param.value < config.audio.effects.treble.range.min ||
               param.value > config.audio.effects.treble.range.max
             ) {
-              return bot.commandService.reply(
-                interaction,
-                "commands.treble.errors.error_max",
-                {
-                  minTreble: config.audio.effects.treble.range.min,
-                  maxTreble: config.audio.effects.treble.range.max,
-                },
-              );
+              return bot.commandService.reply(interaction, "commands.treble.errors.error_max", {
+                minTreble: config.audio.effects.treble.range.min,
+                maxTreble: config.audio.effects.treble.range.max,
+              });
             }
             await bot.playerManager.setTreble(guildId, param.value);
-            results.push(
-              bot.locale.t("commands.treble.set", { treble: param.value }),
-            );
+            results.push(bot.locale.t("commands.treble.set", { treble: param.value }));
             break;
         }
       }
 
       if (results.length === 0) {
-        await bot.commandService.reply(
-          interaction,
-          "commands.equalizer.errors.nothing_provided",
-        );
+        await bot.commandService.reply(interaction, "commands.equalizer.errors.nothing_provided");
       } else {
         await interaction.reply({
           content: results.join("\n"),
@@ -106,13 +91,9 @@ export class EqualizerCommand {
           error: error instanceof Error ? error.message : String(error),
         }),
       );
-      await bot.commandService.reply(
-        interaction,
-        "commands.equalizer.errors.playback",
-        {
-          error: error instanceof Error ? error.message : String(error),
-        },
-      );
+      await bot.commandService.reply(interaction, "commands.equalizer.errors.playback", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

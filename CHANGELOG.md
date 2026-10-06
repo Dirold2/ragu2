@@ -1,17 +1,41 @@
 # Changelog
 
+## 0.2.3 (2026-10-06)
+
+### Added
+
+- The current track is displayed as the Discord voice channel status while music is playing
+- My Wave logs station creation, recommendations, seed changes, and shutdown for easier diagnosis
+
+### Changed
+
+- My Wave uses the last manually played Yandex Music track as its seed; tracks from other sources do not replace it
+- My Wave radio sessions are isolated per guild and reset when Wave is disabled or the player is destroyed
+- Search autocomplete is debounced and cached with `hcacher`, preventing duplicate plugin searches for identical queries
+- Audio stream debug logs now record only the stream origin, not signed playback URLs
+
+### Fixed
+
+- `/wave` now requires the user to be in a voice channel and a manually played Yandex Music track before it can be enabled
+- My Wave recommendation titles consistently use the `Artist — Title` format
+- Wave continues after a fade-out even if FFmpeg completes the audio stream before emitting a reliable end event
+- Discord regional locales such as `en-US` now resolve to their base locale (`en`) instead of repeatedly attempting to load a missing translation file
+
 ## 0.2.2 (2026-09-02)
 
 ### Added
+
 - Hitmo music plugin with text search, direct URL handling, metadata lookup, and audio playback
 - Source-aware autocomplete values for selecting the exact plugin result
 
 ### Changed
+
 - Normal `/play` additions now use FIFO queue ordering instead of priority insertion
 - Autocomplete selections preserve the selected source and search within that plugin only
 - Internal autocomplete values use a reserved prefix that does not conflict with `http://` or `https://` URLs
 
 ### Fixed
+
 - `/skip` now plays the earliest queued track instead of the most recently added track
 - Normal search results are no longer silently replaced by a result from Yandex when Hitmo is selected
 - Hitmo search results now resolve to Hitmo audio URLs instead of Yandex streams
@@ -21,13 +45,16 @@
 ## 0.2.1 (2026-09-01)
 
 ### Added
+
 - `hemmiter` typed event emitter for player, connection, and audio service events
 
 ### Changed
+
 - Migrated player and voice services from Node.js `EventEmitter` to `hemmiter` `MiniEmitter`
 - Updated runtime and development dependencies, including `discord.js`, `fluent-streamer`, `yamd2`, TypeScript, Ox tools, and Zod
 
 ### Fixed
+
 - Yandex Music playback uses the direct streaming URL as FFmpeg input, preventing premature end-of-stream failures
 - Forced track stops after fade-out continue to the next queued track or recommendation
 - Playback transitions continue when Discord does not emit `AudioPlayerStatus.Idle` after FFmpeg reaches EOF
@@ -47,6 +74,7 @@
 ## 0.2.0 (2026-07-02)
 
 ### Added
+
 - `/eq` slash command — equalizer as a proper Discord command (replaces standalone `equalizer.ts`)
 - `Mutex` utility class — shared async mutex in `utils/mutex.ts`
 - `getErrorMessage()` utility — standardized error string extraction (`utils/error.ts`)
@@ -54,6 +82,7 @@
 - `hcacher` cache manager — replaces `lru-cache` for queue and metadata caching
 
 ### Changed
+
 - **PlayerService refactored**: `isDestroyed`, `skipInProgress`, `isHandlingError` boolean flags replaced with `PlayerStatus` enum (`IDLE`, `PLAYING`, `PAUSED`, `TRANSITIONING`, `DESTROYED`)
 - `PlayerEffects.ts` merged into `PlayerService` — all effect methods (`setVolume`, `fadeIn`, `scheduleFadeOut`) are now directly on `PlayerService`
 - `PlayerQueue.ts` merged into `PlayerService` — queue logic (`queueTrack`, `loadNextTrack`, `peekNextTrack`, `getNextTrack`, `getRecommendation`) is now inline
@@ -67,6 +96,7 @@
 - Updated `@dotenvx/dotenvx@^2.0.0`, `oxfmt@^0.57.0`, `oxlint@^1.72.0`
 
 ### Removed
+
 - `PlayerEffects.ts` — functionality merged into `PlayerService`
 - `PlayerQueue.ts` — functionality merged into `PlayerService`
 - `equalizer.ts` standalone command — replaced by `/eq`
@@ -75,6 +105,7 @@
 - `lru-cache` dependency — replaced by `hcacher`
 
 ### Fixed
+
 - Volume range reads `config.audio.volume.range.max` instead of flat `config.volume.max`
 - Audio service race conditions eliminated via `Mutex` (was busy-wait loop)
 - Player state management race conditions via `PlayerStatus` enum transitions
@@ -82,12 +113,14 @@
 ## 0.1.5 (2026-06-28)
 
 ### Added
+
 - Audio reconnect flags (`-reconnect`, `-reconnect_streamed`, `-reconnect_delay_max`, `-reconnect_at_eof`) for network drop recovery
 - Browser User-Agent mask for Yandex Music anti-bot bypass
 - `-probesize` and `-analyzeduration` tuning for stream stability
 - `verbose` mode in `FluentStream` for debug logging
 
 ### Fixed
+
 - `CommandDeps not initialized` crash on volume/play commands
 - FFmpeg `Option re cannot be applied to output url pipe:1` — pass `-i <url>` inside `inputOptions()` to work around `fluent-streamer@0.5.3` arg ordering issue
 - Stream creation — use `ReadableStream.tee()` with a peek-then-drain pattern instead of Node `Transform` + `once("data")`
@@ -95,12 +128,14 @@
 - Type errors in `PlayerManager` constructor (6 params)
 
 ### Changed
+
 - `output("pipe:1")` → `output({ pipe: "pipe:1" })`
 - Removed `.input(url)` call (merged into `inputOptions()`)
 - Removed `ffmpeg.removeAllListeners()` from `.destroy()`
 - Updated Russian locale keys: `bass.option_boolean` → `option_number`, `treble.option_boolean` → `option_number`
 
 ### Removed
+
 - Delay, reverb, distortion, normalize effect code (no fluent-streamer support yet)
 - `equalizer.ts` standalone command (merged into `/equalizer` slash command)
 - Dead imports and unused config constants
@@ -108,6 +143,7 @@
 ## 0.1.4 (2026-05-15)
 
 ### Added
+
 - Yandex Music plugin integration
 - My Wave mode for endless radio
 - History and top tracks tracking
@@ -117,7 +153,9 @@
 - Health metrics endpoint (prom-client)
 
 ### Fixed
+
 - Empty track bug on Yandex Music side
 
 ### Changed
+
 - Replaced `node-cache` with `lru-cache` for better memory usage

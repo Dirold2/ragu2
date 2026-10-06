@@ -23,7 +23,7 @@ export default class CommandService {
    * Получает язык сервера или значение по умолчанию
    */
   private getGuildLanguage(interaction: CommandInteraction): string {
-    return interaction.guild?.preferredLocale || "en";
+    return interaction.guild?.preferredLocale.split("-")[0] || "en";
   }
 
   /**

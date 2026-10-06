@@ -1,49 +1,32 @@
 import type { CommandInteraction } from "discord.js";
-import type { Track } from "../../interfaces/index.js";
-import {
-  type CacheQueueService,
-  type CommandService,
-  PlayerService,
-} from "../index.js";
+import type { Track } from "../../types/index.js";
+import { type CacheQueueService, type CommandService, PlayerService } from "../index.js";
 import { createLogger, type Logger } from "dlog2";
 import { MiniEmitter } from "hemmiter";
 import type { MusicServicePlugin } from "../../interfaces/index.js";
-
-interface PlayerCacheEntry {
-  lastUsed: number;
-  player: PlayerService;
-}
 
 interface PlayerServiceDeps {
   logger: Logger;
   client: {
     user?: { id: string } | null;
+    rest: {
+      put(route: string, options: { body: { status: string | null } }): Promise<unknown>;
+    };
     guilds: {
-      fetch(
-        id: string,
-      ): Promise<{ channels: { fetch(): Promise<Map<string, any>> } }>;
+      fetch(id: string): Promise<{ channels: { fetch(): Promise<Map<string, any>> } }>;
     };
   };
   pluginManager: { getPlugin(name: string): MusicServicePlugin | undefined };
-  t: (
-    key: string,
-    params?: Record<string, unknown>,
-    lang?: string | boolean,
-  ) => string;
+  t: (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;
 }
 
 type PlayerManagerEvents = {
   playerCreated: [guildId: string];
-  playerRestored: [guildId: string];
   playerDestroyed: [guildId: string];
 };
 
 export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
-  private readonly players: Map<string, PlayerService> = new Map();
-  private readonly playerCache: Map<string, PlayerCacheEntry> = new Map();
-  private readonly CACHE_CLEANUP_INTERVAL = 30 * 60 * 1000;
-  private readonly INACTIVE_TIMEOUT = 3600_000;
-  private cacheCleanupInterval: NodeJS.Timeout | null = null;
+  private readonly players = new Map<string, PlayerService>();
   private readonly logger: Logger;
   private readonly playerDeps: PlayerServiceDeps;
 
@@ -58,7 +41,6 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     super();
     this.logger = logger ?? createLogger("PlayerManager");
     this.playerDeps = { logger: this.logger, client, pluginManager, t };
-    this.startCacheCleanup();
   }
 
   public getPlayer(guildId: string): PlayerService {
@@ -66,40 +48,17 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
       throw new Error("guildId is required");
     }
 
-    if (this.players.has(guildId)) {
-      const player = this.players.get(guildId)!;
-      this.updateCache(guildId, player);
-      return player;
-    }
-
-    if (this.playerCache.has(guildId)) {
-      const cacheEntry = this.playerCache.get(guildId)!;
-      cacheEntry.lastUsed = Date.now();
-      this.players.set(guildId, cacheEntry.player);
-      this.logger?.debug?.(
-        `[PlayerManager] Restored player from cache: ${guildId}`,
-      );
-      this.emit("playerRestored", guildId);
-      return cacheEntry.player;
-    }
+    const player = this.players.get(guildId);
+    if (player) return player;
 
     const newPlayer = new PlayerService(guildId, {
       ...this.playerDeps,
       queueService: this.queueService,
     });
     this.players.set(guildId, newPlayer);
-    this.playerCache.set(guildId, { lastUsed: Date.now(), player: newPlayer });
     this.logger?.debug?.(`[PlayerManager] Created new player: ${guildId}`);
     this.emit("playerCreated", guildId);
     return newPlayer;
-  }
-
-  private updateCache(guildId: string, player: PlayerService): void {
-    if (this.playerCache.has(guildId)) {
-      this.playerCache.get(guildId)!.lastUsed = Date.now();
-    } else {
-      this.playerCache.set(guildId, { player, lastUsed: Date.now() });
-    }
   }
 
   public async joinChannel(interaction: CommandInteraction): Promise<void> {
@@ -110,16 +69,11 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
       const player = this.getPlayer(handles.guildId);
       await player.joinChannel(interaction);
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to join channel: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to join channel: ${(err as Error).message}`);
     }
   }
 
-  public async playOrQueueTrack(
-    guildId: string,
-    track: Track | null,
-  ): Promise<void> {
+  public async playOrQueueTrack(guildId: string, track: Track | null): Promise<void> {
     if (!track) return;
 
     try {
@@ -137,9 +91,7 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
       const player = this.getPlayer(guildId);
       await player.skip();
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to skip: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to skip: ${(err as Error).message}`);
     }
   }
 
@@ -151,9 +103,7 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
       const player = this.getPlayer(handles.guildId);
       await player.togglePause();
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to toggle pause: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to toggle pause: ${(err as Error).message}`);
     }
   }
 
@@ -166,13 +116,9 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
       await player.setVolume(normalizedVolume);
       player.setStateVolume(normalizedVolume);
       this.queueService?.setVolume?.(guildId, normalizedVolume);
-      this.logger?.debug?.(
-        `[PlayerManager] Volume set to ${normalizedVolume}% for ${guildId}`,
-      );
+      this.logger?.debug?.(`[PlayerManager] Volume set to ${normalizedVolume}% for ${guildId}`);
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to set volume: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to set volume: ${(err as Error).message}`);
     }
   }
 
@@ -184,10 +130,14 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
   }
 
   public async setWave(guildId: string, wave: boolean): Promise<void> {
-    const player = this.getPlayer(guildId);
-    if (!player) return;
-    player.setWave(wave);
-    this.queueService?.setWave?.(guildId, wave);
+    if (!wave) {
+      this.playerDeps.pluginManager.getPlugin("yandex")?.resetRadioSession?.(guildId);
+      this.logger.debug(`[Wave] Disabled for guild: ${guildId}`);
+    } else {
+      this.logger.debug(`[Wave] Enabled for guild: ${guildId}`);
+    }
+
+    this.queueService.setWave(guildId, wave);
   }
 
   public async setCompressor(guildId: string, value: boolean): Promise<void> {
@@ -196,9 +146,7 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     try {
       player.audioService.setCompressor(value);
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to set compressor: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to set compressor: ${(err as Error).message}`);
     }
   }
 
@@ -208,9 +156,7 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     try {
       player.audioService.setNormalize(value);
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to set normalize: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to set normalize: ${(err as Error).message}`);
     }
   }
 
@@ -220,9 +166,7 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     try {
       player.audioService.setBass(value);
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to set bass: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to set bass: ${(err as Error).message}`);
     }
   }
 
@@ -232,9 +176,7 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     try {
       player.audioService.setTreble(value);
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to set treble: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to set treble: ${(err as Error).message}`);
     }
   }
 
@@ -245,15 +187,10 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     try {
       await player.destroy();
       this.players.delete(guildId);
-      this.playerCache.delete(guildId);
-      this.logger?.debug?.(
-        `[PlayerManager] Left channel and destroyed player: ${guildId}`,
-      );
+      this.logger?.debug?.(`[PlayerManager] Left channel and destroyed player: ${guildId}`);
       this.emit("playerDestroyed", guildId);
     } catch (err) {
-      this.logger?.error?.(
-        `[PlayerManager] Failed to leave channel: ${(err as Error).message}`,
-      );
+      this.logger?.error?.(`[PlayerManager] Failed to leave channel: ${(err as Error).message}`);
     }
   }
 
@@ -267,47 +204,11 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     }
 
     this.players.clear();
-    this.playerCache.clear();
-    this.stopCacheCleanup();
     this.logger?.info?.("[PlayerManager] All players destroyed");
   }
 
-  private startCacheCleanup(): void {
-    this.cacheCleanupInterval = setInterval(() => {
-      const now = Date.now();
-
-      for (const [guildId, entry] of this.playerCache.entries()) {
-        if (this.players.has(guildId)) continue;
-
-        if (now - entry.lastUsed > this.INACTIVE_TIMEOUT) {
-          this.logger?.debug?.(
-            `[PlayerManager] Removing inactive player from cache: ${guildId}`,
-          );
-          try {
-            entry.player.destroy();
-            this.players.delete(guildId);
-            this.playerCache.delete(guildId);
-            this.emit("playerDestroyed", guildId);
-          } catch {
-            // Ignore errors
-          }
-        }
-      }
-    }, this.CACHE_CLEANUP_INTERVAL);
-  }
-
-  private stopCacheCleanup(): void {
-    if (this.cacheCleanupInterval) {
-      clearInterval(this.cacheCleanupInterval);
-      this.cacheCleanupInterval = null;
-    }
-  }
-
   private safeGetPlayer(guildId?: string): PlayerService | null {
-    if (!guildId) return null;
-    return (
-      this.players.get(guildId) ?? this.playerCache.get(guildId)?.player ?? null
-    );
+    return guildId ? (this.players.get(guildId) ?? null) : null;
   }
 
   private async handleServerOnlyCommand(
@@ -315,10 +216,7 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
   ): Promise<{ guildId: string; channelId: string } | null> {
     const { guildId, channelId } = interaction;
     if (!guildId || !channelId) {
-      await this.commandService?.reply?.(
-        interaction,
-        "messages.playerManager.errors.server_error",
-      );
+      await this.commandService?.reply?.(interaction, "messages.playerManager.errors.server_error");
       return null;
     }
 

@@ -10,7 +10,7 @@ import translations from "./locales/en.json" with { type: "json" };
 
 import { config } from "@dotenvx/dotenvx";
 import { resolve } from "path";
-import createLogger, { initLogger } from "dlog2/index.js";
+import createLogger, { initLogger } from "dlog2";
 
 config({ path: resolve(dirname(import.meta), "../.env") });
 
@@ -19,7 +19,7 @@ const __dirname = dirname(import.meta);
 initLogger({ registerHandlers: true });
 
 const logger = createLogger(`ragu2`);
-const locale = createLocale<typeof translations>(`ragu2`);
+const locale = createLocale<typeof translations>();
 locale.load();
 
 /**

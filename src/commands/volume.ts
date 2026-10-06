@@ -25,13 +25,9 @@ export class VolumeCommand {
   ): Promise<void> {
     const { playerManager, commandService, logger } = getDeps();
     if (volume < 0 || volume > config.audio.volume.range.max * 100) {
-      return commandService.reply(
-        interaction,
-        "commands.volume.errors.error_max",
-        {
-          maxVolume: config.audio.volume.range.max * 100,
-        },
-      );
+      return commandService.reply(interaction, "commands.volume.errors.error_max", {
+        maxVolume: config.audio.volume.range.max * 100,
+      });
     }
 
     try {
@@ -45,13 +41,9 @@ export class VolumeCommand {
           error: getErrorMessage(error),
         }),
       );
-      await commandService.reply(
-        interaction,
-        "commands.volume.errors.playback",
-        {
-          error: getErrorMessage(error),
-        },
-      );
+      await commandService.reply(interaction, "commands.volume.errors.playback", {
+        error: getErrorMessage(error),
+      });
     }
   }
 }

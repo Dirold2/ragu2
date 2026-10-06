@@ -250,6 +250,8 @@
       "disabled": "Wave disabled",
       "errors": {
         "not_found": "Player not found",
+        "not_in_voice_channel": "Join a voice channel before managing Wave",
+        "no_yandex_seed": "Play a Yandex Music track before enabling Wave",
         "playback": "Playback error: {error}"
       }
     },

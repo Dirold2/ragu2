@@ -11,18 +11,13 @@ import { Readable } from "node:stream";
 import { AudioService } from "../audio/AudioService.js";
 import { TrackManager } from "./TrackManager.js";
 import { ConnectionManager } from "./ConnectionManager.js";
-import {
-  PlayerStatus,
-  type PlayerState,
-  PlayerServiceEvents,
-} from "../../types/audio.js";
+import { PlayerStatus, type PlayerState, PlayerServiceEvents } from "../../types/audio.js";
 import config from "../../../config.json" with { type: "json" };
 import { DEFAULT_FADEIN, DEFAULT_FADEOUT } from "../../utils/constants.js";
 import type { Track } from "../../types/index.js";
 import type { MusicServicePlugin } from "../../interfaces/index.js";
 
 export interface QueueServiceSubset {
-  clearWaveState(guildId: string): void;
   setTrack(guildId: string, track: Track): Promise<void>;
   getTrack(guildId: string): Promise<Track | null>;
   peekTrack(guildId: string): Promise<Track | null>;
@@ -41,18 +36,15 @@ interface PlayerServiceDeps {
   queueService: QueueServiceSubset;
   client: {
     user?: { id: string } | null;
+    rest: {
+      put(route: string, options: { body: { status: string | null } }): Promise<unknown>;
+    };
     guilds: {
-      fetch(
-        id: string,
-      ): Promise<{ channels: { fetch(): Promise<Map<string, any>> } }>;
+      fetch(id: string): Promise<{ channels: { fetch(): Promise<Map<string, any>> } }>;
     };
   };
   pluginManager: PluginManagerSubset;
-  t: (
-    key: string,
-    params?: Record<string, unknown>,
-    lang?: string | boolean,
-  ) => string;
+  t: (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;
 }
 
 type PlayerServiceEventMap = {
@@ -99,6 +91,11 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  private updateVoiceChannelStatus(track: Track | null): void {
+    const status = track ? track.info.slice(0, 500) : null;
+    void this.connectionManager.setVoiceChannelStatus(status);
+  }
+
   private async recoverFromAudioError(): Promise<void> {
     this.player.stop();
     await this.sleep(500);
@@ -126,16 +123,8 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     }
 
     this.audioService = new AudioService();
-    this.trackManager = new TrackManager(
-      deps.logger,
-      deps.pluginManager,
-      deps.t,
-    );
-    this.connectionManager = new ConnectionManager(
-      guildId,
-      deps.logger,
-      deps.client,
-    );
+    this.trackManager = new TrackManager(deps.logger, deps.pluginManager, deps.t);
+    this.connectionManager = new ConnectionManager(guildId, deps.logger, deps.client);
     this.state = this.getInitialState();
 
     const savedVolume = deps.queueService?.getVolume?.(guildId);
@@ -143,8 +132,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       this.state.volume = Math.max(0, Math.min(200, savedVolume));
     }
 
-    this.state.lastUserTrack =
-      deps.queueService?.getLastTrack?.(guildId) ?? null;
+    this.state.lastUserTrack = deps.queueService?.getLastTrack?.(guildId) ?? null;
 
     this.setupEvents();
   }
@@ -157,10 +145,6 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
 
   setLoop(loop: boolean): void {
     this.state.loop = loop;
-  }
-
-  setWave(wave: boolean): void {
-    this.state.wave = wave;
   }
 
   /* ---- audio effects (was PlayerEffects) ---- */
@@ -186,9 +170,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
           try {
             await action();
           } catch (error) {
-            this.logError(
-              `Error in scheduled fadeOut: ${(error as Error).message}`,
-            );
+            this.logError(`Error in scheduled fadeOut: ${(error as Error).message}`);
           }
         }, delay);
 
@@ -217,8 +199,6 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     this.logDebug(`Queueing track: ${track.info}`);
 
     try {
-      this.deps.queueService?.clearWaveState?.(this.guildId);
-
       if (!this.guildId) {
         this.deps.logger?.warn?.("[PlayerService] No guildId for queueTrack");
         return;
@@ -260,10 +240,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     }
   }
 
-  private async getNextTrack(
-    currentTrack: Track | null,
-    loop: boolean,
-  ): Promise<Track | null> {
+  private async getNextTrack(currentTrack: Track | null, loop: boolean): Promise<Track | null> {
     if (loop && currentTrack && !currentTrack.generation) {
       this.logDebug(`Replaying track due to loop: ${currentTrack.info}`);
       return currentTrack;
@@ -272,16 +249,13 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     const nextTrack = await this.loadNextTrack();
     if (nextTrack) {
       this.logDebug(`Playing next queued track: ${nextTrack.info}`);
-      this.deps.queueService?.clearWaveState?.(this.guildId);
       return nextTrack;
     }
 
     return null;
   }
 
-  private async getRecommendation(
-    lastTrack: Track | null,
-  ): Promise<Track | null> {
+  private async getRecommendation(lastTrack: Track | null): Promise<Track | null> {
     if (!lastTrack?.trackId) {
       return null;
     }
@@ -291,16 +265,19 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       return null;
     }
 
-    this.logDebug(`Fetching recommendations for: ${lastTrack.trackId}`);
+    this.logDebug(`[Wave] Fetching recommendation for seed: ${lastTrack.trackId}`);
 
     try {
       const recommendations = await this.trackManager.getRecommendations(
         lastTrack.trackId,
+        this.guildId,
       );
 
       if (recommendations.length > 0) {
+        const recommendation = recommendations[0];
+        this.logDebug(`[Wave] Playing recommendation: ${recommendation.info}`);
         return {
-          ...recommendations[0],
+          ...recommendation,
           requestedBy: lastTrack.requestedBy,
           waveStatus: true,
         };
@@ -308,9 +285,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
 
       return null;
     } catch (error) {
-      this.logError(
-        `Error fetching recommendations: ${(error as Error).message}`,
-      );
+      this.logError(`Error fetching recommendations: ${(error as Error).message}`);
       return null;
     }
   }
@@ -368,10 +343,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     });
 
     this.audioService.on("error", async (error: Error) => {
-      if (
-        this.status === PlayerStatus.DESTROYED ||
-        this.status === PlayerStatus.TRANSITIONING
-      )
+      if (this.status === PlayerStatus.DESTROYED || this.status === PlayerStatus.TRANSITIONING)
         return;
 
       if (error.message.includes("Premature close")) {
@@ -396,10 +368,8 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     });
 
     this.audioService.on("ended", () => {
-      if (
-        this.status === PlayerStatus.DESTROYED ||
-        this.status === PlayerStatus.TRANSITIONING
-      )
+      this.logDebug(`Audio stream ended while status is ${this.status}`);
+      if (this.status === PlayerStatus.DESTROYED || this.status === PlayerStatus.TRANSITIONING)
         return;
 
       void this.handleTrackEnd();
@@ -435,10 +405,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
 
   /* ---- public commands ---- */
 
-  async playOrQueueTrack(
-    track: Track | null,
-    interaction?: CommandInteraction,
-  ): Promise<void> {
+  async playOrQueueTrack(track: Track | null, interaction?: CommandInteraction): Promise<void> {
     if (!track || this.status === PlayerStatus.DESTROYED) return;
     this.logDebug(`playOrQueueTrack: ${track.info}`);
 
@@ -463,10 +430,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
   }
 
   async skip(): Promise<void> {
-    if (
-      this.status === PlayerStatus.DESTROYED ||
-      this.status === PlayerStatus.TRANSITIONING
-    )
+    if (this.status === PlayerStatus.DESTROYED || this.status === PlayerStatus.TRANSITIONING)
       return;
 
     this.status = PlayerStatus.TRANSITIONING;
@@ -487,13 +451,10 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     if (!track || this.status === PlayerStatus.DESTROYED) return false;
 
     try {
-        this.logDebug(`Playing: ${track.info}`);
+      this.logDebug(`Playing: ${track.info}`);
       this.connectionManager.clearIdleTimeout();
 
-      const trackUrl = await this.trackManager.getTrackUrl(
-        track.trackId,
-        track.source,
-      );
+      const trackUrl = await this.trackManager.getTrackUrl(track.trackId, track.source);
 
       if (!trackUrl) {
         this.deps.logger?.warn?.("[PlayerService] No track URL found");
@@ -502,49 +463,49 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
 
       const plugin = this.deps.pluginManager.getPlugin(track.source);
       const headers = plugin?.getApiHeaders?.(trackUrl) ?? {};
-      const streamResult = await this.audioService.createAudioStreamForDiscord(
-        trackUrl,
-        { headers },
-      );
+      const streamResult = await this.audioService.createAudioStreamForDiscord(trackUrl, {
+        headers,
+      });
       const { stream, type } = streamResult;
       const nodeStream = Readable.fromWeb(stream as any);
       const resource = createAudioResource(nodeStream, { inputType: type });
 
       this.state.currentTrack = track;
-      if (!track.generation) {
-        this.deps.queueService?.setLastTrack?.(this.guildId, track);
+      this.updateVoiceChannelStatus(track);
+      if (!track.generation && track.source === "yandex") {
+        const previousSeed = this.deps.queueService.getLastTrack(this.guildId);
+        if (previousSeed?.trackId !== track.trackId) {
+          this.deps.pluginManager.getPlugin("yandex")?.resetRadioSession?.(this.guildId);
+          this.logDebug(`[Wave] Updated seed: ${track.trackId} (${track.info})`);
+        }
+        this.deps.queueService.setLastTrack(this.guildId, track);
       }
 
       this.player.play(resource);
       await this.fadeIn(this.state.volume);
 
-      const durationMs =
-        track.durationMs ?? (await this.trackManager.getDuration(trackUrl));
+      const durationMs = track.durationMs ?? (await this.trackManager.getDuration(trackUrl));
       const scheduledForTrackId = track.trackId;
 
       this.fadeOutTimer = await this.scheduleFadeOut(durationMs, async () => {
-        if (this.state.currentTrack?.trackId === scheduledForTrackId) {
-          await this.setVolume(0, 2000, false);
-          await this.sleep(4000);
-          if (this.state.currentTrack?.trackId === scheduledForTrackId) {
-            this.logDebug("Track did not end after fade-out, forcing stop");
-            this.player.stop();
-            await this.handleTrackEnd();
-          }
-        }
+        if (this.state.currentTrack?.trackId !== scheduledForTrackId) return;
+
+        this.logDebug("Fade-out deadline reached; advancing to the next track");
+        this.status = PlayerStatus.TRANSITIONING;
+        await this.performFadeOutAndStop();
+        await this.handleTrackEnd();
       });
 
       this.emit(PlayerServiceEvents.TRACK_STARTED, track);
       return true;
     } catch (error) {
-        this.logError(`Error playing track: ${(error as Error).message}`);
+      this.logError(`Error playing track: ${(error as Error).message}`);
       return await this.playNextOrRecommendations();
     }
   }
 
   async togglePause(): Promise<void> {
-    if (!this.state.connection || this.status === PlayerStatus.DESTROYED)
-      return;
+    if (!this.state.connection || this.status === PlayerStatus.DESTROYED) return;
 
     try {
       const status = this.player.state.status;
@@ -601,6 +562,8 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       this.status = PlayerStatus.DESTROYED;
 
       this.clearFadeTimer();
+      await this.connectionManager.setVoiceChannelStatus(null);
+      this.deps.pluginManager.getPlugin("yandex")?.resetRadioSession?.(this.guildId);
 
       this.player.stop();
       await this.audioService.destroy();
@@ -630,13 +593,12 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
         return await this.playTrack(recommendation);
       }
 
+      this.updateVoiceChannelStatus(null);
       this.connectionManager.startIdleTimeout();
       this.emit(PlayerServiceEvents.QUEUE_EMPTY);
       return false;
     } catch (error) {
-      this.logError(
-        `Error in playNextOrRecommendations: ${(error as Error).message}`,
-      );
+      this.logError(`Error in playNextOrRecommendations: ${(error as Error).message}`);
       return false;
     } finally {
       if (this.status === PlayerStatus.TRANSITIONING) {
@@ -660,7 +622,6 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       lastUserTrack: null,
       loop: false,
       pause: false,
-      wave: false,
       compressor: config.audio.effects?.compressor ?? false,
       normalize: config.audio.effects.normalize ?? false,
       bass: config.audio.effects.bass.default ?? 0,
