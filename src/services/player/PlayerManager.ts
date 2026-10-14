@@ -95,6 +95,29 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     }
   }
 
+  public async back(guildId: string): Promise<Track | null> {
+    try {
+      const player = this.getPlayer(guildId);
+      return await player.back();
+    } catch (err) {
+      this.logger?.error?.(
+        `[PlayerManager] Failed to return to previous track: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  public async startIfIdle(guildId: string): Promise<boolean> {
+    try {
+      return await this.getPlayer(guildId).startIfIdle();
+    } catch (err) {
+      this.logger?.error?.(
+        `[PlayerManager] Failed to start idle player: ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
+
   public async togglePause(interaction: CommandInteraction): Promise<void> {
     const handles = await this.handleServerOnlyCommand(interaction);
     if (!handles?.guildId) return;

@@ -446,6 +446,50 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     }
   }
 
+  async startIfIdle(): Promise<boolean> {
+    if (
+      this.status === PlayerStatus.DESTROYED ||
+      this.status === PlayerStatus.TRANSITIONING ||
+      this.state.currentTrack ||
+      this.state.isPlaying
+    ) {
+      return false;
+    }
+
+    return await this.playNextOrRecommendations();
+  }
+
+  async back(): Promise<Track | null> {
+    if (this.status === PlayerStatus.DESTROYED || this.status === PlayerStatus.TRANSITIONING)
+      return null;
+
+    const currentTrack = this.state.currentTrack;
+    const previousTrack = this.state.previousTrack;
+    if (!currentTrack || !previousTrack) return null;
+
+    this.status = PlayerStatus.TRANSITIONING;
+    try {
+      this.logDebug(`Returning to previous track: ${previousTrack.info}`);
+      await this.queueTrack({ ...currentTrack, priority: true });
+      await this.performFadeOutAndStop();
+
+      this.state.currentTrack = null;
+      this.state.isPlaying = false;
+      this.state.pause = false;
+      this.state.previousTrack = currentTrack;
+
+      await this.playTrack(previousTrack);
+      return previousTrack;
+    } catch (error) {
+      this.logError(`Error going back: ${(error as Error).message}`);
+      return null;
+    } finally {
+      if (this.status === PlayerStatus.TRANSITIONING) {
+        this.status = PlayerStatus.IDLE;
+      }
+    }
+  }
+
   async playTrack(track: Track | null): Promise<boolean> {
     if (!track || this.status === PlayerStatus.DESTROYED) return false;
 
@@ -472,6 +516,10 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       const nodeStream = Readable.fromWeb(stream as any);
       const resource = createAudioResource(nodeStream, { inputType: type });
 
+      const currentTrack = this.state.currentTrack;
+      if (currentTrack && currentTrack.trackId !== track.trackId) {
+        this.state.previousTrack = currentTrack;
+      }
       this.state.currentTrack = track;
       this.updateVoiceChannelStatus(track);
       if (!track.generation && track.source === "yandex") {
@@ -532,6 +580,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       this.clearFadeTimer();
 
       const prevTrack = this.state.currentTrack;
+      this.state.previousTrack = prevTrack;
       this.state.currentTrack = null;
       this.state.isPlaying = false;
       this.state.pause = false;
@@ -621,6 +670,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       channelId: null,
       volume: (config.audio.volume?.default ?? 50) * 100,
       currentTrack: null,
+      previousTrack: null,
       nextTrack: null,
       lastUserTrack: null,
       loop: false,

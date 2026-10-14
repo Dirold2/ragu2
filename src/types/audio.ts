@@ -19,6 +19,7 @@ export interface PlayerState {
   channelId: string | null;
   volume: number;
   currentTrack: Track | null;
+  previousTrack: Track | null;
   nextTrack: Track | null;
   lastUserTrack: Track | null;
   loop: boolean;

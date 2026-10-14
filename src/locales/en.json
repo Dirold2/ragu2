@@ -192,6 +192,7 @@
       "description": "Play a track",
       "option_track": "Track name or URL",
       "searching": "Searching: {query}",
+      "wave_enabled": "Wave enabled from: {track}",
       "player": {
         "status": {
           "nothing_playing": "Nothing is currently playing"
@@ -201,7 +202,9 @@
       "errors": {
         "invalid": "Invalid track data",
         "processing": "Error processing track: {error}",
-        "search": "Error searching for {query}"
+        "search": "Error searching for {query}",
+        "not_in_voice_channel": "Join a voice channel before starting Wave",
+        "no_yandex_seed": "Play a Yandex Music track before starting Wave"
       }
     },
     "queue": {
@@ -227,12 +230,36 @@
         "playback": "An error occurred while shuffling: {error}"
       }
     },
-    "skip": {
-      "description": "Skip current track",
-      "skipped": "Track skipped",
+    "back": {
+      "description": "Return to the previous track",
+      "success": "Returning to: {track}",
       "errors": {
-        "not_found": "Player not found",
+        "guild_only": "This command can only be used on a server",
+        "not_found": "There is no previous track to return to",
         "playback": "Playback error: {error}"
+      }
+    },
+    "skip": {
+      "description": "Skip the current track or jump to a queued track",
+      "option_track": "Choose the queued track to play next",
+      "skipped": "Track skipped",
+      "skipped_to": "Skipped to: {track}",
+      "errors": {
+        "guild_only": "This command can only be used on a server",
+        "not_found": "Player not found",
+        "target_not_found": "That track is no longer in the queue",
+        "playback": "Playback error: {error}"
+      }
+    },
+    "delete": {
+      "description": "Remove a track from the queue",
+      "option_track": "Choose a queued track, or leave empty to remove the last one",
+      "success": "Removed from queue: {track}",
+      "errors": {
+        "guild_only": "This command can only be used on a server",
+        "empty": "Queue is empty",
+        "not_found": "That track is no longer in the queue",
+        "unexpected": "Could not remove track from the queue: {error}"
       }
     },
     "volume": {

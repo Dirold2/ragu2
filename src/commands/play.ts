@@ -2,6 +2,7 @@ import {
   ApplicationCommandOptionType,
   type AutocompleteInteraction,
   type CommandInteraction,
+  type GuildMember,
 } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 import { getDeps, t } from "./commandDeps.js";
@@ -133,19 +134,26 @@ export class PlayCommand {
   }
 
   private async handleEmptyQuery(interaction: CommandInteraction): Promise<void> {
-    const { playerManager, commandService } = getDeps();
-    const player = playerManager.getPlayer(interaction.guildId!);
-
-    if (!player.state.currentTrack?.info) {
-      await commandService.reply(interaction, "commands.play.player.status.nothing_playing");
+    const { playerManager, commandService, queueService } = getDeps();
+    const guildId = interaction.guildId;
+    const member = interaction.member as GuildMember;
+    if (!guildId || !member.voice.channelId) {
+      await commandService.reply(interaction, "commands.play.errors.not_in_voice_channel");
       return;
     }
 
-    await commandService.reply(interaction, "commands.play.started_playing", {
-      track: player.state.currentTrack.info,
-    });
+    const waveSeed = queueService.getLastTrack(guildId);
+    if (waveSeed?.source !== "yandex") {
+      await commandService.reply(interaction, "commands.play.errors.no_yandex_seed");
+      return;
+    }
 
     await playerManager.joinChannel(interaction);
+    await playerManager.setWave(guildId, true);
+    await playerManager.startIfIdle(guildId);
+    await commandService.reply(interaction, "commands.play.wave_enabled", {
+      track: waveSeed.info,
+    });
   }
 
   private buildAutocompleteChoices(

@@ -11,6 +11,11 @@ interface EnhancedQueueResult extends QueueResult {
   _timestamp?: number;
 }
 
+export interface QueueEntry {
+  id: string;
+  track: Track;
+}
+
 export default class CacheQueueService {
   private static readonly DEFAULT_VOLUME = config.audio.volume.default * 100 || 20;
   private static readonly CACHE_TTL = 60000;
@@ -248,6 +253,58 @@ export default class CacheQueueService {
 
   setVolume(guildId: string, volume: number): void {
     this.setMetaData(guildId, "volume", Number(volume));
+  }
+
+  getQueueEntries(guildId: string): QueueEntry[] {
+    return Array.from(this.getGuildTracks(guildId)?.entries() ?? []).map(([id, track]) => ({
+      id,
+      track,
+    }));
+  }
+
+  async removeQueueEntry(guildId: string, entryId: string): Promise<Track | null> {
+    try {
+      const guildCache = this.getGuildTracks(guildId);
+      const track = guildCache?.get(entryId) ?? null;
+      if (!guildCache || !track) return null;
+
+      guildCache.delete(entryId);
+      if (guildCache.size === 0) this.trackCache.delete(guildId);
+      this.invalidateQueueCache(guildId);
+      return track;
+    } catch (error) {
+      this.logger.error(
+        `${this.locale.t("messages.cacheQueueService.errors.remove_track", {
+          guildId,
+        })}: ${getErrorMessage(error)}`,
+      );
+      return null;
+    }
+  }
+
+  async skipQueueTo(guildId: string, entryId: string): Promise<Track | null> {
+    try {
+      const guildCache = this.getGuildTracks(guildId);
+      if (!guildCache) return null;
+
+      const entries = Array.from(guildCache.entries());
+      const targetIndex = entries.findIndex(([id]) => id === entryId);
+      if (targetIndex < 0) return null;
+
+      for (const [id] of entries.slice(0, targetIndex)) {
+        guildCache.delete(id);
+      }
+
+      this.invalidateQueueCache(guildId);
+      return entries[targetIndex][1];
+    } catch (error) {
+      this.logger.error(
+        `${this.locale.t("messages.cacheQueueService.errors.remove_track", {
+          guildId,
+        })}: ${getErrorMessage(error)}`,
+      );
+      return null;
+    }
   }
 
   private getGuildTracks(guildId: string): Map<string, Track> | undefined {

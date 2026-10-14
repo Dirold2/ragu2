@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.5 (2026-10-14)
+
+### Added
+
+- `/delete` removes a selected track from the manual queue, including a specific duplicate entry
+- `/skip track:<track>` lets listeners skip directly to a selected queued track
+- `/back` returns to the previously played track and keeps the interrupted track next in the manual queue
+- `/play` without a query enables Wave from the latest Yandex Music seed and starts it when the player is idle
+
+### Changed
+
+- FFmpeg now retries Yandex Music network/TLS and HTTP 5xx failures up to five times before giving up
+
+### Fixed
+
+- `/back` preserves the previous track across normal and skipped playback transitions
+- FFmpeg reconnect, pacing, and probing options are applied to the Yandex Music input rather than the PCM output
+
 ## 0.2.4 (2026-10-14)
 
 ### Added

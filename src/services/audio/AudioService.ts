@@ -83,10 +83,14 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
           "1",
           "-reconnect_streamed",
           "1",
+          "-reconnect_on_network_error",
+          "1",
+          "-reconnect_on_http_error",
+          "5xx",
           "-reconnect_delay_max",
           "5",
-          "-reconnect_at_eof",
-          "1",
+          "-reconnect_max_retries",
+          "5",
           "-probesize",
           "1024k",
           "-analyzeduration",
@@ -95,7 +99,7 @@ export class AudioService extends MiniEmitter<AudioServiceEvents> {
           url,
         )
         .audioCodec("pcm_s16le")
-        .outputOptions("-f", "s16le", "-ar", "48000", "-ac", "2", "-af", "volume=0.1")
+        .outputOptions("-vn", "-f", "s16le", "-ar", "48000", "-ac", "2", "-af", "volume=0.1")
         .output({ pipe: "pipe:1" });
 
       const { output, done, stop } = await this.ffmpeg.run();
