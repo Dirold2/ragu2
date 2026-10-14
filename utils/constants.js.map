@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/utils/constants.ts"],
+  "sourcesContent": ["import config from \"../../config.json\" with { type: \"json\" };\n\nexport const DEFAULT_FADEOUT = config.audio.fade.outBeforeEnd ?? 3_000;\nexport const DEFAULT_FADEIN = config.audio.fade.in ?? 2_000;\n\nexport const DEFAULT_VOLUME = config.audio.volume.default ?? 0.2;\nexport const DEFAULT_BASS = config.audio.effects.bass.default ?? 0;\nexport const DEFAULT_TREBLE = config.audio.effects.treble.default ?? 0;\nexport const DEFAULT_COMPRESSOR = config.audio.effects.compressor ?? false;\nexport const DEFAULT_NORMALIZE = config.audio.effects.normalize ?? false;\n"],
+  "mappings": "aAAA,OAAOA,MAAY,mBAAoB,IAAA,CAAO,KAAM,MAAM,EAEnD,aAAM,gBAAkBA,EAAO,MAAM,KAAK,cAAgB,IACpD,eAAiBA,EAAO,MAAM,KAAK,IAAM,IAEzC,eAAiBA,EAAO,MAAM,OAAO,SAAW,GAChD,aAAeA,EAAO,MAAM,QAAQ,KAAK,SAAW,EACpD,eAAiBA,EAAO,MAAM,QAAQ,OAAO,SAAW,EACxD,mBAAqBA,EAAO,MAAM,QAAQ,YAAc,GACxD,kBAAoBA,EAAO,MAAM,QAAQ,WAAa",
+  "names": ["config"]
+}

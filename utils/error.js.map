@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/utils/error.ts"],
+  "sourcesContent": ["export function getErrorMessage(error: unknown): string {\n  return error instanceof Error ? error.message : String(error);\n}\n"],
+  "mappings": "aAAM,gBAAU,gBAAgBA,EAAc,CAC5C,OAAOA,aAAiB,MAAQA,EAAM,QAAU,OAAOA,CAAK,CAC9D",
+  "names": ["error"]
+}

@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/utils/mutex.ts"],
+  "sourcesContent": ["export class Mutex {\n  private locked = false;\n  private waiters: (() => void)[] = [];\n\n  acquire(): Promise<() => void> {\n    if (!this.locked) {\n      this.locked = true;\n      return Promise.resolve(() => this.release());\n    }\n    return new Promise((resolve) => {\n      this.waiters.push(() => {\n        this.locked = true;\n        resolve(() => this.release());\n      });\n    });\n  }\n\n  private release(): void {\n    const next = this.waiters.shift();\n    if (next) next();\n    else this.locked = false;\n  }\n}\n"],
+  "mappings": "aAAM,aAAO,KAAK,CACR,OAAS,GACT,QAA0B,CAAA,EAElC,SAAO,CACL,OAAK,KAAK,OAIH,IAAI,QAASA,GAAW,CAC7B,KAAK,QAAQ,KAAK,IAAK,CACrB,KAAK,OAAS,GACdA,EAAQ,IAAM,KAAK,QAAO,CAAE,CAC9B,CAAC,CACH,CAAC,GARC,KAAK,OAAS,GACP,QAAQ,QAAQ,IAAM,KAAK,QAAO,CAAE,EAQ/C,CAEQ,SAAO,CACb,MAAMC,EAAO,KAAK,QAAQ,MAAK,EAC3BA,EAAMA,EAAI,EACT,KAAK,OAAS,EACrB",
+  "names": ["resolve", "next"]
+}

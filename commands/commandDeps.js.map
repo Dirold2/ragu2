@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/commands/commandDeps.ts"],
+  "sourcesContent": ["import type { Logger } from \"dlog2\";\nimport type {\n  PlayerManager,\n  CommandService,\n  CacheQueueService,\n  NameService,\n} from \"../services/index.js\";\n\nexport interface CommandDeps {\n  playerManager: PlayerManager;\n  commandService: CommandService;\n  queueService: CacheQueueService;\n  nameService: NameService;\n  logger: Logger;\n  t: (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;\n}\n\nlet currentDeps: CommandDeps | null = null;\n\nexport function setCommandDeps(deps: CommandDeps): void {\n  currentDeps = deps;\n}\n\nexport function getDeps(): CommandDeps {\n  if (!currentDeps) {\n    throw new Error(\n      \"CommandDeps not initialized \u2013 call setCommandDeps() before importing commands\",\n    );\n  }\n  return currentDeps;\n}\n\n/** Translation helper for decorators (evaluated early, returns key as fallback) */\nexport function t(key: string, params?: Record<string, unknown>, lang?: string | boolean): string {\n  return currentDeps?.t(key, params, lang) ?? key;\n}\n"],
+  "mappings": "aAiBA,IAAIA,EAAkC,KAEhC,gBAAU,eAAeC,EAAiB,CAC9CD,EAAcC,CAChB,CAEM,gBAAU,SAAO,CACrB,GAAI,CAACD,EACH,MAAM,IAAI,MACR,oFAA+E,EAGnF,OAAOA,CACT,CAGM,gBAAU,EAAEE,EAAaC,EAAkCC,EAAuB,CACtF,OAAOJ,GAAa,EAAEE,EAAKC,EAAQC,CAAI,GAAKF,CAC9C",
+  "names": ["currentDeps", "deps", "key", "params", "lang"]
+}
