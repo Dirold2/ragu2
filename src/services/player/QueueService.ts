@@ -19,6 +19,10 @@ export default class CacheQueueService {
   private readonly queueCache: CacheManager<EnhancedQueueResult>;
   private readonly metaCache: CacheManager<any>;
 
+  // Wave is user-controlled playback state, so it must not expire with metadata cache entries.
+  private readonly waveStatusByGuild = new Map<string, boolean>();
+  private readonly waveSeedByGuild = new Map<string, Track | null>();
+
   constructor(
     private readonly logger: Logger,
     private readonly locale: {
@@ -205,11 +209,12 @@ export default class CacheQueueService {
   }
 
   getLastTrack(guildId: string): Track | null {
-    return this.getMetaData(guildId, "lastTrack", null);
+    return this.waveSeedByGuild.get(guildId) ?? null;
   }
 
   setLastTrack(guildId: string, track?: Track): void {
-    this.setMetaData(guildId, "lastTrack", track || null);
+    this.waveSeedByGuild.set(guildId, track ?? null);
+    this.invalidateQueueCache(guildId);
   }
 
   getLastTrackID(guildId: string): string | null {
@@ -229,11 +234,12 @@ export default class CacheQueueService {
   }
 
   getWave(guildId: string): boolean {
-    return this.getMetaData(guildId, "waveStatus", false);
+    return this.waveStatusByGuild.get(guildId) ?? false;
   }
 
   setWave(guildId: string, wave: boolean): void {
-    this.setMetaData(guildId, "waveStatus", wave);
+    this.waveStatusByGuild.set(guildId, wave);
+    this.invalidateQueueCache(guildId);
   }
 
   getVolume(guildId: string): number {

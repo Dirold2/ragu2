@@ -25,9 +25,7 @@ export interface Locale<TTranslations> {
 
 export function normalizeLocale(language: string | null | undefined): string {
   const baseLanguage = language?.split("-", 1)[0]?.toLowerCase();
-  return baseLanguage && SUPPORTED_LANGUAGES.has(baseLanguage)
-    ? baseLanguage
-    : DEFAULT_LANGUAGE;
+  return baseLanguage && SUPPORTED_LANGUAGES.has(baseLanguage) ? baseLanguage : DEFAULT_LANGUAGE;
 }
 
 function getNestedTranslation<TTranslations>(translations: TTranslations, key: string): unknown {
@@ -76,8 +74,7 @@ export function createLocale<TTranslations = Record<string, unknown>>(): Locale<
     params?: TranslationParams,
     lang?: string | boolean,
   ): string {
-    const targetLanguage =
-      typeof lang === "string" ? normalizeLocale(lang) : messageLanguage;
+    const targetLanguage = typeof lang === "string" ? normalizeLocale(lang) : messageLanguage;
     const translationsForLanguage =
       translations.get(targetLanguage) ?? translations.get(defaultLanguage);
     const value =

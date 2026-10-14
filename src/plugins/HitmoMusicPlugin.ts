@@ -2,13 +2,21 @@ import createLogger from "dlog2";
 import type { MusicServicePlugin } from "../interfaces/index.js";
 import type { SearchTrackResult } from "../types/index.js";
 import { HITApi } from "hitd2";
+import { CacheManager } from "hcacher";
+import { getErrorMessage } from "../utils/error.js";
 
 export default class HitmoMusicPlugin implements MusicServicePlugin {
   name = "hitmos";
   urlPatterns = [/(?:^|\.)hitmos\.(?:me|fm)(?:\/|$)/, /(?:^|\.)hitmoz\.org(?:\/|$)/];
 
+  private static readonly UNAVAILABLE_TRACK_TTL = 2 * 60_000;
+
   private api: HITApi;
   private readonly sourceUrls = new Map<string, string>();
+  private readonly unavailableTracks = new CacheManager<true>({
+    maxSize: 500,
+    ttl: HitmoMusicPlugin.UNAVAILABLE_TRACK_TTL,
+  });
   public logger = createLogger(this.name);
 
   constructor(sessionCookie?: string) {
@@ -46,8 +54,10 @@ export default class HitmoMusicPlugin implements MusicServicePlugin {
 
   async searchURL(url: string): Promise<SearchTrackResult[]> {
     try {
-      const meta = await this.api.getTrackByUrl(url);
-      this.sourceUrls.set(meta.id, url);
+      const sourceUrl = new URL(url).toString();
+      const meta = await this.api.getTrackByUrl(sourceUrl);
+
+      this.sourceUrls.set(meta.id, sourceUrl);
 
       return [
         {
@@ -56,9 +66,9 @@ export default class HitmoMusicPlugin implements MusicServicePlugin {
           artists: [{ name: meta.artist || "Unknown" }],
           albums: undefined,
           durationMs: meta.duration > 0 ? meta.duration * 1000 : undefined,
-          cover: undefined,
+          cover: meta.image,
           source: this.name,
-          url: undefined,
+          url: sourceUrl,
           generation: false,
         },
       ];
@@ -69,13 +79,33 @@ export default class HitmoMusicPlugin implements MusicServicePlugin {
   }
 
   async getTrackUrl(trackId: string): Promise<string> {
-    const sourceUrl = this.sourceUrls.get(trackId);
-    const audio = sourceUrl
-      ? await this.api.getAudioByUrl(sourceUrl)
-      : await this.api.getAudio(trackId);
-    if (!audio.url) {
-      throw new Error("Audio URL is empty");
+    if (this.unavailableTracks.get(trackId)) {
+      throw new Error(`Track ${trackId} is temporarily marked unavailable by Hitmo`);
     }
-    return audio.url;
+
+    const sourceUrl = this.sourceUrls.get(trackId);
+
+    try {
+      this.logger.debug(`[Hitmo] Resolving ${trackId}; source URL: ${sourceUrl ?? "<missing>"}`);
+
+      const audio = sourceUrl
+        ? await this.api.getAudioByUrl(sourceUrl)
+        : await this.api.getAudio(trackId);
+
+      if (!audio.url) {
+        throw new Error("Audio URL is empty");
+      }
+
+      return audio.url;
+    } catch (error) {
+      this.sourceUrls.delete(trackId);
+      this.unavailableTracks.set(trackId, true);
+
+      this.logger.warn(
+        `[Hitmo] Track ${trackId} is unavailable or has no playable URL; caching failure for 2 minutes: ${getErrorMessage(error)}`,
+      );
+
+      throw error;
+    }
   }
 }

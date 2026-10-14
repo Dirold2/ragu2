@@ -368,7 +368,6 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
     });
 
     this.audioService.on("ended", () => {
-      this.logDebug(`Audio stream ended while status is ${this.status}`);
       if (this.status === PlayerStatus.DESTROYED || this.status === PlayerStatus.TRANSITIONING)
         return;
 
@@ -457,7 +456,10 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       const trackUrl = await this.trackManager.getTrackUrl(track.trackId, track.source);
 
       if (!trackUrl) {
-        this.deps.logger?.warn?.("[PlayerService] No track URL found");
+        this.deps.logger?.warn?.(
+          `[PlayerService] Skipping unavailable ${track.source} track ${track.trackId}: ${track.info}`,
+        );
+        this.logDebug("Trying the next queued track or Wave recommendation");
         return await this.playNextOrRecommendations();
       }
 
@@ -593,6 +595,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
         return await this.playTrack(recommendation);
       }
 
+      this.logDebug("No queued track or Wave recommendation available; starting idle timeout");
       this.updateVoiceChannelStatus(null);
       this.connectionManager.startIdleTimeout();
       this.emit(PlayerServiceEvents.QUEUE_EMPTY);

@@ -76,9 +76,7 @@ export default class NameService {
     return this.searchCache.getOrSet(cacheKey, async () => {
       try {
         const result = await this.withTimeout(
-          isUrl
-            ? this.searchAndProcessURL(trimmedName)
-            : this.searchAcrossPlugins(trimmedName),
+          isUrl ? this.searchAndProcessURL(trimmedName) : this.searchAcrossPlugins(trimmedName),
           TIMEOUT_MS,
         );
 

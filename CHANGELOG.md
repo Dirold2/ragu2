@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4 (2026-10-14)
+
+### Added
+
+- Playback logs identify unavailable queued tracks and whether the player falls back to the queue, Wave, or idle timeout
+
+### Fixed
+
+- Wave state and its Yandex seed no longer expire from the metadata cache during extended radio playback
+- Direct Hitmo URL results retain their source URL and cover artwork when queued
+- Unavailable Hitmo tracks are skipped and cached briefly to avoid repeatedly requesting missing audio pages
+
 ## 0.2.3 (2026-10-06)
 
 ### Added

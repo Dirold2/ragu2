@@ -57,7 +57,11 @@ class RadioSessionManager {
   private playedTracks = new Map<string, Set<string>>();
   private sessionPromises = new Map<string, Promise<string | null>>();
 
-  async getOrCreateSession(sessionKey: string, seedTrackId: string, api: YMApi): Promise<string | null> {
+  async getOrCreateSession(
+    sessionKey: string,
+    seedTrackId: string,
+    api: YMApi,
+  ): Promise<string | null> {
     if (this.sessions.has(sessionKey)) {
       return this.sessions.get(sessionKey)!;
     }
@@ -269,10 +273,7 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
     }
   }
 
-  async getRecommendations(
-    trackId: string,
-    sessionKey = trackId,
-  ): Promise<SearchTrackResult[]> {
+  async getRecommendations(trackId: string, sessionKey = trackId): Promise<SearchTrackResult[]> {
     await this.ensureInitialized();
 
     if (this.recommendationsPromises.has(sessionKey)) {
@@ -444,10 +445,9 @@ export default class YandexMusicPlugin implements MusicServicePlugin {
       return this.processStationTracks(sessionKey, st.sequence ?? []);
     } catch (err: any) {
       if (retry && err?.response?.status === 400) {
-        this.logger.warn(
-          `[Wave] Station is invalid for seed ${trackId}; regenerating`,
-          { module: "Yandex" },
-        );
+        this.logger.warn(`[Wave] Station is invalid for seed ${trackId}; regenerating`, {
+          module: "Yandex",
+        });
         this.radioManager.reset(sessionKey);
         return this.fetchStationTracks(trackId, sessionKey, false);
       }
