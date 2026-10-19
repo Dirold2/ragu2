@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0] (2026-10-16)
+
+### Added
+
+- Spotify album and playlist URLs now expand into their tracks and are queued through the existing collection flow.
+- `PlayerControlService` provides transport-independent playback controls for Discord commands and the forthcoming REST API.
+
+### Changed
+
+- URL metadata processing has a 30-second timeout, while text search remains limited to 2.5 seconds.
+- Discord commands for pause, skip, back, loop, Wave, volume, queue deletion, and shuffle now delegate to the shared player-control layer.
+
+### Fixed
+
+- Spotify collection IDs are no longer treated as track IDs or returned as `Unknown` tracks.
+- Read-only player lookups no longer create an empty player instance.
+
 ## 0.2.5 (2026-10-14)
 
 ### Added

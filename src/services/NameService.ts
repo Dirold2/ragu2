@@ -65,19 +65,19 @@ export default class NameService {
    * @returns Promise with search results
    */
   async searchName(trackName: string): Promise<SearchTrackResult[]> {
-    const TIMEOUT_MS = 2500; // 2.5 секунды на запрос
     const trimmedName = trackName.trim();
 
     if (!trimmedName) return [];
 
     const isUrl = TrackUrlSchema.safeParse(trimmedName).success;
+    const timeoutMs = isUrl ? 30_000 : 2_500;
     const cacheKey = isUrl ? trimmedName : trimmedName.toLocaleLowerCase();
 
     return this.searchCache.getOrSet(cacheKey, async () => {
       try {
         const result = await this.withTimeout(
           isUrl ? this.searchAndProcessURL(trimmedName) : this.searchAcrossPlugins(trimmedName),
-          TIMEOUT_MS,
+          timeoutMs,
         );
 
         this.logger.debug(`Found ${result.length} results for: ${trimmedName}`);
@@ -328,8 +328,11 @@ export default class NameService {
       return {
         trackId: track.id,
         info: this.formatTrackInfo(track) || "Unknown Track",
+        title: track.title,
+        artists: track.artists.map((artist) => artist.name),
         source: track.source || "unknown",
         priority: false,
+        durationMs: track.durationMs,
         ...(requestedBy && { requestedBy }),
         generation: false,
       };
@@ -348,7 +351,11 @@ export default class NameService {
    * @returns Formatted track info string
    */
   private formatTrackInfo(track: SearchTrackResult): string {
-    return `${track.artists.map((a) => a.name).join(", ")} - ${track.title}`;
+    const artists = track.artists
+      .map((artist) => artist.name)
+      .filter(Boolean)
+      .join(", ");
+    return artists ? `${artists} - ${track.title}` : track.title;
   }
 
   /**
@@ -389,6 +396,8 @@ export default class NameService {
     return {
       trackId: track.id,
       info: this.formatTrackInfo(track),
+      title: track.title,
+      artists: track.artists.map((artist) => artist.name),
       source: track.source,
       priority: isPriority,
       requestedBy: interaction.user.id,

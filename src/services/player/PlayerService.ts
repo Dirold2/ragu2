@@ -29,6 +29,7 @@ export interface QueueServiceSubset {
 
 interface PluginManagerSubset {
   getPlugin(name: string): MusicServicePlugin | undefined;
+  getActivePlugins(): readonly MusicServicePlugin[];
 }
 
 interface PlayerServiceDeps {
@@ -497,9 +498,9 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       this.logDebug(`Playing: ${track.info}`);
       this.connectionManager.clearIdleTimeout();
 
-      const trackUrl = await this.trackManager.getTrackUrl(track.trackId, track.source);
+      const playback = await this.trackManager.resolvePlayback(track);
 
-      if (!trackUrl) {
+      if (!playback) {
         this.deps.logger?.warn?.(
           `[PlayerService] Skipping unavailable ${track.source} track ${track.trackId}: ${track.info}`,
         );
@@ -507,9 +508,13 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
         return await this.playNextOrRecommendations();
       }
 
-      const plugin = this.deps.pluginManager.getPlugin(track.source);
-      const headers = plugin?.getApiHeaders?.(trackUrl) ?? {};
-      const streamResult = await this.audioService.createAudioStreamForDiscord(trackUrl, {
+      if (playback.fallback) {
+        this.logDebug(`Using ${playback.source} audio for ${track.source} track ${track.trackId}`);
+      }
+
+      const plugin = this.deps.pluginManager.getPlugin(playback.source);
+      const headers = plugin?.getApiHeaders?.(playback.url) ?? {};
+      const streamResult = await this.audioService.createAudioStreamForDiscord(playback.url, {
         headers,
       });
       const { stream, type } = streamResult;
@@ -534,7 +539,7 @@ export default class PlayerService extends MiniEmitter<PlayerServiceEventMap> {
       this.player.play(resource);
       await this.fadeIn(this.state.volume);
 
-      const durationMs = track.durationMs ?? (await this.trackManager.getDuration(trackUrl));
+      const durationMs = track.durationMs ?? (await this.trackManager.getDuration(playback.url));
       const scheduledForTrackId = track.trackId;
 
       this.fadeOutTimer = await this.scheduleFadeOut(durationMs, async () => {

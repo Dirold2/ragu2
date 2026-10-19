@@ -10,6 +10,12 @@ export interface MusicServicePlugin {
   /** Если true — плагин зарегистрирован, но временно отключён. */
   disabled?: boolean;
 
+  /**
+   * Может ли плагин передавать в FFmpeg надёжный прямой аудиопоток.
+   * По умолчанию true; metadata-only плагины используют fallback-источник.
+   */
+  supportsPlayback?: boolean;
+
   initialize(): any;
 
   /**

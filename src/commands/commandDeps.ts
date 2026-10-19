@@ -4,6 +4,7 @@ import type {
   CommandService,
   CacheQueueService,
   NameService,
+  PlayerControlService,
 } from "../services/index.js";
 
 export interface CommandDeps {
@@ -11,6 +12,7 @@ export interface CommandDeps {
   commandService: CommandService;
   queueService: CacheQueueService;
   nameService: NameService;
+  playerControl: PlayerControlService;
   logger: Logger;
   t: (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;
 }

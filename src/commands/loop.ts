@@ -2,7 +2,6 @@ import { CommandInteraction } from "discord.js";
 import { Discord, Slash } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
-import { getErrorMessage } from "../utils/error.js";
 
 @Discord()
 export class LoopCommand {
@@ -10,32 +9,22 @@ export class LoopCommand {
     name: "loop",
     description: t("commands.loop.description"),
   })
-  async toggleLoop(interaction: CommandInteraction) {
-    const { playerManager, commandService, logger } = getDeps();
-    try {
-      const player = playerManager.getPlayer(interaction.guildId!);
-      if (!player) {
-        return await commandService.reply(interaction, "commands.loop.errors.not_found");
-      }
+  async toggleLoop(interaction: CommandInteraction): Promise<void> {
+    const { commandService, playerControl } = getDeps();
+    const result = await playerControl.toggleLoop(interaction.guildId ?? "");
 
-      const newLoop = !player.state.loop;
-
-      await playerManager.setLoop(interaction.guildId!, newLoop);
-
-      return await commandService.reply(
-        interaction,
-        player.state.loop ? "commands.loop.enabled" : "commands.loop.disabled",
-        player.state.loop ? { track: player.state.currentTrack?.info || "" } : undefined,
-      );
-    } catch (error) {
-      logger.error(
-        getDeps().t("commands.loop.errors.playback", {
-          error: getErrorMessage(error),
-        }),
-      );
-      return await commandService.reply(interaction, "commands.loop.errors.playback", {
-        error: getErrorMessage(error),
-      });
+    if (!result.ok) {
+      await commandService.reply(interaction, "commands.loop.errors.not_found");
+      return;
     }
+
+    const state = await playerControl.getState(interaction.guildId ?? "");
+    await commandService.reply(
+      interaction,
+      result.data.enabled ? "commands.loop.enabled" : "commands.loop.disabled",
+      result.data.enabled
+        ? { track: state.ok ? state.data.player?.currentTrack?.info || "" : "" }
+        : undefined,
+    );
   }
 }

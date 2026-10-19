@@ -10,18 +10,17 @@ export class PauseCommand {
     description: t("commands.pause.description"),
   })
   async pause(interaction: CommandInteraction): Promise<void> {
-    const { playerManager, commandService } = getDeps();
-    const player = playerManager.getPlayer(interaction.guildId!);
-    if (!player) {
-      return await commandService.reply(interaction, "commands.pause.errors.not_found");
+    const { commandService, playerControl } = getDeps();
+    const result = await playerControl.togglePause(interaction.guildId ?? "");
+
+    if (!result.ok) {
+      await commandService.reply(interaction, "commands.pause.errors.not_found");
+      return;
     }
 
-    await playerManager.togglePause(interaction);
-
-    return await commandService.reply(
+    await commandService.reply(
       interaction,
-      player.state.pause ? "commands.pause.paused" : "commands.pause.resumed",
-      undefined,
+      result.data.paused ? "commands.pause.paused" : "commands.pause.resumed",
     );
   }
 }

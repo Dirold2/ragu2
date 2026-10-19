@@ -2,11 +2,11 @@ import {
   ApplicationCommandOptionType,
   AutocompleteInteraction,
   CommandInteraction,
+  MessageFlags,
 } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
-import { getErrorMessage } from "../utils/error.js";
 
 const MAX_AUTOCOMPLETE_CHOICES = 25;
 const MAX_CHOICE_NAME_LENGTH = 100;
@@ -35,45 +35,33 @@ export class SkipCommand {
 
     if (!interaction.isChatInputCommand()) return;
 
-    const { playerManager, commandService, logger, queueService } = getDeps();
+    const { commandService, playerControl } = getDeps();
     const guildId = interaction.guildId;
     if (!guildId) {
       await commandService.reply(interaction, "commands.skip.errors.guild_only");
       return;
     }
 
-    try {
-      const player = playerManager.getPlayer(guildId);
-      if (!player) {
-        await commandService.reply(interaction, "commands.skip.errors.not_found");
-        return;
-      }
-
-      if (queueEntryId) {
-        const targetTrack = await queueService.skipQueueTo(guildId, queueEntryId);
-        if (!targetTrack) {
-          await commandService.reply(interaction, "commands.skip.errors.target_not_found");
-          return;
-        }
-
-        await commandService.reply(interaction, "commands.skip.skipped_to", {
-          track: targetTrack.info,
-        });
-      } else {
-        await commandService.reply(interaction, "commands.skip.skipped");
-      }
-
-      await playerManager.skip(guildId);
-    } catch (error) {
-      logger.error(
-        getDeps().t("commands.skip.errors.playback", {
-          error: getErrorMessage(error),
-        }),
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const result = await playerControl.skip(guildId, queueEntryId);
+    if (!result.ok) {
+      await commandService.reply(
+        interaction,
+        result.code === "QUEUE_ENTRY_NOT_FOUND"
+          ? "commands.skip.errors.target_not_found"
+          : "commands.skip.errors.not_found",
       );
-      await commandService.reply(interaction, "commands.skip.errors.playback", {
-        error: getErrorMessage(error),
-      });
+      return;
     }
+
+    if (result.data.target) {
+      await commandService.reply(interaction, "commands.skip.skipped_to", {
+        track: result.data.target.info,
+      });
+      return;
+    }
+
+    await commandService.reply(interaction, "commands.skip.skipped");
   }
 
   private async handleAutocomplete(

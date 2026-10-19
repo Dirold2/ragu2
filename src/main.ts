@@ -36,6 +36,7 @@ async function run() {
     commandService: bot.commandService,
     queueService: bot.queueService,
     nameService: bot.nameService,
+    playerControl: bot.playerControl,
     logger: bot.logger,
     t: (key, params, lang) => bot.locale.t(key as any, params as any, lang),
   });

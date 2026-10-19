@@ -35,6 +35,8 @@ export const TrackSchema = z.object({
   trackId: z.string(),
   addedAt: z.bigint().optional(),
   info: z.string(),
+  title: z.string().optional(),
+  artists: z.array(z.string()).optional(),
   url: z.string().url().optional(),
   source: z.string(),
   waveStatus: z.boolean().optional(),

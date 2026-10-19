@@ -9,6 +9,7 @@ import {
   CommandService,
   NameService,
   PlayerManager,
+  PlayerControlService,
   PluginManager,
 } from "./services/index.js";
 
@@ -24,6 +25,7 @@ export class Bot {
   public nameService!: NameService;
   public queueService!: CacheQueueService;
   public playerManager!: PlayerManager;
+  public playerControl!: PlayerControlService;
   public commandService!: CommandService;
   public pluginManager!: PluginManager;
   public logger = createLogger(`ragu2`);
@@ -81,6 +83,8 @@ export class Bot {
           )(key, params, lang),
         this.logger,
       );
+
+      this.playerControl = new PlayerControlService(this.playerManager, this.queueService);
 
       this.nameService = new NameService(
         this.queueService,

@@ -16,7 +16,10 @@ interface PlayerServiceDeps {
       fetch(id: string): Promise<{ channels: { fetch(): Promise<Map<string, any>> } }>;
     };
   };
-  pluginManager: { getPlugin(name: string): MusicServicePlugin | undefined };
+  pluginManager: {
+    getPlugin(name: string): MusicServicePlugin | undefined;
+    getActivePlugins(): readonly MusicServicePlugin[];
+  };
   t: (key: string, params?: Record<string, unknown>, lang?: string | boolean) => string;
 }
 
@@ -59,6 +62,11 @@ export default class PlayerManager extends MiniEmitter<PlayerManagerEvents> {
     this.logger?.debug?.(`[PlayerManager] Created new player: ${guildId}`);
     this.emit("playerCreated", guildId);
     return newPlayer;
+  }
+
+  /** Returns an existing player without creating one. */
+  public findPlayer(guildId: string): PlayerService | null {
+    return this.players.get(guildId) ?? null;
   }
 
   public async joinChannel(interaction: CommandInteraction): Promise<void> {

@@ -2,7 +2,6 @@ import { ApplicationCommandOptionType, CommandInteraction } from "discord.js";
 import { Discord, Slash, SlashOption } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
-import { getErrorMessage } from "../utils/error.js";
 import config from "../../config.json" with { type: "json" };
 
 @Discord()
@@ -23,27 +22,16 @@ export class VolumeCommand {
     volume: number,
     interaction: CommandInteraction,
   ): Promise<void> {
-    const { playerManager, commandService, logger } = getDeps();
-    if (volume < 0 || volume > config.audio.volume.range.max * 100) {
-      return commandService.reply(interaction, "commands.volume.errors.error_max", {
+    const { commandService, playerControl } = getDeps();
+    const result = await playerControl.setVolume(interaction.guildId ?? "", volume);
+
+    if (!result.ok) {
+      await commandService.reply(interaction, "commands.volume.errors.error_max", {
         maxVolume: config.audio.volume.range.max * 100,
       });
+      return;
     }
 
-    try {
-      await playerManager.setVolume(interaction.guildId!, volume);
-      await commandService.reply(interaction, "commands.volume.set", {
-        volume,
-      });
-    } catch (error) {
-      logger.error(
-        getDeps().t("commands.volume.errors.playback", {
-          error: getErrorMessage(error),
-        }),
-      );
-      await commandService.reply(interaction, "commands.volume.errors.playback", {
-        error: getErrorMessage(error),
-      });
-    }
+    await commandService.reply(interaction, "commands.volume.set", { volume: result.data.volume });
   }
 }

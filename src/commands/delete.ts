@@ -6,7 +6,6 @@ import {
 import { Discord, Slash, SlashOption } from "discordx";
 
 import { getDeps, t } from "./commandDeps.js";
-import { getErrorMessage } from "../utils/error.js";
 
 const MAX_AUTOCOMPLETE_CHOICES = 25;
 const MAX_CHOICE_NAME_LENGTH = 100;
@@ -35,35 +34,27 @@ export class DeleteCommand {
 
     if (!interaction.isChatInputCommand()) return;
 
-    const { commandService, logger, queueService } = getDeps();
+    const { commandService, playerControl } = getDeps();
     const guildId = interaction.guildId;
     if (!guildId) {
       await commandService.reply(interaction, "commands.delete.errors.guild_only");
       return;
     }
 
-    try {
-      const entryId = queueEntryId ?? queueService.getQueueEntries(guildId).at(-1)?.id;
-      if (!entryId) {
-        await commandService.reply(interaction, "commands.delete.errors.empty");
-        return;
-      }
-
-      const removedTrack = await queueService.removeQueueEntry(guildId, entryId);
-      if (!removedTrack) {
-        await commandService.reply(interaction, "commands.delete.errors.not_found");
-        return;
-      }
-
-      await commandService.reply(interaction, "commands.delete.success", {
-        track: removedTrack.info,
-      });
-    } catch (error) {
-      logger.error(`Failed to delete queued track: ${getErrorMessage(error)}`);
-      await commandService.reply(interaction, "commands.delete.errors.unexpected", {
-        error: getErrorMessage(error),
-      });
+    const result = await playerControl.deleteFromQueue(guildId, queueEntryId);
+    if (!result.ok) {
+      await commandService.reply(
+        interaction,
+        result.code === "QUEUE_EMPTY"
+          ? "commands.delete.errors.empty"
+          : "commands.delete.errors.not_found",
+      );
+      return;
     }
+
+    await commandService.reply(interaction, "commands.delete.success", {
+      track: result.data.track.info,
+    });
   }
 
   private async handleAutocomplete(
