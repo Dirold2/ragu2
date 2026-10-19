@@ -1,0 +1,2 @@
+"use strict";export var PlayerStatus;(function(E){E.IDLE="idle",E.PLAYING="playing",E.PAUSED="paused",E.TRANSITIONING="transitioning",E.DESTROYED="destroyed"})(PlayerStatus||(PlayerStatus={}));export var PlayerServiceEvents;(function(E){E.PLAYING="playing",E.PAUSED="paused",E.TRACK_STARTED="trackStarted",E.TRACK_ENDED="trackEnded",E.QUEUE_EMPTY="queueEmpty",E.VOLUME_CHANGED="volumeChanged",E.CONNECTED="connected",E.DISCONNECTED="disconnected",E.TRACK_QUEUED="trackQueued"})(PlayerServiceEvents||(PlayerServiceEvents={}));
+//# sourceMappingURL=audio.js.map

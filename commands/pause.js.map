@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/commands/pause.ts"],
+  "sourcesContent": ["import { CommandInteraction } from \"discord.js\";\nimport { Discord, Slash } from \"discordx\";\n\nimport { getDeps, t } from \"./commandDeps.js\";\n\n@Discord()\nexport class PauseCommand {\n  @Slash({\n    name: \"pause\",\n    description: t(\"commands.pause.description\"),\n  })\n  async pause(interaction: CommandInteraction): Promise<void> {\n    const { commandService, playerControl } = getDeps();\n    const result = await playerControl.togglePause(interaction.guildId ?? \"\");\n\n    if (!result.ok) {\n      await commandService.reply(interaction, \"commands.pause.errors.not_found\");\n      return;\n    }\n\n    await commandService.reply(\n      interaction,\n      result.data.paused ? \"commands.pause.paused\" : \"commands.pause.resumed\",\n    );\n  }\n}\n"],
+  "mappings": "gEAAA,OAAS,sBAAAA,MAA0B,aACnC,OAAS,WAAAC,EAAS,SAAAC,MAAa,WAE/B,OAAS,WAAAC,EAAS,KAAAC,MAAS,mBAGpB,IAAMC,EAAN,KAAkB,CAKvB,MAAM,MAAMC,EAA+B,CACzC,KAAM,CAAE,eAAAC,EAAgB,cAAAC,CAAa,EAAKL,EAAO,EAC3CM,EAAS,MAAMD,EAAc,YAAYF,EAAY,SAAW,EAAE,EAExE,GAAI,CAACG,EAAO,GAAI,CACd,MAAMF,EAAe,MAAMD,EAAa,iCAAiC,EACzE,MACF,CAEA,MAAMC,EAAe,MACnBD,EACAG,EAAO,KAAK,OAAS,wBAA0B,wBAAwB,CAE3E,GAbMC,EAAA,CAJLR,EAAM,CACL,KAAM,QACN,YAAaE,EAAE,4BAA4B,EAC5C,mDACwBJ,CAAkB,CAAA,4DALhCK,EAAYK,EAAA,CADxBT,EAAO,GACKI,CAAY",
+  "names": ["CommandInteraction", "Discord", "Slash", "getDeps", "t", "PauseCommand", "interaction", "commandService", "playerControl", "result", "__decorate"]
+}

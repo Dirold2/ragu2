@@ -1,0 +1,2 @@
+"use strict";import o from"../../config.json"with{type:"json"};export const DEFAULT_FADEOUT=o.audio.fade.outBeforeEnd??3e3,DEFAULT_FADEIN=o.audio.fade.in??2e3,DEFAULT_VOLUME=o.audio.volume.default??.2,DEFAULT_BASS=o.audio.effects.bass.default??0,DEFAULT_TREBLE=o.audio.effects.treble.default??0,DEFAULT_COMPRESSOR=o.audio.effects.compressor??!1,DEFAULT_NORMALIZE=o.audio.effects.normalize??!1;
+//# sourceMappingURL=constants.js.map

@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../../src/errors/index.ts"],
+  "sourcesContent": ["export class UserNotInVoiceChannelError extends Error {\n  constructor() {\n    super(\"User is not in a voice channel\");\n    this.name = \"UserNotInVoiceChannelError\";\n  }\n}\n\nexport class PluginNotFoundError extends Error {\n  constructor(source: string) {\n    super(`Plugin not found for source: ${source}`);\n    this.name = \"PluginNotFoundError\";\n  }\n}\n"],
+  "mappings": "aAAM,aAAO,mCAAmC,KAAK,CACnD,aAAA,CACE,MAAM,gCAAgC,EACtC,KAAK,KAAO,4BACd,EAGI,aAAO,4BAA4B,KAAK,CAC5C,YAAYA,EAAc,CACxB,MAAM,gCAAgCA,CAAM,EAAE,EAC9C,KAAK,KAAO,qBACd",
+  "names": ["source"]
+}
